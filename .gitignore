@@ -1,4 +1,7 @@
 .idea*
+.gradle
+# gradle output
+build
 
 # Compiled class file
 *.class
