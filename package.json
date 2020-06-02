@@ -1,0 +1,9 @@
+{
+  "author": "Philip Wilcox",
+  "name": "spotify-butler",
+  "description": "Basic playlist curation",
+  "version": "0.0.1",
+  "dependencies": {
+
+  }
+}
