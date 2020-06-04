@@ -1,7 +1,7 @@
 const http = require('http');
 
 const hostname = '127.0.0.1';
-const port = 3000;
+const port = 8888;
 
 // TODO: pull client id and secret from ENV vars https://nodejs.dev/learn/how-to-read-environment-variables-from-nodejs
 // TODO: learn about async https://nodejs.dev/learn/modern-asynchronous-javascript-with-async-and-await
@@ -11,9 +11,14 @@ const port = 3000;
 const server = http.createServer((req, res) => {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/plain');
-    res.end('Hello World');
+    let responseBody = (req.url == '/callback') ? callbackInfoToString(req) : `Hello World from ${req.url}`
+    res.end(responseBody);
 });
 
 server.listen(port, hostname, () => {
     console.log(`Server running at http://${hostname}:${port}/`);
 });
+
+function callbackInfoToString(req) {
+    return `Hi this is the callback ${req.url}`;
+}
