@@ -9,6 +9,16 @@ const port = 8888;
 // Expects a file with a json body with three keys: 'client_id', 'client_secret', 'redirect_uri'
 const secrets = JSON.parse(fs.readFileSync('secrets.json'))
 
+/**
+ * This will start a server with just a few endpoints (since UI is less important to us than iterating through the data).
+ *
+ * The `/start` path will start the authorization + data fetching process.
+ *
+ * The `/callback` path is where a user will be sent back to after logging in on the Spotify site.
+ *
+ * The Spotify auth flow is described at https://developer.spotify.com/documentation/general/guides/authorization-guide/
+ * under "Authorization Code Flow."
+ */
 const server = http.createServer((req, res) => {
     const path = req.url.split('?')[0]
     switch (path) {
@@ -16,7 +26,7 @@ const server = http.createServer((req, res) => {
             processCallback(req, res);
             break;
         case '/start':
-            makeAuthRequest(res);
+            makeInitialAuthRequest(res);
             break;
         default:
             res.statusCode = 200;
@@ -29,6 +39,15 @@ server.listen(port, hostname, () => {
     console.log(`Initialized with client ID ${secrets.client_id}`)
 });
 
+/**
+ * This will handle the initial callback from the user logging into Spotify. At this point we'll have (in the URL),
+ * a code param and a copy of the state value we sent.
+ *
+ * The `state` value is for protection against CSRF and since we're running locally here more as a user script,
+ * we aren't too concerned with it.
+ *
+ * We will then call Spotify again to exchange that code for access token + refresh token.
+ */
 function processCallback(req, res) {
     const callbackQuerystring = req.url.split('?')[1]
     const callbackParams = querystring.parse(callbackQuerystring)
@@ -40,7 +59,11 @@ function processCallback(req, res) {
     res.end(`Hi this is the callback code: ${callbackCode} with state: ${callbackState}`);
 }
 
-function makeAuthRequest(res) {
+/**
+ * This will redirect the user over to Spotify to log in and grant permission (or redirect back to
+ * our callback page here if permission is already granted).
+ */
+function makeInitialAuthRequest(res) {
     const stateKey = 'spotify_auth_state'
     const state = crypto.randomBytes(12).toString('base64')
     res.setHeader('Set-Cookie', [`${stateKey}=${state}`]);
