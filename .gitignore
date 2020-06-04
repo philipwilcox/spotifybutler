@@ -28,3 +28,5 @@ build
 hs_err_pid*
 
 node_modules/
+
+secrets.json
