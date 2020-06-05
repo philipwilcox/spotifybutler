@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const crypto = require('crypto')
 const querystring = require('querystring')
@@ -57,6 +58,59 @@ function processCallback(req, res) {
     res.statusCode = 200
     res.setHeader('Content-Type', 'text/plain');
     res.end(`Hi this is the callback code: ${callbackCode} with state: ${callbackState}`);
+
+    const formBody = querystring.stringify({
+        code: callbackCode,
+        redirect_uri: secrets.redirect_uri,
+        grant_type: 'authorization_code'
+    })
+
+    const authorization = `Basic ${Buffer.from(secrets.client_id + ':' + secrets.client_secret).toString('base64')}`
+    console.log(`authorization: ${authorization}`)
+    const options = {
+        hostname: 'accounts.spotify.com',
+        //port: 443,
+        path: '/api/token',
+        method: 'POST',
+        headers: {
+            'Authorization': authorization,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': formBody.length
+        }
+    }
+
+
+    let postRequestPromise = new Promise((resolve, reject) => {
+        const req = https.request(options, res => {
+            var response = ""
+
+            res.on('data', data => {
+                response += data
+            })
+
+            res.on('end', () => {
+                resolve(response);
+            })
+
+            res.on('error', (error) => {
+                console.log(`error is ${error}`)
+                reject(error);
+            });
+        })
+
+        // TODO: https://nodejs.dev/learn/making-http-requests-with-nodejs this shows this outside the block here,
+        // but other examples have a res.on instead inside the above block?
+        req.on('error', error => {
+            console.error(error);
+            reject(error);
+        })
+
+        req.write(formBody)
+        req.end()
+    })
+    postRequestPromise.then(value => {
+        console.log(`done with post! value is ${value}`)
+    })
 }
 
 /**
