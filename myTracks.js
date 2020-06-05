@@ -8,37 +8,50 @@ module.exports = {
      * This returns a promise for a GET call to the endpoint described at
      * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
      */
-    getMySavedTracks: function (accessToken) {
-        const params = querystring.stringify({
-            limit: 50,
-            offset: 0
-        })
-        const options = {
-            hostname: constants.SPOTIFY_API_HOSTNAME,
-            path: `/v1/me/tracks?${params}`,
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`
-            }
+    getMySavedTracks: async function (accessToken) {
+        let response = await getPageOfTracks(accessToken, 50, 0)
+        let accumulatedResponses = [response]
+        while (response.next) {
+            console.log(`fetching next page from ${response.next}`)
+            const nextArgs = querystring.parse(response.next.split('?')[1])
+            response = await getPageOfTracks(accessToken, nextArgs.limit, nextArgs.offset)
+            accumulatedResponses.push(response)
         }
-        return new Promise((resolve, reject) => {
-            var response = ""
-            const req = https.request(options, res => {
-                res.on('data', data => {
-                    response += data
-                })
 
-                res.on('end', () => {
-                    // TODO: convert this to a loop to fetch all
-                    const payload = JSON.parse(response);
-                    console.log(`done with tracks get! response was ${response}`);
-                    resolve(response);
-                })
-            })
-            req.on('error', error => {
-                reject(error)
-            })
-            req.end()
-        });
+        const allItems = accumulatedResponses.map(x => x.items).flat()
+        return allItems
     }
 };
+
+const getPageOfTracks = function(accessToken, limit, offset) {
+    const params = querystring.stringify({
+        limit: limit,
+        offset: offset
+    })
+    const options = {
+        hostname: constants.SPOTIFY_API_HOSTNAME,
+        path: `/v1/me/tracks?${params}`,
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`
+        }
+    }
+    return new Promise((resolve, reject) => {
+        var response = ""
+        const req = https.request(options, res => {
+            res.on('data', data => {
+                response += data
+            })
+
+            res.on('end', () => {
+                const payload = JSON.parse(response);
+                //console.log(`done with tracks get! response was ${response}`);
+                resolve(payload);
+            })
+        })
+        req.on('error', error => {
+            reject(error)
+        })
+        req.end()
+    });
+}

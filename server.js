@@ -61,12 +61,13 @@ async function processCallback(req, res) {
 
     const tokenPayload = await getAccessAndRefreshTokens(callbackCode)
     const myTracks = await myTracksModule.getMySavedTracks(tokenPayload.access_token)
+    const myTrackStrings = myTracks.map(x => `\n${x.track.name} (${x.track.artists[0].name} - ${x.track.album.name} (${x.track.album.release_date})) (# ${x.track.id}) from ${x.added_at}`)
 
     const resultString = `Hi, this is the info from the spotify API!
 
 I got callback code: ${callbackCode}
 I traded this for access token ${tokenPayload.access_token}
-I then got my tracks: ${myTracks}
+I then got my tracks: ${myTrackStrings}
     `
 
     res.statusCode = 200
@@ -83,7 +84,6 @@ function makeInitialAuthRequest(res) {
     const stateKey = 'spotify_auth_state'
     const state = crypto.randomBytes(12).toString('base64')
     res.setHeader('Set-Cookie', [`${stateKey}=${state}`]);
-    //res.cookie(stateKey, state)
 
     const scope = 'user-read-private user-read-email user-top-read user-read-recently-played playlist-read-private user-library-read';
     res.writeHead(302, {
