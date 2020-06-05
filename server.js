@@ -4,11 +4,12 @@ const fs = require('fs');
 const crypto = require('crypto')
 const querystring = require('querystring')
 
+
 const hostname = '127.0.0.1';
 const port = 8888;
 
-const SPOTIFY_ACCOUNTS_HOSTNAME = 'accounts.spotify.com';
-const SPOTIFY_API_HOSTNAME = 'api.spotify.com';
+const constants = require('./constants')
+const myTracksModule = require('./myTracks')
 
 // Expects a file with a json body with three keys: 'client_id', 'client_secret', 'redirect_uri'
 const secrets = JSON.parse(fs.readFileSync('secrets.json'))
@@ -59,7 +60,7 @@ async function processCallback(req, res) {
     // We don't check the callback state value because we're just running a local server-side script that calls back to localhost
 
     const tokenPayload = await getAccessAndRefreshTokens(callbackCode)
-    const myTracks = await getMySavedTracks(tokenPayload.access_token)
+    const myTracks = await myTracksModule.getMySavedTracks(tokenPayload.access_token)
 
     const resultString = `Hi, this is the info from the spotify API!
 
@@ -86,7 +87,7 @@ function makeInitialAuthRequest(res) {
 
     const scope = 'user-read-private user-read-email user-top-read user-read-recently-played playlist-read-private user-library-read';
     res.writeHead(302, {
-        'Location': `https://${SPOTIFY_ACCOUNTS_HOSTNAME}/authorize?` +
+        'Location': `https://${constants.SPOTIFY_ACCOUNTS_HOSTNAME}/authorize?` +
         querystring.stringify({
             response_type: 'code',
             client_id: secrets.client_id,
@@ -109,7 +110,7 @@ function getAccessAndRefreshTokens(callbackCode) {
 
     const authorization = `Basic ${Buffer.from(secrets.client_id + ':' + secrets.client_secret).toString('base64')}`
     const options = {
-        hostname: SPOTIFY_ACCOUNTS_HOSTNAME,
+        hostname: constants.SPOTIFY_ACCOUNTS_HOSTNAME,
         path: '/api/token',
         method: 'POST',
         headers: {
@@ -149,43 +150,4 @@ function getAccessAndRefreshTokens(callbackCode) {
         req.write(formBody);
         req.end();
     })
-}
-
-/**
- * This returns a promise for a GET call to the endpoint described at
- * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
- */
-function getMySavedTracks(accessToken) {
-    const params = querystring.stringify({
-        limit: 50,
-        offset: 0
-    })
-    const options = {
-        hostname: SPOTIFY_API_HOSTNAME,
-        path: `/v1/me/tracks?${params}`,
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`
-        }
-    }
-    return new Promise((resolve, reject) => {
-        var response = ""
-        const req = https.request(options, res => {
-            res.on('data', data => {
-                response += data
-            })
-
-            res.on('end', () => {
-                // TODO: convert this to a loop to fetch all
-                const payload = JSON.parse(response);
-                console.log(`done with tracks get! response was ${response}`);
-                resolve(response);
-            })
-        })
-        req.on('error', error => {
-            reject(error)
-
-        })
-        req.end()
-    });
 }
