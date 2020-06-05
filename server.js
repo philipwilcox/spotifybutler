@@ -55,10 +55,6 @@ function processCallback(req, res) {
     const callbackCode = callbackParams['code']
     const callbackState = callbackParams['state']
 
-    res.statusCode = 200
-    res.setHeader('Content-Type', 'text/plain');
-    res.end(`Hi this is the callback code: ${callbackCode} with state: ${callbackState}`);
-
     const formBody = querystring.stringify({
         code: callbackCode,
         redirect_uri: secrets.redirect_uri,
@@ -105,11 +101,16 @@ function processCallback(req, res) {
             reject(error);
         })
 
-        req.write(formBody)
-        req.end()
+        req.write(formBody);
+        req.end();
     })
     postRequestPromise.then(value => {
-        console.log(`done with post! value is ${value}`)
+        const accessTokens = JSON.parse(value);
+        console.log(`done with post! value is ${value}`);
+
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'text/plain');
+        res.end(`Hi this is the callback code: ${callbackCode}\n which yielded access token ${accessTokens.access_token} and refresh token ${accessTokens.refresh_token}`);
     })
 }
 
