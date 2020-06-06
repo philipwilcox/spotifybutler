@@ -25,14 +25,22 @@ const secrets = JSON.parse(fs.readFileSync('secrets.json'))
  * The Spotify auth flow is described at https://developer.spotify.com/documentation/general/guides/authorization-guide/
  * under "Authorization Code Flow."
  */
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
     const path = req.url.split('?')[0]
     switch (path) {
         case '/callback':
-            processCallback(req, res);
+            const accessToken = await getAccessTokenFromCallback(req, res);
+            console.log(`Got access token: ${accessToken}`)
+            await fetchTracksAndBuildResponse(accessToken, res);
             break;
         case '/start':
-            makeInitialAuthRequest(res);
+            // If we saved a previous access_token in our secrets file, we can bypass the first step until it expires!
+            if (secrets.access_token) {
+                console.log(`Using stored access token ${secrets.access_token}`)
+                await fetchTracksAndBuildResponse(secrets.access_token, res);
+            } else {
+                makeInitialAuthRequest(res);
+            }
             break;
         default:
             res.statusCode = 200;
@@ -45,26 +53,7 @@ server.listen(port, hostname, () => {
     console.log(`Initialized with client ID ${secrets.client_id}`)
 });
 
-/**
- * This will handle the initial callback from the user logging into Spotify. At this point we'll have (in the URL),
- * a code param and a copy of the state value we sent.
- *
- * The `state` value is for protection against CSRF and since we're running locally here more as a user script,
- * we aren't too concerned with it.
- *
- * We will then call Spotify again to exchange that code for access token + refresh token.
- */
-async function processCallback(req, res) {
-    const callbackQuerystring = req.url.split('?')[1]
-    const callbackParams = querystring.parse(callbackQuerystring)
-    const callbackCode = callbackParams['code']
-    // We don't check the callback state value because we're just running a local server-side script that calls back to localhost
-
-    const tokenPayload = await getAccessAndRefreshTokens(callbackCode)
-    const trackList = await MyTracks.getMySavedTracks(tokenPayload.access_token)
-    //const myTrackStrings = trackList.map(x => `\n${x.track.name} (${x.track.artists[0].name} - ${x.track.album.name} (${x.track.album.release_date})) (# ${x.track.id}) from ${x.added_at}`)
-
-    const tracksByDecade = TrackSorting.groupTracksByDecade(trackList)
+function tracksByDecadeToString(tracksByDecade) {
     const decadeArray = Array.from(tracksByDecade.keys()).sort()
     var trackStrings = ""
     decadeArray.map(decade => {
@@ -77,15 +66,39 @@ async function processCallback(req, res) {
 
     const resultString = `Hi, this is the info from the spotify API!
 
-I got callback code: ${callbackCode}
-I traded this for access token ${tokenPayload.access_token}
-I then got my tracks: ${trackStrings}
+I got my tracks: ${trackStrings}
     `
+    return resultString;
+}
+
+async function fetchTracksAndBuildResponse(accessToken, res) {
+    const trackList = await MyTracks.getMySavedTracks(accessToken)
+    const tracksByDecade = TrackSorting.groupTracksByDecade(trackList)
+    const resultString = tracksByDecadeToString(tracksByDecade);
 
     res.statusCode = 200
     res.setHeader('Content-Type', 'text/plain');
     res.end(resultString);
+}
 
+/**
+ * This will handle the initial callback from the user logging into Spotify. At this point we'll have (in the URL),
+ * a code param and a copy of the state value we sent.
+ *
+ * The `state` value is for protection against CSRF and since we're running locally here more as a user script,
+ * we aren't too concerned with it.
+ *
+ * We will then call Spotify again to exchange that code for access token + refresh token, and then return just the
+ * access token since we're a short-lived application.
+ */
+async function getAccessTokenFromCallback(req, res) {
+    const callbackQuerystring = req.url.split('?')[1]
+    const callbackParams = querystring.parse(callbackQuerystring)
+    const callbackCode = callbackParams['code']
+    // We don't check the callback state value because we're just running a local server-side script that calls back to localhost
+
+    const tokenPayload = await getAccessAndRefreshTokens(callbackCode)
+    return tokenPayload.access_token
 }
 
 /**

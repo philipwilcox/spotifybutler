@@ -17,6 +17,5 @@ module.exports = {
         }
         const tracksByDecade = trackList.reduce(reducer, new Map())
         return tracksByDecade;
-
     }
 };
