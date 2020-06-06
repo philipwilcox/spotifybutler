@@ -9,7 +9,8 @@ const hostname = '127.0.0.1';
 const port = 8888;
 
 const constants = require('./constants')
-const myTracksModule = require('./myTracks')
+const MyTracks = require('./myTracks')
+const TrackSorting = require('./trackSorting')
 
 // Expects a file with a json body with three keys: 'client_id', 'client_secret', 'redirect_uri'
 const secrets = JSON.parse(fs.readFileSync('secrets.json'))
@@ -60,14 +61,25 @@ async function processCallback(req, res) {
     // We don't check the callback state value because we're just running a local server-side script that calls back to localhost
 
     const tokenPayload = await getAccessAndRefreshTokens(callbackCode)
-    const myTracks = await myTracksModule.getMySavedTracks(tokenPayload.access_token)
-    const myTrackStrings = myTracks.map(x => `\n${x.track.name} (${x.track.artists[0].name} - ${x.track.album.name} (${x.track.album.release_date})) (# ${x.track.id}) from ${x.added_at}`)
+    const trackList = await MyTracks.getMySavedTracks(tokenPayload.access_token)
+    //const myTrackStrings = trackList.map(x => `\n${x.track.name} (${x.track.artists[0].name} - ${x.track.album.name} (${x.track.album.release_date})) (# ${x.track.id}) from ${x.added_at}`)
+
+    const tracksByDecade = TrackSorting.groupTracksByDecade(trackList)
+    const decadeArray = Array.from(tracksByDecade.keys()).sort()
+    var trackStrings = ""
+    decadeArray.map(decade => {
+        trackStrings += `\n\n${decade}`
+        const decadeTracks = tracksByDecade.get(decade)
+        decadeTracks.map(x => {
+            trackStrings += `\n   ${x.track.name} (${x.track.artists[0].name} - ${x.track.album.name} (${x.track.album.release_date})) (# ${x.track.id}) from ${x.added_at}`
+        })
+    })
 
     const resultString = `Hi, this is the info from the spotify API!
 
 I got callback code: ${callbackCode}
 I traded this for access token ${tokenPayload.access_token}
-I then got my tracks: ${myTrackStrings}
+I then got my tracks: ${trackStrings}
     `
 
     res.statusCode = 200

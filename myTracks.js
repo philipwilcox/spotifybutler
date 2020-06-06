@@ -14,6 +14,10 @@ module.exports = {
         while (response.next) {
             console.log(`fetching next page from ${response.next}`)
             const nextArgs = querystring.parse(response.next.split('?')[1])
+
+            // if we have a limit set, break here if we exceed it
+            if (constants.TRACK_FETCH_LIMIT && nextArgs.offset > constants.TRACK_FETCH_LIMIT) break;
+
             response = await getPageOfTracks(accessToken, nextArgs.limit, nextArgs.offset)
             accumulatedResponses.push(response)
         }
