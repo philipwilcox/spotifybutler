@@ -110,7 +110,7 @@ function makeInitialAuthRequest(res) {
     const state = crypto.randomBytes(12).toString('base64')
     res.setHeader('Set-Cookie', [`${stateKey}=${state}`]);
 
-    const scope = 'user-read-private user-read-email user-top-read user-read-recently-played playlist-read-private user-library-read';
+    const scope = 'user-read-private user-read-email user-top-read user-read-recently-played playlist-read-private user-library-read playlist-modify-private';
     res.writeHead(302, {
         'Location': `https://${constants.SPOTIFY_ACCOUNTS_HOSTNAME}/authorize?` +
         querystring.stringify({
