@@ -3,5 +3,5 @@ module.exports = {
     SPOTIFY_API_HOSTNAME: 'api.spotify.com',
     TRACK_FETCH_SIZE: 50,
     // page limit is intended for dev only, to avoid slowdowns from waiting for all calls
-    TRACK_FETCH_LIMIT: null
+    PAGED_ITEM_FETCH_LIMIT: null
 }
