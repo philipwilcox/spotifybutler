@@ -76,8 +76,8 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     const trackList = await Tracks.getMySavedTracks(accessToken)
     const tracksByDecade = TrackSorting.groupTracksByDecade(trackList)
 
-    const firstDecade = tracksByDecade.get(tracksByDecade.keys()[0])
-    await Playlists.savePlaylistByName(firstDecade, tracksByDecade.get(firstDecade), accessToken)
+    const firstDecade = tracksByDecade.keys().next().value
+    await Playlists.savePlaylistByName(`${firstDecade} - Butler Created`, tracksByDecade.get(firstDecade), accessToken)
 
     const resultString = tracksByDecadeToString(tracksByDecade);
 

@@ -46,4 +46,12 @@ const getOrCreatePlaylistByName = async function(playlists, playlistName, access
 const createPlaylistWithName = async function(playlistName, accessToken) {
     const userId = await spotifyRequests.getUserId(accessToken)
     console.log(`user ID is ${userId}`)
+    const endpoint = `/v1/users/${userId}/playlists`
+    const data = {
+        name: playlistName,
+        public: false,
+        collaborative: false,
+        description: "Automatically generated playlist from Spotify Butler app"
+    }
+    return spotifyRequests.postData(endpoint, data, accessToken)
 }

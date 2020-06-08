@@ -25,6 +25,13 @@ module.exports = {
     getUserId: async function (accessToken) {
         const result = await makeGetRequest("/v1/me", accessToken)
         return result.id
+    },
+
+    /**
+     * Posts a JSON payload to a Spotify API endpoint.
+     */
+    postData: async function (endpoint, data, accessToken) {
+        return makePostRequest(endpoint, data, accessToken)
     }
 };
 
@@ -86,6 +93,44 @@ const makeGetRequest = function(path, accessToken) {
         req.on('error', error => {
             reject(error)
         })
+        req.end()
+    });
+}
+
+/**
+ * Make a post request to the specified endpoint with a JSON payload, returning a promise for the results.
+ * @param path the API endpoint path
+ * @param data the JSON object to POST
+ * @param accessToken the user access token
+ */
+const makePostRequest = function(path, data, accessToken) {
+    const options = {
+        hostname: constants.SPOTIFY_API_HOSTNAME,
+        path: path,
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        }
+    }
+    return new Promise((resolve, reject) => {
+        var response = ""
+        const req = https.request(options, res => {
+            res.on('data', data => {
+                response += data
+                // console.log(`${options.path} data section: ${data}`);
+            })
+
+            res.on('end', () => {
+                // console.log(`${options.path} finished`);
+                const payload = JSON.parse(response);
+                resolve(payload);
+            })
+        })
+        req.on('error', error => {
+            reject(error)
+        })
+        req.write(JSON.stringify(data))
         req.end()
     });
 }
