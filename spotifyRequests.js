@@ -12,9 +12,11 @@ module.exports = {
      * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
      *
      * Note that we discard the page-level reponse metadata and just accumulate the `items` from each page.
+     *
+     * Note that this assumes host is always constants.SPOTIFY_API_HOSTNAME
      */
-    getAllResults: async function (endpoint, accessToken) {
-        const pages = await getAllPages(endpoint, accessToken)
+    getAllResults: async function (path, accessToken) {
+        const pages = await getAllPages(constants.SPOTIFY_API_HOSTNAME, path, accessToken)
         return pages.map(x => x.items).flat();
     },
 
@@ -23,7 +25,7 @@ module.exports = {
      * https://developer.spotify.com/documentation/web-api/reference/users-profile/get-current-users-profile/
      */
     getUserId: async function (accessToken) {
-        const result = await makeGetRequest("/v1/me", accessToken)
+        const result = await makeGetRequest(constants.SPOTIFY_API_HOSTNAME, "/v1/me", accessToken)
         return result.id
     },
 
@@ -37,9 +39,9 @@ module.exports = {
 
 /**
  * This fetches all responses from a GET endpoint in the spotify api as a list of response objects.
- */
-const getAllPages = async function(endpoint, accessToken) {
-    let response = await getSinglePageOfResults(endpoint, accessToken, 50, 0)
+ * */
+const getAllPages = async function(host, path, accessToken) {
+    let response = await getSinglePageOfResults(host, path, accessToken, 50, 0)
     let accumulatedResponses = [response]
     while (response.next) {
         console.log(`fetching next page from ${response.next}`)
@@ -48,18 +50,18 @@ const getAllPages = async function(endpoint, accessToken) {
         // if we have a limit set, break here if we exceed it
         if (constants.PAGED_ITEM_FETCH_LIMIT && nextArgs.offset > constants.PAGED_ITEM_FETCH_LIMIT) break;
 
-        response = await getSinglePageOfResults(endpoint, accessToken, nextArgs.limit, nextArgs.offset)
+        response = await getSinglePageOfResults(host, path, accessToken, nextArgs.limit, nextArgs.offset)
         accumulatedResponses.push(response)
     }
     return accumulatedResponses
 }
 
-const getSinglePageOfResults = function(endpoint, accessToken, limit, offset) {
+const getSinglePageOfResults = function(host, path, accessToken, limit, offset) {
     const params = querystring.stringify({
         limit: limit,
         offset: offset
     })
-    return makeGetRequest(`${endpoint}?${params}`, accessToken)
+    return makeGetRequest(host, `${path}?${params}`, accessToken)
 }
 
 /**
@@ -67,9 +69,9 @@ const getSinglePageOfResults = function(endpoint, accessToken, limit, offset) {
  * @param path the API endpoint path, including querystring params
  * @param accessToken the user access token
  */
-const makeGetRequest = function(path, accessToken) {
+const makeGetRequest = function (host, path, accessToken) {
     const options = {
-        hostname: constants.SPOTIFY_API_HOSTNAME,
+        hostname: host,
         path: path,
         method: 'GET',
         headers: {
