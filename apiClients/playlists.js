@@ -24,6 +24,7 @@ module.exports = {
     savePlaylistByName: async function (playlistName, trackList, accessToken) {
         // TODO: implement the rest
         const playlists = await getListOfPlaylists(accessToken)
+        const playlistWithName = await getOrCreatePlaylistByName(playlists, playlistName, accessToken)
         console.log(`Found these playlists ${playlists.map(x => " " + x.name)}`)
     }
 };
@@ -31,4 +32,18 @@ module.exports = {
 
 const getListOfPlaylists = async function(accessToken) {
     return spotifyRequests.getAllResults('/v1/me/playlists', accessToken)
+}
+
+const getOrCreatePlaylistByName = async function(playlists, playlistName, accessToken) {
+    const existingPlaylist = playlists.find(x => x.name === playlistName)
+    if (existingPlaylist) {
+        return existingPlaylist
+    } else {
+        return createPlaylistWithName(playlistName, accessToken)
+    }
+}
+
+const createPlaylistWithName = async function(playlistName, accessToken) {
+    const userId = await spotifyRequests.getUserId(accessToken)
+    console.log(`user ID is ${userId}`)
 }

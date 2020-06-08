@@ -16,6 +16,15 @@ module.exports = {
     getAllResults: async function (endpoint, accessToken) {
         const pages = await getAllPages(endpoint, accessToken)
         return pages.map(x => x.items).flat();
+    },
+
+    /**
+     * This returns the current user's internal spotify user ID as described at:
+     * https://developer.spotify.com/documentation/web-api/reference/users-profile/get-current-users-profile/
+     */
+    getUserId: async function (accessToken) {
+        const result = await makeGetRequest("/v1/me", accessToken)
+        return result.id
     }
 };
 
@@ -43,9 +52,18 @@ const getSinglePageOfResults = function(endpoint, accessToken, limit, offset) {
         limit: limit,
         offset: offset
     })
+    return makeGetRequest(`${endpoint}?${params}`, accessToken)
+}
+
+/**
+ * Make a get request to the specified endpoint, returning a promise for the results.
+ * @param path the API endpoint path, including querystring params
+ * @param accessToken the user access token
+ */
+const makeGetRequest = function(path, accessToken) {
     const options = {
         hostname: constants.SPOTIFY_API_HOSTNAME,
-        path: `${endpoint}?${params}`,
+        path: path,
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`
