@@ -76,8 +76,9 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     const trackList = await Tracks.getMySavedTracks(accessToken)
     const tracksByDecade = TrackSorting.groupTracksByDecade(trackList)
 
-    const firstDecade = tracksByDecade.keys().next().value
-    await Playlists.savePlaylistByName(`${firstDecade} - Butler Created`, tracksByDecade.get(firstDecade), accessToken)
+    for (const [decade, trackList] of tracksByDecade) {
+        await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken)
+    }
 
     const resultString = tracksByDecadeToString(tracksByDecade);
 
@@ -85,6 +86,10 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     res.setHeader('Content-Type', 'text/plain');
     res.end(resultString);
 }
+
+/**
+ * Iterator function for a map of decade string : trackList list objects
+ */
 
 /**
  * This will handle the initial callback from the user logging into Spotify. At this point we'll have (in the URL),

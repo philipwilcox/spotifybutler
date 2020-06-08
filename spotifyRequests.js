@@ -30,10 +30,17 @@ module.exports = {
     },
 
     /**
-     * Posts a JSON payload to a Spotify API endpoint.
+     * POSTs a JSON payload to a Spotify API endpoint.
      */
     postData: async function (endpoint, data, accessToken) {
-        return makePostRequest(endpoint, data, accessToken)
+        return makeRequestWithJsonBody('POST', endpoint, data, accessToken)
+    },
+
+    /**
+     * DELETEs a JSON payload to a Spotify API endpoint.
+     */
+    deleteData: async function (endpoint, data, accessToken) {
+        return makeRequestWithJsonBody('DELETE', endpoint, data, accessToken)
     }
 };
 
@@ -44,7 +51,7 @@ const getAllPages = async function(host, path, accessToken) {
     let response = await getSinglePageOfResults(host, path, accessToken, 50, 0)
     let accumulatedResponses = [response]
     while (response.next) {
-        console.log(`fetching next page from ${response.next}`)
+        // console.log(`fetching next page from ${response.next}`)
         const nextArgs = querystring.parse(response.next.split('?')[1])
 
         // if we have a limit set, break here if we exceed it
@@ -100,16 +107,17 @@ const makeGetRequest = function (host, path, accessToken) {
 }
 
 /**
- * Make a post request to the specified endpoint with a JSON payload, returning a promise for the results.
+ * Make a request to the specified endpoint with a given method and a JSON body, returning a promise for the results.
+ * @param method the HTTP method, like `POST`
  * @param path the API endpoint path
  * @param data the JSON object to POST
  * @param accessToken the user access token
  */
-const makePostRequest = function(path, data, accessToken) {
+const makeRequestWithJsonBody = function(method, path, data, accessToken) {
     const options = {
         hostname: constants.SPOTIFY_API_HOSTNAME,
         path: path,
-        method: 'POST',
+        method: method.toUpperCase(),
         headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json'

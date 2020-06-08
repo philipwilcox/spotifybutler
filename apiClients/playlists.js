@@ -21,9 +21,16 @@ module.exports = {
      */
     savePlaylistByName: async function (playlistName, trackList, accessToken) {
         // TODO: implement the rest
-        const playlists = await getListOfPlaylists(accessToken)
+        const playlists = await getListOfPlaylists(accessToken) // TODO: could hoist this up for perf reasons
         const playlistWithName = await getOrCreatePlaylistByNameWithTracks(playlists, playlistName, accessToken)
-        console.log(`Found these playlists ${playlists.map(x => " " + x.name)}`)
+        const playlistDifferences = getPlaylistDifferences(playlistWithName.tracks, trackList)
+        if (playlistDifferences.added.length > 0) {
+            await addTracksToPlaylist(playlistWithName.id, playlistDifferences.added, accessToken)
+        }
+        if (playlistDifferences.removed.length > 0) {
+            await removeTracksFromPlaylist(playlistWithName.id, playlistDifferences.removed, accessToken)
+        }
+        console.log(`For playlist ${playlistWithName.name} (${playlistWithName.id}) I added ${playlistDifferences.added.length} tracks and removed ${playlistDifferences.removed.length}`)
     }
 };
 
@@ -39,7 +46,6 @@ const getOrCreatePlaylistByNameWithTracks = async function(playlists, playlistNa
         if (tracksUrl.host !== constants.SPOTIFY_API_HOSTNAME) {
             throw `Expected ${constants.SPOTIFY_API_HOSTNAME} for host for hydration URL, got ${tracksUrl.host} from ${playlist.tracks.href}`
         }
-        console.log("hydrating")
         const tracks = await spotifyRequests.getAllResults(tracksUrl.pathname, accessToken)
         existingPlaylist.tracks = tracks
         return existingPlaylist
@@ -68,5 +74,50 @@ const createPlaylistWithName = async function(playlistName, accessToken) {
  * playlist to the given list of desired tracks.
  */
 const getPlaylistDifferences = function(playlistTrackList, desiredTracklist) {
-    
+    const playlistTrackUris = new Set(playlistTrackList.map(x => x.track.uri))
+    const desiredTrackUris = new Set(desiredTracklist.map(x => x.track.uri))
+    const removedTracks = playlistTrackList.filter(x => !desiredTrackUris.has(x.track.uri))
+    const addedTracks = desiredTracklist.filter(x => !playlistTrackUris.has(x.track.uri))
+    return {
+        removed: removedTracks,
+        added: addedTracks
+    }
+}
+
+const addTracksToPlaylist = async function(playlistId, trackList, accessToken) {
+    // NOTE: can't do more than 100 items at a time
+    const endpoint = `/v1/playlists/${playlistId}/tracks`
+    const chunkedTrackList = chunkedList(trackList, 100)
+    for (const chunk of chunkedTrackList) {
+        const data = {
+            uris: chunk.map(x => x.track.uri)
+        }
+        await spotifyRequests.postData(endpoint, data, accessToken)
+    }
+}
+
+const removeTracksFromPlaylist = async function(playlistId, trackList, accessToken) {
+    // NOTE: can't do more than 100 items at a time
+    const endpoint = `/v1/playlists/${playlistId}/tracks`
+    const chunkedTrackList = chunkedList(trackList, 100)
+    for (const chunk of chunkedTrackList) {
+        // TODO: this doesn't work yet
+        const data = {
+            tracks: chunk.map(x => {
+                uri: x.track.uri
+            })
+        }
+        await spotifyRequests.deleteData(endpoint, data, accessToken)
+    }
+}
+
+const chunkedList = function(list, chunkSize) {
+    let start = 0
+    let listOfLists = []
+    while (start < list.length) {
+        const sublist = list.slice(start, start+100)
+        listOfLists.push(sublist)
+        start += 100
+    }
+    return listOfLists
 }
