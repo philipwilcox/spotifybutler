@@ -103,9 +103,9 @@ const removeTracksFromPlaylist = async function(playlistId, trackList, accessTok
     for (const chunk of chunkedTrackList) {
         // TODO: this doesn't work yet
         const data = {
-            tracks: chunk.map(x => {
+            tracks: chunk.map(x => ({
                 uri: x.track.uri
-            })
+            }))
         }
         await spotifyRequests.deleteData(endpoint, data, accessToken)
     }

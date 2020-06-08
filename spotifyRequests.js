@@ -1,6 +1,7 @@
 const querystring = require('querystring')
 const https = require('https');
 const constants = require('./constants')
+const fetch = require("node-fetch");
 
 /**
  * This is a library for interacting with the often-paginated spotify library in a synchronous way that hides pagination details
@@ -40,7 +41,21 @@ module.exports = {
      * DELETEs a JSON payload to a Spotify API endpoint.
      */
     deleteData: async function (endpoint, data, accessToken) {
-        return makeRequestWithJsonBody('DELETE', endpoint, data, accessToken)
+        // NOTE: I was trying to avoid external dependencies, but `fetch` is needed here since the built in
+        // https request stuff in Node wasn't letting me send a postbody in a DELETE, which is nonstandard but
+        // required by the Spotify API...
+        const response = fetch(
+            'https://' + constants.SPOTIFY_API_HOSTNAME + endpoint,
+            {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                body: JSON.stringify(data)
+            }
+        )
+        return (await response).json()
     }
 };
 
