@@ -76,6 +76,7 @@ const createPlaylistWithName = async function(playlistName, accessToken) {
 const getPlaylistDifferences = function(playlistTrackList, desiredTracklist) {
     const playlistTrackUris = new Set(playlistTrackList.map(x => x.track.uri))
     const desiredTrackUris = new Set(desiredTracklist.map(x => x.track.uri))
+    // TODO: how to reconcile multiple entries in spotify for the same song with different URIs
     const removedTracks = playlistTrackList.filter(x => !desiredTrackUris.has(x.track.uri))
     const addedTracks = desiredTracklist.filter(x => !playlistTrackUris.has(x.track.uri))
     return {

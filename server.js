@@ -9,7 +9,7 @@ const hostname = '127.0.0.1';
 const port = 8888;
 
 const constants = require('./constants')
-const Tracks = require('./apiClients/tracks')
+const Library = require('./apiClients/library')
 const Playlists = require('./apiClients/playlists')
 const TrackSorting = require('./trackSorting')
 
@@ -73,12 +73,37 @@ I got my tracks: ${trackStrings}
 }
 
 async function fetchTracksAndBuildResponse(accessToken, res) {
-    const trackList = await Tracks.getMySavedTracks(accessToken)
-    const tracksByDecade = TrackSorting.groupTracksByDecade(trackList)
+    // const mySavedTracks = await
+    // const topTracks = await
+    const [
+        mySavedTracks,
+        topTracks,
+        topArtists
+    ] = await Promise.all([
+        Library.getMySavedTracks(accessToken),
+        Library.getMyTopTracks(accessToken),
+        Library.getMyTopArtists(accessToken)
+    ]);
+    const tracksByDecade = TrackSorting.groupTracksByDecade(mySavedTracks)
+    // TODO: maybe add a "top track count" limit here too?
+    const savedTracksNotInTop50Tracks = TrackSorting.trackListWithoutOtherList(mySavedTracks, topTracks)
+    const savedTracksNotByTop50Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 50)
+    const savedTracksNotByTop10Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 10)
+
+    // TODO: liked songs that aren't in recent plays
+    // TODO: liked songs that aren't from followed artists
+
+    // TODO: refactor to flatten out the "track lists" i'm passing around here to not have the "added_at" wrapper layer before sending to playlist module
 
     for (const [decade, trackList] of tracksByDecade) {
         await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken)
-    }
+    } // TODO: could map this to an array of promises that I then await all of...
+
+    await Promise.all([
+        Playlists.savePlaylistByName(`Saved Tracks Not In My Top 50 Tracks - Butler`, savedTracksNotInTop50Tracks, accessToken),
+        Playlists.savePlaylistByName(`Saved Tracks Not By My Top 50 Artists - Butler`, savedTracksNotByTop50Artists, accessToken),
+        Playlists.savePlaylistByName(`Saved Tracks Not By My Top 10 Artists - Butler`, savedTracksNotByTop10Artists, accessToken),
+    ])
 
     const resultString = tracksByDecadeToString(tracksByDecade);
 
