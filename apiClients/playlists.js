@@ -1,5 +1,8 @@
 const spotifyRequests = require('../spotifyRequests')
 const constants = require('../constants')
+const Utils = require('../utils')
+
+const DO_SHUFFLE = true
 
 /**
  Playlist saving design:
@@ -25,15 +28,20 @@ module.exports = {
         const playlistWithName = await getOrCreatePlaylistByNameWithTracks(playlists, playlistName, accessToken)
         const playlistDifferences = getPlaylistDifferences(playlistWithName.tracks, trackList)
         console.log(`\n\nFor playlist ${playlistWithName.name} (${playlistWithName.id}) I will add ${playlistDifferences.added.length} tracks and will remove ${playlistDifferences.removed.length}`)
-        if (playlistDifferences.added.length > 0) {
-            await addTracksToPlaylist(playlistWithName.id, playlistDifferences.added, accessToken)
-            console.log(`   Added: ${playlistDifferences.added.map(x => x.track.name)}`)
+        if (DO_SHUFFLE) {
+            await removeTracksFromPlaylist(playlistWithName.id, playlistWithName.tracks, accessToken)
+            console.log(`   Cleared out playlist ${playlistName} entirely to re-add in shuffled order`)
+            await addTracksToPlaylist(playlistWithName.id, Utils.shuffle(trackList), accessToken)
+        } else {
+            if (playlistDifferences.added.length > 0) {
+                await addTracksToPlaylist(playlistWithName.id, playlistDifferences.added, accessToken)
+            }
+            if (playlistDifferences.removed.length > 0) {
+                await removeTracksFromPlaylist(playlistWithName.id, playlistDifferences.removed, accessToken)
+            }
         }
-        if (playlistDifferences.removed.length > 0) {
-            await removeTracksFromPlaylist(playlistWithName.id, playlistDifferences.removed, accessToken)
-            console.log(`    ${playlistDifferences.removed.map(x => x.track.name)}`)
-        }
-
+        console.log(`   Added to ${playlistName}: ${playlistDifferences.added.map(x => x.track.name)}`)
+        console.log(`   Removed from ${playlistName}: ${playlistDifferences.removed.map(x => x.track.name)}`)
     }
 };
 

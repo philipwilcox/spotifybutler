@@ -12,7 +12,6 @@ const constants = require('./constants')
 const Library = require('./apiClients/library')
 const Playlists = require('./apiClients/playlists')
 const TrackSorting = require('./trackSorting')
-const Utils = require('./utils')
 
 // Expects a file with a json body with three keys: 'client_id', 'client_secret', 'redirect_uri'
 const secrets = JSON.parse(fs.readFileSync('secrets.json'))
@@ -87,10 +86,10 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     ]);
     const tracksByDecade = TrackSorting.groupTracksByDecade(mySavedTracks)
     // TODO: maybe add a "top track count" limit here too?
-    const savedTracksNotInTop50Tracks = Utils.shuffle(TrackSorting.trackListWithoutOtherList(mySavedTracks, topTracks))
-    const savedTracksNotByTop50Artists = Utils.shuffle(TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 50))
-    const savedTracksNotByTop10Artists = Utils.shuffle(TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 10))
-    const savedTracksByTop10Artists = Utils.shuffle(TrackSorting.trackListByArtists(mySavedTracks, topArtists, 10))
+    const savedTracksNotInTop50Tracks = TrackSorting.trackListWithoutOtherList(mySavedTracks, topTracks)
+    const savedTracksNotByTop50Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 50)
+    const savedTracksNotByTop10Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 10)
+    const savedTracksByTop10Artists = TrackSorting.trackListByArtists(mySavedTracks, topArtists, 10)
 
 
     // TODO: liked songs that aren't in recent plays
