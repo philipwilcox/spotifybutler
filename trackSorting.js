@@ -34,7 +34,7 @@ module.exports = {
     },
 
     /**
-     * Returns a list of tracks from the original track list that aren't from the artists provided.
+     * Returns a list of tracks from the original track list that ARE NOT from the artists provided.
      *
      * The artistLimit param controls how many of the top artists to filter out.
      */
@@ -42,6 +42,17 @@ module.exports = {
         // the saved tracks have a `artists` array with limited info but each does include `uri` as well as `name` and `type` and `id`
         const artistUrisToRemove = new Set(artistList.slice(0, artistLimit).map(x => x.uri))
         return savedTrackList.filter(x => !Utils.setContainsAnyOf(new Set(x.track.artists.map(a => a.uri)), artistUrisToRemove))
+    },
+
+    /**
+     * Returns a list of tracks from the original track list that ARE from the artists provided.
+     *
+     * The artistLimit param controls how many of the artist list to include.
+     */
+    trackListByArtists: function (savedTrackList, artistList, artistLimit = 50) {
+        // the saved tracks have a `artists` array with limited info but each does include `uri` as well as `name` and `type` and `id`
+        const artistUrisToKeep = new Set(artistList.slice(0, artistLimit).map(x => x.uri))
+        return savedTrackList.filter(x => Utils.setContainsAnyOf(new Set(x.track.artists.map(a => a.uri)), artistUrisToKeep))
     }
 
 };

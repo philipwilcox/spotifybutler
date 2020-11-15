@@ -24,14 +24,14 @@ module.exports = {
         const playlists = await getListOfPlaylists(accessToken) // TODO: could hoist this up for perf reasons
         const playlistWithName = await getOrCreatePlaylistByNameWithTracks(playlists, playlistName, accessToken)
         const playlistDifferences = getPlaylistDifferences(playlistWithName.tracks, trackList)
-        console.log(`For playlist ${playlistWithName.name} (${playlistWithName.id}) I will add ${playlistDifferences.added.length} tracks and will remove ${playlistDifferences.removed.length}`)
+        console.log(`\n\nFor playlist ${playlistWithName.name} (${playlistWithName.id}) I will add ${playlistDifferences.added.length} tracks and will remove ${playlistDifferences.removed.length}`)
         if (playlistDifferences.added.length > 0) {
             await addTracksToPlaylist(playlistWithName.id, playlistDifferences.added, accessToken)
             console.log(`   Added: ${playlistDifferences.added.map(x => x.track.name)}`)
         }
         if (playlistDifferences.removed.length > 0) {
             await removeTracksFromPlaylist(playlistWithName.id, playlistDifferences.removed, accessToken)
-            console.log(`   Removed: ${playlistDifferences.removed.map(x => x.track.name)}`)
+            console.log(`    ${playlistDifferences.removed.map(x => x.track.name)}`)
         }
 
     }
