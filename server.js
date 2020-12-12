@@ -65,9 +65,8 @@ function tracksByDecadeToString(tracksByDecade) {
         })
     })
 
-    const resultString = `Hi, this is the info from the spotify API!
-
-I got my tracks: ${trackStrings}
+    const resultString = `Hi, here are all the tracks by decade:
+${trackStrings}
     `
     return resultString;
 }
@@ -97,27 +96,30 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
 
     // TODO: refactor to flatten out the "track lists" i'm passing around here to not have the "added_at" wrapper layer before sending to playlist module
 
+    const decadesChangesList = []
     for (const [decade, trackList] of tracksByDecade) {
-        await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken)
+        decadesChangesList.push(await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken))
     } // TODO: could map this to an array of promises that I then await all of...
 
-    await Promise.all([
+    const otherChangesList = await Promise.all([
         Playlists.savePlaylistByName(`Saved Tracks Not In My Top 50 Tracks - Butler`, savedTracksNotInTop50Tracks, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 50 Artists - Butler`, savedTracksNotByTop50Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 10 Artists - Butler`, savedTracksNotByTop10Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks By My Top 10 Artists - Butler`, savedTracksByTop10Artists, accessToken),
     ])
 
-    const resultString = tracksByDecadeToString(tracksByDecade);
+    const allChangesList = decadesChangesList.concat(otherChangesList)
+
+    const changesString = allChangesList
+        .map(changes => `For playlist ${changes.name}\n   Added tracks: ${changes.added.map(x => x.track.name)}\n   Removed tracks: ${changes.removed.map(x => x.track.name)}`)
+        .join("\n\n")
+
+    const resultString = changesString + "\n\n\n" + tracksByDecadeToString(tracksByDecade);
 
     res.statusCode = 200
     res.setHeader('Content-Type', 'text/plain');
     res.end(resultString);
 }
-
-/**
- * Iterator function for a map of decade string : trackList list objects
- */
 
 /**
  * This will handle the initial callback from the user logging into Spotify. At this point we'll have (in the URL),

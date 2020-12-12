@@ -26,7 +26,7 @@ module.exports = {
         // TODO: implement the rest
         const playlists = await getListOfPlaylists(accessToken) // TODO: could hoist this up for perf reasons
         const playlistWithName = await getOrCreatePlaylistByNameWithTracks(playlists, playlistName, accessToken)
-        const playlistDifferences = getPlaylistDifferences(playlistWithName.tracks, trackList)
+        const playlistDifferences = getPlaylistDifferences(playlistName, playlistWithName.tracks, trackList)
         console.log(`\n\nFor playlist ${playlistWithName.name} (${playlistWithName.id}) I will add ${playlistDifferences.added.length} tracks and will remove ${playlistDifferences.removed.length}`)
         if (DO_SHUFFLE) {
             await removeTracksFromPlaylist(playlistWithName.id, playlistWithName.tracks, accessToken)
@@ -42,6 +42,7 @@ module.exports = {
         }
         console.log(`   Added to ${playlistName}: ${playlistDifferences.added.map(x => x.track.name)}`)
         console.log(`   Removed from ${playlistName}: ${playlistDifferences.removed.map(x => x.track.name)}`)
+        return playlistDifferences
     }
 };
 
@@ -84,13 +85,14 @@ const createPlaylistWithName = async function(playlistName, accessToken) {
  * Return an object like {removed: [tracks], added: [tracks]} that result from comparing the tracks already in the
  * playlist to the given list of desired tracks.
  */
-const getPlaylistDifferences = function(playlistTrackList, desiredTracklist) {
+const getPlaylistDifferences = function(playlistName, playlistTrackList, desiredTracklist) {
     const playlistTrackUris = new Set(playlistTrackList.map(x => x.track.uri))
     const desiredTrackUris = new Set(desiredTracklist.map(x => x.track.uri))
     // TODO: how to reconcile multiple entries in spotify for the same song with different URIs
     const removedTracks = playlistTrackList.filter(x => !desiredTrackUris.has(x.track.uri))
     const addedTracks = desiredTracklist.filter(x => !playlistTrackUris.has(x.track.uri))
     return {
+        name: playlistName,
         removed: removedTracks,
         added: addedTracks
     }
