@@ -111,7 +111,7 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     const allChangesList = decadesChangesList.concat(otherChangesList)
 
     const changesString = allChangesList
-        .map(changes => `For playlist ${changes.name}\n   Added tracks: ${changes.added.map(x => x.track.name)}\n   Removed tracks: ${changes.removed.map(x => x.track.name)}`)
+        .map(changes => `For playlist ${changes.name} (${changes.newLength} tracks)\n   Added tracks: ${changes.added.map(x => x.track.name)}\n   Removed tracks: ${changes.removed.map(x => x.track.name)}`)
         .join("\n\n")
 
     const resultString = changesString + "\n\n\n" + tracksByDecadeToString(tracksByDecade);

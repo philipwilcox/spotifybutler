@@ -94,7 +94,8 @@ const getPlaylistDifferences = function(playlistName, playlistTrackList, desired
     return {
         name: playlistName,
         removed: removedTracks,
-        added: addedTracks
+        added: addedTracks,
+        newLength: desiredTracklist.length
     }
 }
 
