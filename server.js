@@ -86,8 +86,10 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     const tracksByDecade = TrackSorting.groupTracksByDecade(mySavedTracks)
     // TODO: maybe add a "top track count" limit here too?
     const savedTracksNotInTop50Tracks = TrackSorting.trackListWithoutOtherList(mySavedTracks, topTracks)
-    const savedTracksNotByTop100Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 100)
+    // Note that the API won't give me more than top 50 artists
+    // TODO: note that the API now lets you pass in different "time ranges" like "long_term" vs "medium_term", update to use this! default is medium_term, about six months
     const savedTracksNotByTop50Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 50)
+    const savedTracksNotByTop25Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 25)
     const savedTracksNotByTop10Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 10)
     const savedTracksByTop20Artists = TrackSorting.trackListByArtists(mySavedTracks, topArtists, 15)
 
@@ -104,8 +106,8 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
 
     const otherChangesList = await Promise.all([
         Playlists.savePlaylistByName(`Saved Tracks Not In My Top 50 Tracks - Butler`, savedTracksNotInTop50Tracks, accessToken),
-        Playlists.savePlaylistByName(`Saved Tracks Not In My Top 100 Artists - Butler`, savedTracksNotByTop100Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 50 Artists - Butler`, savedTracksNotByTop50Artists, accessToken),
+        Playlists.savePlaylistByName(`Saved Tracks Not By My Top 25 Artists - Butler`, savedTracksNotByTop25Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 10 Artists - Butler`, savedTracksNotByTop10Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks By My Top 20 Artists - Butler`, savedTracksByTop20Artists, accessToken),
     ])
