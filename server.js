@@ -86,9 +86,10 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
     const tracksByDecade = TrackSorting.groupTracksByDecade(mySavedTracks)
     // TODO: maybe add a "top track count" limit here too?
     const savedTracksNotInTop50Tracks = TrackSorting.trackListWithoutOtherList(mySavedTracks, topTracks)
+    const savedTracksNotByTop100Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 100)
     const savedTracksNotByTop50Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 50)
     const savedTracksNotByTop10Artists = TrackSorting.trackListNotByArtists(mySavedTracks, topArtists, 10)
-    const savedTracksByTop10Artists = TrackSorting.trackListByArtists(mySavedTracks, topArtists, 10)
+    const savedTracksByTop20Artists = TrackSorting.trackListByArtists(mySavedTracks, topArtists, 15)
 
 
     // TODO: liked songs that aren't in recent plays
@@ -103,9 +104,10 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
 
     const otherChangesList = await Promise.all([
         Playlists.savePlaylistByName(`Saved Tracks Not In My Top 50 Tracks - Butler`, savedTracksNotInTop50Tracks, accessToken),
+        Playlists.savePlaylistByName(`Saved Tracks Not In My Top 100 Artists - Butler`, savedTracksNotByTop100Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 50 Artists - Butler`, savedTracksNotByTop50Artists, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 10 Artists - Butler`, savedTracksNotByTop10Artists, accessToken),
-        Playlists.savePlaylistByName(`Saved Tracks By My Top 10 Artists - Butler`, savedTracksByTop10Artists, accessToken),
+        Playlists.savePlaylistByName(`Saved Tracks By My Top 20 Artists - Butler`, savedTracksByTop20Artists, accessToken),
     ])
 
     const allChangesList = decadesChangesList.concat(otherChangesList)
