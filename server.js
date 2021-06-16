@@ -8,6 +8,8 @@ const querystring = require('querystring')
 const hostname = '127.0.0.1';
 const port = 8888;
 
+const MIN_YEAR_FOR_DISCOVER_WEEKLY = 2016;
+
 const constants = require('./constants')
 const Library = require('./apiClients/library')
 const Playlists = require('./apiClients/playlists')
@@ -72,8 +74,6 @@ ${trackStrings}
 }
 
 async function fetchTracksAndBuildResponse(accessToken, res) {
-    // const mySavedTracks = await
-    // const topTracks = await
     const [
         mySavedTracks,
         topTracks,
@@ -99,9 +99,22 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
 
     // TODO: refactor to flatten out the "track lists" i'm passing around here to not have the "added_at" wrapper layer before sending to playlist module
 
-    const decadesChangesList = []
+
+    // Scrape discover weekly for any new stuff each time
+    // TODO: could improve playlist API here for sure
+    const discoverWeeklyPlaylist = await Playlists.getPlaylistAndTracksByName( "Discover Weekly", accessToken)
+    const currentDiscoverWeeklyCollectedTracks = await Playlists.getPlaylistAndTracksByName( `Collected Discover Weekly ${MIN_YEAR_FOR_DISCOVER_WEEKLY} And On - Butler`, accessToken)
+    const existingTrackUris = new Set(currentDiscoverWeeklyCollectedTracks.tracks.map(x => x.track.uri))
+    const filteredTracks = discoverWeeklyPlaylist.tracks
+        .filter(x => Number(x.track.album.release_date.split('-')[0]) >= MIN_YEAR_FOR_DISCOVER_WEEKLY)
+        .filter(x => !existingTrackUris.has(x.track.uri));
+    const concatenatedTracks = currentDiscoverWeeklyCollectedTracks.tracks.concat(filteredTracks);
+    const discoverWeeklyCollectedChangesList = await Playlists.savePlaylistByName(`Collected Discover Weekly ${MIN_YEAR_FOR_DISCOVER_WEEKLY} And On - Butler`, concatenatedTracks, accessToken)
+
+
+    const changesListsSoFar = [discoverWeeklyCollectedChangesList]
     for (const [decade, trackList] of tracksByDecade) {
-        decadesChangesList.push(await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken))
+        changesListsSoFar.push(await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken))
     } // TODO: could map this to an array of promises that I then await all of...
 
     const otherChangesList = await Promise.all([
@@ -112,7 +125,7 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
         Playlists.savePlaylistByName(`Saved Tracks By My Top 20 Artists - Butler`, savedTracksByTop20Artists, accessToken),
     ])
 
-    const allChangesList = decadesChangesList.concat(otherChangesList)
+    const allChangesList = changesListsSoFar.concat(otherChangesList)
 
     const changesString = allChangesList
         .map(changes => `For playlist ${changes.name} (${changes.newLength} tracks)\n   Added tracks: ${changes.added.map(x => x.track.name)}\n   Removed tracks: ${changes.removed.map(x => x.track.name)}`)

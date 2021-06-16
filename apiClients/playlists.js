@@ -23,7 +23,6 @@ module.exports = {
      * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
      */
     savePlaylistByName: async function (playlistName, trackList, accessToken) {
-        // TODO: implement the rest
         const playlists = await getListOfPlaylists(accessToken) // TODO: could hoist this up for perf reasons
         const playlistWithName = await getOrCreatePlaylistByNameWithTracks(playlists, playlistName, accessToken)
         const playlistDifferences = getPlaylistDifferences(playlistName, playlistWithName.tracks, trackList)
@@ -43,6 +42,11 @@ module.exports = {
         console.log(`   Added to ${playlistName}: ${playlistDifferences.added.map(x => x.track.name)}`)
         console.log(`   Removed from ${playlistName}: ${playlistDifferences.removed.map(x => x.track.name)}`)
         return playlistDifferences
+    },
+
+    getPlaylistAndTracksByName: async function(playlistName, accessToken) {
+        const playlists = await getListOfPlaylists(accessToken) // TODO: could hoist this up for perf reasons
+        return getPlaylistAndTracksByNameInternal(playlists, playlistName, accessToken);
     }
 };
 
@@ -50,7 +54,7 @@ const getListOfPlaylists = async function(accessToken) {
     return spotifyRequests.getAllResults('/v1/me/playlists', accessToken)
 }
 
-const getOrCreatePlaylistByNameWithTracks = async function(playlists, playlistName, accessToken) {
+const getPlaylistAndTracksByNameInternal = async function(playlists, playlistName, accessToken) {
     const existingPlaylist = playlists.find(x => x.name === playlistName)
     if (existingPlaylist) {
         // hydrate tracks data - only needed if existing playlist; new playlist we can assume is empty
@@ -61,6 +65,15 @@ const getOrCreatePlaylistByNameWithTracks = async function(playlists, playlistNa
         const tracks = await spotifyRequests.getAllResults(tracksUrl.pathname, accessToken)
         existingPlaylist.tracks = tracks
         return existingPlaylist
+    } else {
+        return { placeholder: true, tracks: [] };
+    }
+}
+
+const getOrCreatePlaylistByNameWithTracks = async function(playlists, playlistName, accessToken) {
+    const existingPlaylist = playlists.find(x => x.name === playlistName)
+    if (existingPlaylist) {
+        return getPlaylistAndTracksByNameInternal(playlists, playlistName, accessToken)
     } else {
         const newPlaylist = await createPlaylistWithName(playlistName, accessToken)
         // hydrate as empty of tracks since we just created it
