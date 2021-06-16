@@ -110,6 +110,7 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
         .filter(x => !existingTrackUris.has(x.track.uri));
     const concatenatedTracks = currentDiscoverWeeklyCollectedTracks.tracks.concat(filteredTracks);
     const discoverWeeklyCollectedChangesList = await Playlists.savePlaylistByName(`Collected Discover Weekly ${MIN_YEAR_FOR_DISCOVER_WEEKLY} And On - Butler`, concatenatedTracks, accessToken)
+    // TODO: disable shuffling for this one
 
 
     const changesListsSoFar = [discoverWeeklyCollectedChangesList]
