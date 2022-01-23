@@ -1,6 +1,6 @@
-const Utils = require('./utils')
+import Utils from './utils.js'
 
-module.exports = {
+export default {
 
     /**
      * This returns a map of decade strings to lists of tracks, from an original flat track list.

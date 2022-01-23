@@ -1,4 +1,4 @@
-module.exports = {
+export default {
 
     /**
      * Returns true if sourceSet contains any of the items in targetSet.

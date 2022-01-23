@@ -1,4 +1,4 @@
-module.exports = {
+export default {
     SPOTIFY_ACCOUNTS_HOSTNAME: 'accounts.spotify.com',
     SPOTIFY_API_HOSTNAME: 'api.spotify.com',
     TRACK_FETCH_SIZE: 50,

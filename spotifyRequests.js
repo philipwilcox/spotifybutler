@@ -1,13 +1,13 @@
-const querystring = require('querystring')
-const https = require('https');
-const constants = require('./constants')
-const fetch = import("node-fetch");
+import querystring from 'querystring'
+import https from 'https';
+import constants from './constants.js'
+import fetch from 'node-fetch';
 
 /**
  * This is a library for interacting with the often-paginated spotify library in a synchronous way that hides pagination details
  * from the user.
  */
-module.exports = {
+export default {
     /**
      * This returns a set of parsed json response items from a spotify API such as:
      * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/

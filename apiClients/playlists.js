@@ -1,6 +1,6 @@
-const spotifyRequests = require('../spotifyRequests')
-const constants = require('../constants')
-const Utils = require('../utils')
+import spotifyRequests  from '../spotifyRequests.js'
+import constants from  '../constants.js'
+import Utils from '../utils.js'
 
 const DO_SHUFFLE = true
 
@@ -17,7 +17,7 @@ const DO_SHUFFLE = true
  function removeTracksFromPlaylist(playlist, tracks) : Promise
  function addTracksToPlaylist(playlist, tracks) : Promise
  */
-module.exports = {
+export default {
     /**
      * This returns a promise for a GET call to the endpoint described at
      * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/

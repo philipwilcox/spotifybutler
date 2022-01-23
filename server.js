@@ -1,8 +1,8 @@
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
-const crypto = require('crypto')
-const querystring = require('querystring')
+import http from 'http'
+import https from 'https'
+import fs from 'fs'
+import crypto from 'crypto'
+import querystring from 'querystring'
 
 
 const hostname = '127.0.0.1';
@@ -10,10 +10,10 @@ const port = 8888;
 
 const MIN_YEAR_FOR_DISCOVER_WEEKLY = 2016;
 
-const constants = require('./constants')
-const Library = require('./apiClients/library')
-const Playlists = require('./apiClients/playlists')
-const TrackSorting = require('./trackSorting')
+import constants from './constants.js'
+import Library from './apiClients/library.js'
+import Playlists from './apiClients/playlists.js'
+import TrackSorting from './trackSorting.js'
 
 // Expects a file with a json body with three keys: 'client_id', 'client_secret', 'redirect_uri'
 const secrets = JSON.parse(fs.readFileSync('secrets.json'))

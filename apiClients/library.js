@@ -1,6 +1,6 @@
-const spotifyRequests = require('../spotifyRequests')
+import spotifyRequests  from '../spotifyRequests.js'
 
-module.exports = {
+export default {
     /**
      * This returns a promise for a GET call to the endpoint described at
      * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
