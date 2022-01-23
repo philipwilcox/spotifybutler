@@ -1,7 +1,7 @@
 const querystring = require('querystring')
 const https = require('https');
 const constants = require('./constants')
-const fetch = require("node-fetch");
+const fetch = import("node-fetch");
 
 /**
  * This is a library for interacting with the often-paginated spotify library in a synchronous way that hides pagination details
