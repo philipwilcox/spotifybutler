@@ -118,6 +118,7 @@ async function fetchTracksAndBuildResponse(accessToken, res) {
         changesListsSoFar.push(await Playlists.savePlaylistByName(`${decade} - Butler Created`, trackList, accessToken))
     } // TODO: could map this to an array of promises that I then await all of...
 
+    // TODO: investigate why it's currently reporting adding a lot to these each time...
     const otherChangesList = await Promise.all([
         Playlists.savePlaylistByName(`Saved Tracks Not In My Top 50 Tracks - Butler`, savedTracksNotInTop50Tracks, accessToken),
         Playlists.savePlaylistByName(`Saved Tracks Not By My Top 50 Artists - Butler`, savedTracksNotByTop50Artists, accessToken),
