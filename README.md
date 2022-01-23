@@ -6,3 +6,5 @@ aren't in your top songs" or "here are songs you liked that aren't in the last 5
 I'd love to do fancier queries than those two, like iTunes smart playlists, but the Spotify API doesn't support getting
 more than just that. I wish it would give me "last play time" and "total play count" for a user/track, but don't see
 that in their API, and the feature requests are old and stale.
+
+Currently developed against node v16.13.2 LTS.
