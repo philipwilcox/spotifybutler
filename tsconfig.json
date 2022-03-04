@@ -3,7 +3,10 @@
     "esModuleInterop": true,
     "target": "es6",
     "allowSyntheticDefaultImports": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "moduleResolution": "Node",
+    "rootDir": "src",
+    "experimentalDecorators": true
   },
   "exclude": [
     "node_modules"

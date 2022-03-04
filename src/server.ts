@@ -1,19 +1,13 @@
-import http from 'http'
-import https from 'https'
-import fs from 'fs'
-
+import http, {ServerResponse} from 'http'
+import constants from './constants.js'
+import Library from './lib/spotify-clients/library.js'
+import secrets from './secrets.js'
+import SpotifyAuth from './lib/spotify-clients/spotify-auth.js'
 
 const hostname = '127.0.0.1';
 const port = 8888;
 
 const MIN_YEAR_FOR_DISCOVER_WEEKLY = 2018;
-
-import constants from './constants.js'
-import Library from './apiClients/library.js'
-import Playlists from './apiClients/playlists.js'
-import TrackSorting from './trackSorting.js'
-import secrets from './secrets.js'
-import SpotifyAuth from './lib/spotify-auth.js'
 
 
 /**
@@ -34,7 +28,8 @@ const server = http.createServer(async (req, res) => {
         case '/callback':
             const accessToken = await spotifyAuth.getAccessTokenFromCallback(req, res);
             console.log(`Got access token: ${accessToken}`)
-            // await fetchTracksAndBuildResponse(accessToken, res);
+            // TODO: once we're here, the application begins!
+            await runButler(accessToken, res);
             break;
         case '/start':
             // If we saved a previous access_token in our secrets file, we can bypass the first step until it expires!
@@ -55,6 +50,23 @@ server.listen(port, hostname, () => {
     console.log(`Server running at http://${hostname}:${port}/`);
     console.log(`Initialized with client ID ${secrets.client_id}`)
 });
+
+async function runButler(accessToken: string, res: ServerResponse) {
+    const library = new Library(constants.SPOTIFY_API_HOSTNAME, constants.PAGED_ITEM_FETCH_LIMIT); // TODO: do people do DI for TypeScript?
+    const [
+        mySavedTracks,
+        topTracks,
+        topArtists
+    ] = await Promise.all([
+        library.getMySavedTracks(accessToken),
+        library.getMyTopTracks(accessToken),
+        library.getMyTopArtists(accessToken)
+    ]);
+
+    console.log(`I got ${mySavedTracks.length} saved tracks!`)
+    // get my playlists of interest
+}
+
 //
 // function tracksByDecadeToString(tracksByDecade) {
 //     const decadeArray = Array.from(tracksByDecade.keys()).sort()

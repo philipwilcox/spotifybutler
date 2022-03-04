@@ -3,10 +3,10 @@ import {ServerResponse} from "http";
 import https from "https";
 
 export default class SpotifyAuth {
-    private spotify_accounts_hostname: string;
-    private client_id: string;
-    private client_secret: string;
-    private redirect_uri: string;
+    private readonly spotify_accounts_hostname: string;
+    private readonly client_id: string;
+    private readonly client_secret: string;
+    private readonly redirect_uri: string;
 
     constructor(spotify_accounts_hostname: string, client_id: string, client_secret: string, redirect_uri: string) {
         this.spotify_accounts_hostname = spotify_accounts_hostname;

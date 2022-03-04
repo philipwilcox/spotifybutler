@@ -1,6 +1,6 @@
-import spotifyRequests  from '../spotifyRequests.js'
-import constants from  '../constants.js'
-import Utils from '../utils.js'
+import spotifyRequests from '../../spotifyRequests.js'
+import constants from '../constants.js'
+import Utils from '../../utils.js'
 
 const DO_SHUFFLE = true
 
@@ -44,33 +44,33 @@ export default {
         return playlistDifferences
     },
 
-    getPlaylistAndTracksByName: async function(playlistName, accessToken) {
+    getPlaylistAndTracksByName: async function (playlistName, accessToken) {
         const playlists = await getListOfPlaylists(accessToken) // TODO: could hoist this up for perf reasons
         return getPlaylistAndTracksByNameInternal(playlists, playlistName, accessToken);
     }
 };
 
-const getListOfPlaylists = async function(accessToken) {
+const getListOfPlaylists = async function (accessToken) {
     return spotifyRequests.getAllResults('/v1/me/playlists', accessToken)
 }
 
-const getPlaylistAndTracksByNameInternal = async function(playlists, playlistName, accessToken) {
+const getPlaylistAndTracksByNameInternal = async function (playlists, playlistName, accessToken) {
     const existingPlaylist = playlists.find(x => x.name === playlistName)
     if (existingPlaylist) {
         // hydrate tracks data - only needed if existing playlist; new playlist we can assume is empty
         const tracksUrl = new URL(existingPlaylist.tracks.href)
         if (tracksUrl.host !== constants.SPOTIFY_API_HOSTNAME) {
-            throw `Expected ${constants.SPOTIFY_API_HOSTNAME} for host for hydration URL, got ${tracksUrl.host} from ${playlist.tracks.href}`
+            throw `Expected ${constants.SPOTIFY_API_HOSTNAME} for host for hydration URL, got ${tracksUrl.host} from ${existingPlaylist.tracks.href}`
         }
         const tracks = await spotifyRequests.getAllResults(tracksUrl.pathname, accessToken)
         existingPlaylist.tracks = tracks
         return existingPlaylist
     } else {
-        return { placeholder: true, tracks: [] };
+        return {placeholder: true, tracks: []};
     }
 }
 
-const getOrCreatePlaylistByNameWithTracks = async function(playlists, playlistName, accessToken) {
+const getOrCreatePlaylistByNameWithTracks = async function (playlists, playlistName, accessToken) {
     const existingPlaylist = playlists.find(x => x.name === playlistName)
     if (existingPlaylist) {
         return getPlaylistAndTracksByNameInternal(playlists, playlistName, accessToken)
@@ -82,7 +82,7 @@ const getOrCreatePlaylistByNameWithTracks = async function(playlists, playlistNa
     }
 }
 
-const createPlaylistWithName = async function(playlistName, accessToken) {
+const createPlaylistWithName = async function (playlistName, accessToken) {
     const userId = await spotifyRequests.getUserId(accessToken)
     const endpoint = `/v1/users/${userId}/playlists`
     const data = {
@@ -98,7 +98,7 @@ const createPlaylistWithName = async function(playlistName, accessToken) {
  * Return an object like {removed: [tracks], added: [tracks]} that result from comparing the tracks already in the
  * playlist to the given list of desired tracks.
  */
-const getPlaylistDifferences = function(playlistName, playlistTrackList, desiredTracklist) {
+const getPlaylistDifferences = function (playlistName, playlistTrackList, desiredTracklist) {
     const playlistTrackUris = new Set(playlistTrackList.map(x => x.track.uri))
     const desiredTrackUris = new Set(desiredTracklist.map(x => x.track.uri))
     // TODO: how to reconcile multiple entries in spotify for the same song with different URIs
@@ -112,7 +112,7 @@ const getPlaylistDifferences = function(playlistName, playlistTrackList, desired
     }
 }
 
-const addTracksToPlaylist = async function(playlistId, trackList, accessToken) {
+const addTracksToPlaylist = async function (playlistId, trackList, accessToken) {
     // NOTE: can't do more than 100 items at a time
     const endpoint = `/v1/playlists/${playlistId}/tracks`
     const chunkedTrackList = chunkedList(trackList, 100)
@@ -124,7 +124,7 @@ const addTracksToPlaylist = async function(playlistId, trackList, accessToken) {
     }
 }
 
-const removeTracksFromPlaylist = async function(playlistId, trackList, accessToken) {
+const removeTracksFromPlaylist = async function (playlistId, trackList, accessToken) {
     // NOTE: can't do more than 100 items at a time
     const endpoint = `/v1/playlists/${playlistId}/tracks`
     const chunkedTrackList = chunkedList(trackList, 100)
@@ -139,11 +139,11 @@ const removeTracksFromPlaylist = async function(playlistId, trackList, accessTok
     }
 }
 
-const chunkedList = function(list, chunkSize) {
+const chunkedList = function (list, chunkSize) {
     let start = 0
     let listOfLists = []
     while (start < list.length) {
-        const sublist = list.slice(start, start+100)
+        const sublist = list.slice(start, start + 100)
         listOfLists.push(sublist)
         start += 100
     }

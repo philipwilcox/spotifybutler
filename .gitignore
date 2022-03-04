@@ -29,8 +29,8 @@ hs_err_pid*
 
 node_modules/
 
-secrets.ts
-secrets.json
-secrets.js
+src/secrets.ts
+src/secrets.json
+src/secrets.js
 *.js
 *.js.map

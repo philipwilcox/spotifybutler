@@ -1,4 +1,4 @@
-import Utils from './utils.js'
+import Utils from '../utils.js'
 
 export default {
 
@@ -7,7 +7,7 @@ export default {
      */
     groupTracksByDecade: function (savedTrackList) {
         const reducer = (accumulator, item) => {
-            const trackDecade = Math.floor(item.track.album.release_date.split('-')[0] / 10)*10
+            const trackDecade = Math.floor(item.track.album.release_date.split('-')[0] / 10) * 10
             if (accumulator.has(trackDecade)) {
                 const oldList = accumulator.get(trackDecade)
                 oldList.push(item)
@@ -30,7 +30,7 @@ export default {
     trackListWithoutOtherList: function (savedTrackList, tracksToRemove) {
         const trackUrisToRemove = new Set(tracksToRemove.map(x => x.uri))
         // TODO: how to reconcile multiple entries in spotify for the same song with different URIs
-        return savedTrackList.filter(x=> !trackUrisToRemove.has(x.track.uri))
+        return savedTrackList.filter(x => !trackUrisToRemove.has(x.track.uri))
     },
 
     /**
