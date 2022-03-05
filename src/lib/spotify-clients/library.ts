@@ -6,6 +6,7 @@ import {Track} from "../models/spotify/track.js";
 import {Artist} from "../models/spotify/artist.js";
 import {Playlist} from "../models/spotify/playlist.js";
 import {PlaylistTrack} from "../models/spotify/playlist-track.js";
+import utils from "../../utils.js";
 
 export default class Library {
     private requestBackend: RequestBackend
@@ -62,7 +63,7 @@ export default class Library {
     async addTracksToPlaylist(playlistId: string, trackList: Track[]) {
         // NOTE: can't do more than 100 items at a time
         const endpoint = `/v1/playlists/${playlistId}/tracks`
-        const chunkedTrackList = chunkedList(trackList, 100)
+        const chunkedTrackList = utils.chunkedList(trackList, 100)
         for (const chunk of chunkedTrackList) {
             const data = {
                 uris: chunk.map(x => x.uri)
@@ -75,7 +76,7 @@ export default class Library {
     async removeTracksFromPlaylist(playlistId: string, trackList: Track[]) {
         // NOTE: can't do more than 100 items at a time
         const endpoint = `/v1/playlists/${playlistId}/tracks`
-        const chunkedTrackList = chunkedList(trackList, 100)
+        const chunkedTrackList = utils.chunkedList(trackList, 100)
         for (const chunk of chunkedTrackList) {
             const data = {
                 tracks: chunk.map(x => ({
@@ -272,16 +273,4 @@ const makeRequestWithJsonBody = function <Type>(method, hostname, path, data, ac
         req.write(JSON.stringify(data))
         req.end()
     });
-}
-
-// TODO: move to some sort of utils module
-const chunkedList = function <Type>(list: Type[], chunkSize: number): Type[][] {
-    let start = 0
-    let listOfLists = []
-    while (start < list.length) {
-        const sublist = list.slice(start, start + chunkSize)
-        listOfLists.push(sublist)
-        start += chunkSize
-    }
-    return listOfLists
 }

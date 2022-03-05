@@ -1,12 +1,18 @@
 export default {
-
     /**
-     * Returns true if sourceSet contains any of the items in targetSet.
+     * Returns an array of n-element subarrays created by splitting the given array up.
      */
-    setContainsAnyOf: function (sourceSet, targetSet) {
-        return [...sourceSet].find(x => targetSet.has(x))
+    chunkedList: function <Type>(list: Type[], chunkSize: number): Type[][] {
+        let start = 0
+        let listOfLists = []
+        while (start < list.length) {
+            const sublist = list.slice(start, start + chunkSize)
+            listOfLists.push(sublist)
+            start += chunkSize
+        }
+        return listOfLists
     },
-    
+
     /**
      * Shuffles array in place. ES6 version from https://stackoverflow.com/questions/6274339/how-can-i-shuffle-an-array
      * @param {Array} a items An array containing the items.
