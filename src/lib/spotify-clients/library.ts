@@ -5,6 +5,7 @@ import {LibraryTrack} from "../models/spotify/library-track.js";
 import {Track} from "../models/spotify/track.js";
 import {Artist} from "../models/spotify/artist.js";
 import {Playlist} from "../models/spotify/playlist.js";
+import {PlaylistTrack} from "../models/spotify/playlist-track.js";
 
 export default class Library {
     private requestBackend: RequestBackend
@@ -38,59 +39,15 @@ export default class Library {
         )
     }
 
-    async getTracksForPlaylist(tracks_href: string): Promise<Track[]> {
+    async getTracksForPlaylist(tracks_href: string): Promise<PlaylistTrack[]> {
         // hydrate tracks data - only needed if existing playlist; new playlist we can assume is empty
         const tracksUrl = new URL(tracks_href)
-        const x = this.requestBackend.getAllResults(tracksUrl.pathname)
-        return x
+        return this.requestBackend.getAllResults(tracksUrl.pathname).then(
+            items => Deserialize(items, PlaylistTrack)
+        )
     }
 
-    /**
-     * TODO: currently this returns just playlist ID, but we could make it return full object
-     *
-     * {
-     *   "collaborative": false,
-     *   "description": "Automatically generated playlist from Spotify Butler app",
-     *   "external_urls": {
-     *     "spotify": "https://open.spotify.com/playlist/6d9sTk085tMSfKn5YBnLUi"
-     *   },
-     *   "followers": {
-     *     "href": null,
-     *     "total": 0
-     *   },
-     *   "href": "https://api.spotify.com/v1/playlists/6d9sTk085tMSfKn5YBnLUi",
-     *   "id": "6d9sTk085tMSfKn5YBnLUi",
-     *   "images": [],
-     *   "name": "100 Most Recent Liked Songs",
-     *   "owner": {
-     *     "display_name": "philipwilcox",
-     *     "external_urls": {
-     *       "spotify": "https://open.spotify.com/user/philipwilcox"
-     *     },
-     *     "href": "https://api.spotify.com/v1/users/philipwilcox",
-     *     "id": "philipwilcox",
-     *     "type": "user",
-     *     "uri": "spotify:user:philipwilcox"
-     *   },
-     *   "primary_color": null,
-     *   "public": false,
-     *   "snapshot_id": "MSw2Yzc0NDE5OWU4OGQ0ZmViZDQ2OGU1ZjA2ODg1ZTg4MmU2ODYxZjEy",
-     *   "tracks": {
-     *     "href": "https://api.spotify.com/v1/playlists/6d9sTk085tMSfKn5YBnLUi/tracks",
-     *     "items": [],
-     *     "limit": 100,
-     *     "next": null,
-     *     "offset": 0,
-     *     "previous": null,
-     *     "total": 0
-     *   },
-     *   "type": "playlist",
-     *   "uri": "spotify:playlist:6d9sTk085tMSfKn5YBnLUi"
-     * }
-     *
-     * @param playlistName
-     */
-    async createPlaylistWithName(playlistName): Promise<string> {
+    async createPlaylistWithName(playlistName): Promise<Playlist> {
         const userId = await this.requestBackend.getUserId()
         const endpoint = `/v1/users/${userId}/playlists`
         const data = {
@@ -99,11 +56,7 @@ export default class Library {
             collaborative: false,
             description: "Automatically generated playlist from Spotify Butler app"
         }
-        const r = this.requestBackend.postData(endpoint, data)
-        return r.then(
-            // @ts-ignore
-            x => x.id
-        )
+        return this.requestBackend.postData(endpoint, data)
     }
 
     async addTracksToPlaylist(playlistId: string, trackList: Track[]) {
@@ -115,6 +68,21 @@ export default class Library {
                 uris: chunk.map(x => x.uri)
             }
             await this.requestBackend.postData(endpoint, data)
+        }
+    }
+
+    // TODO: could I go further and type playlist IDs to be "special" strings?
+    async removeTracksFromPlaylist(playlistId: string, trackList: Track[]) {
+        // NOTE: can't do more than 100 items at a time
+        const endpoint = `/v1/playlists/${playlistId}/tracks`
+        const chunkedTrackList = chunkedList(trackList, 100)
+        for (const chunk of chunkedTrackList) {
+            const data = {
+                tracks: chunk.map(x => ({
+                    uri: x.uri
+                }))
+            }
+            await this.requestBackend.deleteData(endpoint, data)
         }
     }
 
@@ -170,7 +138,7 @@ class RequestBackend {
     /**
      * POSTs a JSON payload to a Spotify API endpoint.
      */
-    async postData(endpoint, data) {
+    async postData<Type>(endpoint, data): Promise<Type> {
         return makeRequestWithJsonBody('POST', this.apiHost, endpoint, data, this.accessToken)
     }
 
@@ -273,7 +241,7 @@ const makeGetRequest = function (host: string, path: string, accessToken: string
  * @param data the JSON object to POST
  * @param accessToken the user access token
  */
-const makeRequestWithJsonBody = function (method, hostname, path, data, accessToken) {
+const makeRequestWithJsonBody = function <Type>(method, hostname, path, data, accessToken): Promise<Type> {
     // TODO: note that this currently returns unschema'd json objects
     const options = {
         hostname: hostname,

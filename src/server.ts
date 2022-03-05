@@ -18,13 +18,14 @@ import Database from 'better-sqlite3';
  * The Spotify auth flow is described at https://developer.spotify.com/documentation/general/guides/authorization-guide/
  * under "Authorization Code Flow."
  */
+let newLogin = false;
 const server = http.createServer(async (req, res) => {
     const spotifyAuth = new SpotifyAuth(constants.SPOTIFY.SPOTIFY_ACCOUNTS_HOSTNAME, secrets.client_id, secrets.client_secret, secrets.redirect_uri)
     const path = req.url.split('?')[0]
     switch (path) {
         case '/callback':
             // If we saved a previous access_token in our secrets file, we can bypass the first step until it expires!
-            if (secrets.access_token) {
+            if (secrets.access_token && !newLogin) {
                 console.log(`Using stored access token ${secrets.access_token}`)
                 // Once we're here, the application begins!
                 buildResponse(secrets.access_token, res)
@@ -36,7 +37,9 @@ const server = http.createServer(async (req, res) => {
             }
             break;
         case '/start':
-            spotifyAuth.initialAuthRequest(res);
+            console.log("Starting auth flow!")
+            spotifyAuth.initialAuthRequest(res)
+            newLogin = true
             break;
         default:
             res.statusCode = 200;
@@ -52,7 +55,7 @@ server.listen(constants.SERVER.PORT, constants.SERVER.HOSTNAME, () => {
 async function buildResponse(accessToken: string, res: ServerResponse) {
     const library = new Library(constants.SPOTIFY.SPOTIFY_API_HOSTNAME, constants.SPOTIFY.PAGED_ITEM_FETCH_LIMIT, accessToken);
     const db = createDatabase();
-    const app = new App(library, db)
+    const app = new App(library, db, constants.APP.MIN_YEAR_FOR_DISCOVER_WEEKLY)
     // Once we're here, the main logic begins!
     const stringResult = await app.runButler();
     res.statusCode = 200
@@ -66,10 +69,11 @@ function createDatabase() {
 
     // TODO: add a distinct constraint on playlist name
     const tableCreations = ["CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)",
-        "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json TEXT)",
-        "CREATE TABLE saved_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, added_at TEXT, track_json TEXT)",
+        "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)",
+        "CREATE TABLE saved_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, added_at TEXT, track_json JSON)",
         "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT)",
-        "CREATE TABLE playlist_tracks (playlist_name TEXT, name TEXT, id TEXT, href TEXT, uri TEXT, track_json TEXT)"
+        "CREATE TABLE playlist_tracks (playlist_name TEXT, added_at TEXT, name TEXT, id TEXT, href TEXT, uri TEXT," +
+        " track_json JSON)"
     ]
 
     tableCreations.map(query => db.prepare(query).run())

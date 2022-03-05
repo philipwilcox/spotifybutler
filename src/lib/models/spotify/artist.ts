@@ -19,6 +19,6 @@ export class Artist {
 
 
 export class Followers {
-    @deserialize href: null;
+    @deserialize href: null | string;
     @deserialize total: number;
 }
