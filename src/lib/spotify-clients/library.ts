@@ -5,7 +5,6 @@ import {LibraryTrack} from "../models/spotify/library-track.js";
 import {Track} from "../models/spotify/track.js";
 import {Artist} from "../models/spotify/artist.js";
 import {Playlist} from "../models/spotify/playlist.js";
-import {stringify} from "querystring";
 
 export default class Library {
     private requestBackend: RequestBackend
@@ -44,6 +43,79 @@ export default class Library {
         const tracksUrl = new URL(tracks_href)
         const x = this.requestBackend.getAllResults(tracksUrl.pathname)
         return x
+    }
+
+    /**
+     * TODO: currently this returns just playlist ID, but we could make it return full object
+     *
+     * {
+     *   "collaborative": false,
+     *   "description": "Automatically generated playlist from Spotify Butler app",
+     *   "external_urls": {
+     *     "spotify": "https://open.spotify.com/playlist/6d9sTk085tMSfKn5YBnLUi"
+     *   },
+     *   "followers": {
+     *     "href": null,
+     *     "total": 0
+     *   },
+     *   "href": "https://api.spotify.com/v1/playlists/6d9sTk085tMSfKn5YBnLUi",
+     *   "id": "6d9sTk085tMSfKn5YBnLUi",
+     *   "images": [],
+     *   "name": "100 Most Recent Liked Songs",
+     *   "owner": {
+     *     "display_name": "philipwilcox",
+     *     "external_urls": {
+     *       "spotify": "https://open.spotify.com/user/philipwilcox"
+     *     },
+     *     "href": "https://api.spotify.com/v1/users/philipwilcox",
+     *     "id": "philipwilcox",
+     *     "type": "user",
+     *     "uri": "spotify:user:philipwilcox"
+     *   },
+     *   "primary_color": null,
+     *   "public": false,
+     *   "snapshot_id": "MSw2Yzc0NDE5OWU4OGQ0ZmViZDQ2OGU1ZjA2ODg1ZTg4MmU2ODYxZjEy",
+     *   "tracks": {
+     *     "href": "https://api.spotify.com/v1/playlists/6d9sTk085tMSfKn5YBnLUi/tracks",
+     *     "items": [],
+     *     "limit": 100,
+     *     "next": null,
+     *     "offset": 0,
+     *     "previous": null,
+     *     "total": 0
+     *   },
+     *   "type": "playlist",
+     *   "uri": "spotify:playlist:6d9sTk085tMSfKn5YBnLUi"
+     * }
+     *
+     * @param playlistName
+     */
+    async createPlaylistWithName(playlistName): Promise<string> {
+        const userId = await this.requestBackend.getUserId()
+        const endpoint = `/v1/users/${userId}/playlists`
+        const data = {
+            name: playlistName,
+            public: false,
+            collaborative: false,
+            description: "Automatically generated playlist from Spotify Butler app"
+        }
+        const r = this.requestBackend.postData(endpoint, data)
+        return r.then(
+            // @ts-ignore
+            x => x.id
+        )
+    }
+
+    async addTracksToPlaylist(playlistId: string, trackList: Track[]) {
+        // NOTE: can't do more than 100 items at a time
+        const endpoint = `/v1/playlists/${playlistId}/tracks`
+        const chunkedTrackList = chunkedList(trackList, 100)
+        for (const chunk of chunkedTrackList) {
+            const data = {
+                uris: chunk.map(x => x.uri)
+            }
+            await this.requestBackend.postData(endpoint, data)
+        }
     }
 
 }
@@ -99,7 +171,7 @@ class RequestBackend {
      * POSTs a JSON payload to a Spotify API endpoint.
      */
     async postData(endpoint, data) {
-        return makeRequestWithJsonBody('POST', endpoint, data, this.accessToken)
+        return makeRequestWithJsonBody('POST', this.apiHost, endpoint, data, this.accessToken)
     }
 
     /**
@@ -201,10 +273,10 @@ const makeGetRequest = function (host: string, path: string, accessToken: string
  * @param data the JSON object to POST
  * @param accessToken the user access token
  */
-const makeRequestWithJsonBody = function (method, path, data, accessToken) {
+const makeRequestWithJsonBody = function (method, hostname, path, data, accessToken) {
     // TODO: note that this currently returns unschema'd json objects
     const options = {
-        hostname: this.spotify_api_host,
+        hostname: hostname,
         path: path,
         method: method.toUpperCase(),
         headers: {
@@ -232,4 +304,16 @@ const makeRequestWithJsonBody = function (method, path, data, accessToken) {
         req.write(JSON.stringify(data))
         req.end()
     });
+}
+
+// TODO: move to some sort of utils module
+const chunkedList = function <Type>(list: Type[], chunkSize: number): Type[][] {
+    let start = 0
+    let listOfLists = []
+    while (start < list.length) {
+        const sublist = list.slice(start, start + chunkSize)
+        listOfLists.push(sublist)
+        start += chunkSize
+    }
+    return listOfLists
 }

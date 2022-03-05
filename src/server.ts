@@ -64,11 +64,12 @@ async function buildResponse(accessToken: string, res: ServerResponse) {
 function createDatabase() {
     const db = new Database(constants.SQLITE.DB_FILE);
 
+    // TODO: add a distinct constraint on playlist name
     const tableCreations = ["CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)",
         "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json TEXT)",
         "CREATE TABLE saved_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, added_at TEXT, track_json TEXT)",
         "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT)",
-        "CREATE TABLE playlist_tracks (playlist_name TEXT, name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)"
+        "CREATE TABLE playlist_tracks (playlist_name TEXT, name TEXT, id TEXT, href TEXT, uri TEXT, track_json TEXT)"
     ]
 
     tableCreations.map(query => db.prepare(query).run())
