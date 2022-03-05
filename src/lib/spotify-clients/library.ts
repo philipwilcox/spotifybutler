@@ -4,34 +4,48 @@ import {Deserialize} from "cerialize";
 import {LibraryTrack} from "../models/spotify/library-track.js";
 import {Track} from "../models/spotify/track.js";
 import {Artist} from "../models/spotify/artist.js";
+import {Playlist} from "../models/spotify/playlist.js";
+import {stringify} from "querystring";
 
 export default class Library {
     private requestBackend: RequestBackend
-    private accessToken: string
 
     constructor(spotify_api_host: string, paged_item_fetch_limit: null | number, accessToken: string) {
-        this.requestBackend = new RequestBackend(spotify_api_host, paged_item_fetch_limit)
-        this.accessToken = accessToken
+        this.requestBackend = new RequestBackend(spotify_api_host, paged_item_fetch_limit, accessToken)
     }
 
-    async getMySavedTracks() {
+    async getMySavedTracks(): Promise<LibraryTrack[]> {
         // TODO: move the type awareness into a templated generic requestBackend method?
-        return this.requestBackend.getAllResults('/v1/me/tracks', this.accessToken).then(
+        return this.requestBackend.getAllResults('/v1/me/tracks').then(
             items => Deserialize(items, LibraryTrack)
         )
     }
 
-    async getMyTopTracks() {
-        return this.requestBackend.getAllResults('/v1/me/top/tracks', this.accessToken).then(
+    async getMyTopTracks(): Promise<Track[]> {
+        return this.requestBackend.getAllResults('/v1/me/top/tracks').then(
             items => Deserialize(items, Track)
         )
     }
 
-    async getMyTopArtists() {
-        return this.requestBackend.getAllResults('/v1/me/top/artists', this.accessToken).then(
+    async getMyTopArtists(): Promise<Artist[]> {
+        return this.requestBackend.getAllResults('/v1/me/top/artists').then(
             items => Deserialize(items, Artist)
         )
     }
+
+    async getMyPlaylists(): Promise<Playlist[]> {
+        return this.requestBackend.getAllResults('/v1/me/playlists').then(
+            items => Deserialize(items, Playlist)
+        )
+    }
+
+    async getTracksForPlaylist(tracks_href: string): Promise<Track[]> {
+        // hydrate tracks data - only needed if existing playlist; new playlist we can assume is empty
+        const tracksUrl = new URL(tracks_href)
+        const x = this.requestBackend.getAllResults(tracksUrl.pathname)
+        return x
+    }
+
 }
 
 
@@ -45,12 +59,14 @@ export default class Library {
  * from the user.
  */
 class RequestBackend {
-    private spotify_api_host: string
-    private paged_item_fetch_limit: null | number
+    private apiHost: string
+    private pagedItemFetchLimit: null | number
+    private accessToken: string
 
-    constructor(spotify_api_host: string, paged_item_fetch_limit: null | number) {
-        this.spotify_api_host = spotify_api_host
-        this.paged_item_fetch_limit = paged_item_fetch_limit
+    constructor(spotifyApiHost: string, pagedItemFetchLimit: null | number, accessToken: string) {
+        this.apiHost = spotifyApiHost
+        this.pagedItemFetchLimit = pagedItemFetchLimit
+        this.accessToken = accessToken
     }
 
     // TODO: make this generic on type of return value, for e.g. tracks vs playlists
@@ -62,8 +78,8 @@ class RequestBackend {
      *
      * Note that this assumes host is always this.spotify_api_host
      */
-    async getAllResults(path, accessToken) {
-        const pages = await this.getAllPages(this.spotify_api_host, path, accessToken)
+    async getAllResults(path) {
+        const pages = await this.getAllPages(this.apiHost, path)
         // @ts-ignore
         return pages.map(x => x.items).flat();
     }
@@ -72,8 +88,9 @@ class RequestBackend {
      * This returns the current user's internal spotify user ID as described at:
      * https://developer.spotify.com/documentation/web-api/reference/users-profile/get-current-users-profile/
      */
-    async getUserId(accessToken) {
-        const result = await makeGetRequest(this.spotify_api_host, "/v1/me", accessToken)
+    // TODO: do I need?
+    async getUserId() {
+        const result = await makeGetRequest(this.apiHost, "/v1/me", this.accessToken)
         // @ts-ignore
         return result.id
     }
@@ -81,24 +98,24 @@ class RequestBackend {
     /**
      * POSTs a JSON payload to a Spotify API endpoint.
      */
-    async postData(endpoint, data, accessToken) {
-        return makeRequestWithJsonBody('POST', endpoint, data, accessToken)
+    async postData(endpoint, data) {
+        return makeRequestWithJsonBody('POST', endpoint, data, this.accessToken)
     }
 
     /**
      * DELETEs a JSON payload to a Spotify API endpoint.
      */
-    async deleteData(endpoint, data, accessToken) {
+    async deleteData(endpoint, data) {
         // NOTE: I was trying to avoid external dependencies, but `fetch` is needed here since the built in
         // https request stuff in Node wasn't letting me send a postbody in a DELETE, which is nonstandard but
         // required by the Spotify API...
         const response = fetch(
-            'https://' + this.spotify_api_host + endpoint,
+            'https://' + this.apiHost + endpoint,
             {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${accessToken}`
+                    'Authorization': `Bearer ${this.accessToken}`
                 },
                 body: JSON.stringify(data)
             }
@@ -109,8 +126,10 @@ class RequestBackend {
     /**
      * This fetches all responses from a GET endpoint in the spotify api as a list of response objects.
      * */
-    async getAllPages(host, path, accessToken) {
-        let response = await getSinglePageOfResults(host, path, accessToken, 50, 0)
+    async getAllPages(host, path) {
+        // TODO: do I need to build limit/offset myself each time?
+        // TODO: configure limit somewhere? especially for top artists/track stuff if they ever support more?
+        let response = await getSinglePageOfResults(host, path, this.accessToken, 50, 0)
         let accumulatedResponses = [response]
         // @ts-ignore
         while (response.next) {
@@ -119,9 +138,10 @@ class RequestBackend {
             const nextArgs = new URLSearchParams(response.next.split('?')[1])
 
             // if we have a limit set, break here if we exceed it
-            if (this.paged_item_fetch_limit && parseInt(nextArgs.get("offset")) > this.paged_item_fetch_limit) break;
+            if (this.pagedItemFetchLimit && parseInt(nextArgs.get("offset")) > this.pagedItemFetchLimit) break;
 
-            response = await getSinglePageOfResults(host, path, accessToken, nextArgs.get("limit"), nextArgs.get("offset"))
+            response = await getSinglePageOfResults(host, path, this.accessToken, nextArgs.get("limit"), nextArgs.get("offset"))
+
             accumulatedResponses.push(response)
         }
         return accumulatedResponses
@@ -154,13 +174,15 @@ const makeGetRequest = function (host: string, path: string, accessToken: string
     return new Promise((resolve, reject) => {
         var response = ""
         const req = https.request(options, res => {
+            if (res.statusCode !== 200) {
+                const errorString = `Saw a non-200 status code ${res.statusCode} - ${res.statusMessage} for response that so far is ${response} from ${host} ${path}`
+                throw new Error(errorString)
+            }
             res.on('data', data => {
                 response += data
-                // console.log(`${options.path} data section: ${data}`);
             })
 
             res.on('end', () => {
-                // console.log(`${options.path} finished`);
                 const payload = JSON.parse(response);
                 resolve(payload);
             })

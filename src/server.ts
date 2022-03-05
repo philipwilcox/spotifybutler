@@ -4,7 +4,7 @@ import Library from './lib/spotify-clients/library.js'
 import secrets from './secrets.js'
 import SpotifyAuth from './lib/spotify-clients/spotify-auth.js'
 import App from "./app.js";
-import sqlite3 from 'sqlite3';
+import Database from 'better-sqlite3';
 
 
 /**
@@ -23,19 +23,20 @@ const server = http.createServer(async (req, res) => {
     const path = req.url.split('?')[0]
     switch (path) {
         case '/callback':
-            const accessToken = await spotifyAuth.getAccessTokenFromCallback(req, res);
-            console.log(`Got access token: ${accessToken}`)
-            // Once we're here, the application begins!
-            buildResponse(accessToken, res)
-            break;
-        case '/start':
             // If we saved a previous access_token in our secrets file, we can bypass the first step until it expires!
             if (secrets.access_token) {
                 console.log(`Using stored access token ${secrets.access_token}`)
-                // await fetchTracksAndBuildResponse(secrets.access_token, res);
+                // Once we're here, the application begins!
+                buildResponse(secrets.access_token, res)
             } else {
-                spotifyAuth.initialAuthRequest(res);
+                const accessToken = await spotifyAuth.getAccessTokenFromCallback(req, res);
+                console.log(`Got access token: ${accessToken}`)
+                // Once we're here, the application begins!
+                buildResponse(accessToken, res)
             }
+            break;
+        case '/start':
+            spotifyAuth.initialAuthRequest(res);
             break;
         default:
             res.statusCode = 200;
@@ -61,20 +62,16 @@ async function buildResponse(accessToken: string, res: ServerResponse) {
 
 // TODO: modularize how I use this?
 function createDatabase() {
-    const db = new sqlite3.Database(constants.SQLITE.DB_FILE, (err) => {
-        if (err) {
-            console.log('Could not connect to database', err)
-        } else {
-            console.log('Connected to database')
-        }
-    })
+    const db = new Database(constants.SQLITE.DB_FILE);
 
-    db.serialize(function () {
-        db.run("CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)")
-        db.run("CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)")
-        db.run("CREATE TABLE library_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)")
-        db.run("CREATE TABLE playlist_tracks (playlist_name TEXT, name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)")
-    })
+    const tableCreations = ["CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)",
+        "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json TEXT)",
+        "CREATE TABLE saved_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, added_at TEXT, track_json TEXT)",
+        "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT)",
+        "CREATE TABLE playlist_tracks (playlist_name TEXT, name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)"
+    ]
+
+    tableCreations.map(query => db.prepare(query).run())
 
     return db;
 }
