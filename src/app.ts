@@ -67,16 +67,50 @@ export default class App {
         // Come up with new playlist contents based on the following queries!
         // TODO: check how well date sorting works here... maybe convert timestamps before storing...
         // TODO: make this config-driven with a new config class, including like shuffle and such
+        const numberedSubquery = "(SELECT id, row_number() OVER win1 AS rn FROM saved_tracks WINDOW win1 AS" +
+            " (PARTITION BY primary_artist_id ORDER BY RANDOM())) as numbered"
         const playlistQueries = {
+            // TODO: add like a "Random 100" mix...
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
                 " 100",
-            // TODO: this one is special cause it's additive each time, but we can union the old plus the new!
-            // "Collected Discover Weekly 2016 And On - Butler": "SELECT track_json FROM playlist_tracks WHERE" +
-            //     " playlist_name = 'Discover Weekly' AND release_year >=
-            //     ${this.minYearForDiscoverWeekly}`,
-            "Liked Tracks, Five Per Artist": "SELECT track_json FROM saved_tracks INNER JOIN (SELECT id," +
-                " row_number() OVER win1 as rn  FROM saved_tracks WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY" +
-                " RANDOM())) as numbered where saved_tracks.id = numbered.id and numbered.rn < 6",
+            "Collected Discover Weekly 2016 And On - Butler": `
+                SELECT track_json
+                FROM playlist_tracks
+                WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler'
+                UNION
+                SELECT track_json
+                FROM playlist_tracks
+                WHERE playlist_name = 'Discover Weekly'
+                  AND release_year >= ${this.minYearForDiscoverWeekly}
+                  AND id NOT IN
+                      (SELECT id
+                       FROM playlist_tracks
+                       WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler')
+            `,
+            "Liked Tracks, Five Per Artist": `
+                SELECT track_json
+                FROM saved_tracks
+                         INNER JOIN ${numberedSubquery}
+                where saved_tracks.id = numbered.id
+                  and numbered.rn < 6`,
+            "2005-2024, Five Per Artist": `
+                SELECT track_json
+                FROM saved_tracks as s
+                         INNER JOIN ${numberedSubquery}
+                WHERE s.id = numbered.id
+                  and numbered.rn < 6
+                  and release_year >= 2005
+                  and release_year < 2025
+            `,
+            "1985-2004, Five Per Artist": `
+                SELECT track_json
+                FROM saved_tracks as s
+                         INNER JOIN ${numberedSubquery}
+                WHERE s.id = numbered.id
+                  and numbered.rn < 6
+                  and release_year >= 1985
+                  and release_year < 2004
+            `,
             // TODO: how to know which artist is number 1 vs number 10, say
             // "Saved Tracks By My Top 20 Artists - Butler": "",
             // "Saved Tracks Not By My Top 10 Artists - Butler": "",
@@ -138,6 +172,7 @@ export default class App {
     getResultsForPlaylistQueries(playlistQueries: Record<string, string>): Record<string, NewPlaylistInfo> {
         const playlistResults: Record<string, NewPlaylistInfo> = {}
         for (let playlistName in playlistQueries) {
+            console.log(`About to query: ${playlistQueries[playlistName]}`)
             const allTracks = this.db.prepare(playlistQueries[playlistName]).all().map(x =>
                 Deserialize(JSON.parse(x.track_json), Track)
             )
