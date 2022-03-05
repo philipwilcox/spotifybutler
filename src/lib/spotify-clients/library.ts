@@ -2,31 +2,33 @@ import fetch from "node-fetch";
 import https from "https";
 import {Deserialize} from "cerialize";
 import {LibraryTrack} from "../models/spotify/library-track.js";
-import {Track} from "../models/spotify/track";
-import {Artist} from "../models/spotify/artist";
+import {Track} from "../models/spotify/track.js";
+import {Artist} from "../models/spotify/artist.js";
 
 export default class Library {
     private requestBackend: RequestBackend
+    private accessToken: string
 
-    constructor(spotify_api_host: string, paged_item_fetch_limit: null | number) {
+    constructor(spotify_api_host: string, paged_item_fetch_limit: null | number, accessToken: string) {
         this.requestBackend = new RequestBackend(spotify_api_host, paged_item_fetch_limit)
+        this.accessToken = accessToken
     }
 
-    async getMySavedTracks(accessToken) {
+    async getMySavedTracks() {
         // TODO: move the type awareness into a templated generic requestBackend method?
-        return this.requestBackend.getAllResults('/v1/me/tracks', accessToken).then(
+        return this.requestBackend.getAllResults('/v1/me/tracks', this.accessToken).then(
             items => Deserialize(items, LibraryTrack)
         )
     }
 
-    async getMyTopTracks(accessToken) {
-        return this.requestBackend.getAllResults('/v1/me/top/tracks', accessToken).then(
+    async getMyTopTracks() {
+        return this.requestBackend.getAllResults('/v1/me/top/tracks', this.accessToken).then(
             items => Deserialize(items, Track)
         )
     }
 
-    async getMyTopArtists(accessToken) {
-        return this.requestBackend.getAllResults('/v1/me/top/artists', accessToken).then(
+    async getMyTopArtists() {
+        return this.requestBackend.getAllResults('/v1/me/top/artists', this.accessToken).then(
             items => Deserialize(items, Artist)
         )
     }

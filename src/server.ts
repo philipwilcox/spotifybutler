@@ -3,11 +3,8 @@ import constants from './constants.js'
 import Library from './lib/spotify-clients/library.js'
 import secrets from './secrets.js'
 import SpotifyAuth from './lib/spotify-clients/spotify-auth.js'
-
-const hostname = '127.0.0.1';
-const port = 8888;
-
-const MIN_YEAR_FOR_DISCOVER_WEEKLY = 2018;
+import App from "./app.js";
+import sqlite3 from 'sqlite3';
 
 
 /**
@@ -22,14 +19,14 @@ const MIN_YEAR_FOR_DISCOVER_WEEKLY = 2018;
  * under "Authorization Code Flow."
  */
 const server = http.createServer(async (req, res) => {
-    const spotifyAuth = new SpotifyAuth(constants.SPOTIFY_ACCOUNTS_HOSTNAME, secrets.client_id, secrets.client_secret, secrets.redirect_uri)
+    const spotifyAuth = new SpotifyAuth(constants.SPOTIFY.SPOTIFY_ACCOUNTS_HOSTNAME, secrets.client_id, secrets.client_secret, secrets.redirect_uri)
     const path = req.url.split('?')[0]
     switch (path) {
         case '/callback':
             const accessToken = await spotifyAuth.getAccessTokenFromCallback(req, res);
             console.log(`Got access token: ${accessToken}`)
-            // TODO: once we're here, the application begins!
-            await runButler(accessToken, res);
+            // Once we're here, the application begins!
+            buildResponse(accessToken, res)
             break;
         case '/start':
             // If we saved a previous access_token in our secrets file, we can bypass the first step until it expires!
@@ -46,26 +43,42 @@ const server = http.createServer(async (req, res) => {
     }
 });
 
-server.listen(port, hostname, () => {
-    console.log(`Server running at http://${hostname}:${port}/`);
+server.listen(constants.SERVER.PORT, constants.SERVER.HOSTNAME, () => {
+    console.log(`Server running at http://${constants.SERVER.HOSTNAME}:${constants.SERVER.PORT}/`);
     console.log(`Initialized with client ID ${secrets.client_id}`)
 });
 
-async function runButler(accessToken: string, res: ServerResponse) {
-    const library = new Library(constants.SPOTIFY_API_HOSTNAME, constants.PAGED_ITEM_FETCH_LIMIT); // TODO: do people do DI for TypeScript?
-    const [
-        mySavedTracks,
-        topTracks,
-        topArtists
-    ] = await Promise.all([
-        library.getMySavedTracks(accessToken),
-        library.getMyTopTracks(accessToken),
-        library.getMyTopArtists(accessToken)
-    ]);
-
-    console.log(`I got ${mySavedTracks.length} saved tracks!`)
-    // get my playlists of interest
+async function buildResponse(accessToken: string, res: ServerResponse) {
+    const library = new Library(constants.SPOTIFY.SPOTIFY_API_HOSTNAME, constants.SPOTIFY.PAGED_ITEM_FETCH_LIMIT, accessToken);
+    const db = createDatabase();
+    const app = new App(library, db)
+    // Once we're here, the main logic begins!
+    const stringResult = await app.runButler();
+    res.statusCode = 200
+    res.setHeader("Content-Type", "text/plain")
+    res.end(stringResult)
 }
+
+// TODO: modularize how I use this?
+function createDatabase() {
+    const db = new sqlite3.Database(constants.SQLITE.DB_FILE, (err) => {
+        if (err) {
+            console.log('Could not connect to database', err)
+        } else {
+            console.log('Connected to database')
+        }
+    })
+
+    db.serialize(function () {
+        db.run("CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)")
+        db.run("CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)")
+        db.run("CREATE TABLE library_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)")
+        db.run("CREATE TABLE playlist_tracks (playlist_name TEXT, name TEXT, id TEXT, href TEXT, uri TEXT, json TEXT)")
+    })
+
+    return db;
+}
+
 
 //
 // function tracksByDecadeToString(tracksByDecade) {

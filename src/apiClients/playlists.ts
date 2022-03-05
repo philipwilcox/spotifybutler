@@ -59,8 +59,8 @@ const getPlaylistAndTracksByNameInternal = async function (playlists, playlistNa
     if (existingPlaylist) {
         // hydrate tracks data - only needed if existing playlist; new playlist we can assume is empty
         const tracksUrl = new URL(existingPlaylist.tracks.href)
-        if (tracksUrl.host !== constants.SPOTIFY_API_HOSTNAME) {
-            throw `Expected ${constants.SPOTIFY_API_HOSTNAME} for host for hydration URL, got ${tracksUrl.host} from ${existingPlaylist.tracks.href}`
+        if (tracksUrl.host !== constants.SPOTIFY.SPOTIFY_API_HOSTNAME) {
+            throw `Expected ${constants.SPOTIFY.SPOTIFY_API_HOSTNAME} for host for hydration URL, got ${tracksUrl.host} from ${existingPlaylist.tracks.href}`
         }
         const tracks = await spotifyRequests.getAllResults(tracksUrl.pathname, accessToken)
         existingPlaylist.tracks = tracks
