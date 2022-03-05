@@ -7,6 +7,16 @@ import App from "./app.js";
 import Database from 'better-sqlite3';
 
 
+/***
+ * Next steps
+ * TODO: add other new limited-count playlist ideas
+ * TODO: add some deduping inspection/logic around the playlists
+ * TODO: investigate why sometimes we add/remove slightly different numbers when modifying the "five per artist" lists
+ * TODO: bring back remaining old ones
+ * TODO: try to do an in-place shuffle method
+ * TODO: integrate with lastfm
+ */
+
 /**
  * This will start a server with just a few endpoints (since UI is less important to us than iterating through the
  * data).
