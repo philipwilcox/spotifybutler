@@ -55,7 +55,7 @@ server.listen(constants.SERVER.PORT, constants.SERVER.HOSTNAME, () => {
 async function buildResponse(accessToken: string, res: ServerResponse) {
     const library = new Library(constants.SPOTIFY.SPOTIFY_API_HOSTNAME, constants.SPOTIFY.PAGED_ITEM_FETCH_LIMIT, accessToken);
     const db = createDatabase();
-    const app = new App(library, db, constants.APP.MIN_YEAR_FOR_DISCOVER_WEEKLY)
+    const app = new App(library, db, constants.APP.MIN_YEAR_FOR_DISCOVER_WEEKLY, constants.APP.DRY_RUN)
     // Once we're here, the main logic begins!
     const stringResult = await app.runButler();
     res.statusCode = 200
@@ -70,10 +70,11 @@ function createDatabase() {
     // TODO: add a distinct constraint on playlist name
     const tableCreations = ["CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)",
         "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)",
-        "CREATE TABLE saved_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, added_at TEXT, track_json JSON)",
+        "CREATE TABLE saved_tracks (name TEXT, id TEXT, primary_artist_id TEXT, release_date TEXT, release_year" +
+        " NUMERIC, href TEXT, uri TEXT, added_at TEXT, track_json JSON)",
         "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT)",
-        "CREATE TABLE playlist_tracks (playlist_name TEXT, added_at TEXT, name TEXT, id TEXT, href TEXT, uri TEXT," +
-        " track_json JSON)"
+        "CREATE TABLE playlist_tracks (playlist_name TEXT, added_at TEXT, release_date TEXT, release_year NUMERIC," +
+        " name TEXT, primary_artist_id TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)"
     ]
 
     tableCreations.map(query => db.prepare(query).run())

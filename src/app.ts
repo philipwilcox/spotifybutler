@@ -13,11 +13,13 @@ export default class App {
     private library: Library
     private db: Database
     private minYearForDiscoverWeekly: number
+    private dryRun: boolean
 
-    constructor(library: Library, db: Database, minYearForDiscoverWeekly: number) {
+    constructor(library: Library, db: Database, minYearForDiscoverWeekly: number, dryRun: boolean = false) {
         this.library = library
         this.db = db
         this.minYearForDiscoverWeekly = minYearForDiscoverWeekly
+        this.dryRun = dryRun
     }
 
     async runButler() {
@@ -66,57 +68,68 @@ export default class App {
         // TODO: check how well date sorting works here... maybe convert timestamps before storing...
         // TODO: make this config-driven with a new config class, including like shuffle and such
         const playlistQueries = {
-            // TODO: do some deduping based on artist/name/id type stuff in the DB...
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
                 " 100",
-            // TODO: this one is special cause it's additive each time
+            // TODO: this one is special cause it's additive each time, but we can union the old plus the new!
             // "Collected Discover Weekly 2016 And On - Butler": "SELECT track_json FROM playlist_tracks WHERE" +
-            //     " playlist_name = 'Discover Weekly' AND substr(json_extract(track_json," +
-            //     ` '$.album.release_date'), 1, 4) >= '${this.minYearForDiscoverWeekly}'`,
+            //     " playlist_name = 'Discover Weekly' AND release_year >=
+            //     ${this.minYearForDiscoverWeekly}`,
             "Liked Tracks, Five Per Artist": "SELECT track_json FROM saved_tracks INNER JOIN (SELECT id," +
-                " row_number() " +
-                "OVER win1 as rn  FROM saved_tracks WINDOW win1 AS (PARTITION BY json_extract(track_json, " +
-                "'$.artists[0].id') ORDER BY RANDOM())) as numbered where saved_tracks.id = numbered.id " +
-                "and numbered.rn < 6",
+                " row_number() OVER win1 as rn  FROM saved_tracks WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY" +
+                " RANDOM())) as numbered where saved_tracks.id = numbered.id and numbered.rn < 6",
             // TODO: how to know which artist is number 1 vs number 10, say
             // "Saved Tracks By My Top 20 Artists - Butler": "",
             // "Saved Tracks Not By My Top 10 Artists - Butler": "",
             // "Saved Tracks Not By My Top 25 Artists - Butler": "",
             "Saved Tracks Not By My Top 50 Artists - Butler": "SELECT track_json FROM saved_tracks WHERE" +
-                " json_extract(track_json, '$.artists[0].id') NOT IN (SELECT id FROM top_artists)",
-            // "Saved Tracks Not In My Top 50 Tracks - Butler": "",
-            // "1960 - Butler Created": "",
-            // "1970 - Butler Created": "",
-            // "1980 - Butler Created": "",
-            // "1990 - Butler Created": "",
-            // "2000 - Butler Created": "",
-            // "2010 - Butler Created": "",
-            // "2020 - Butler Created": "",
+                " primary_artist_id NOT IN (SELECT id FROM top_artists)",
+            "Saved Tracks Not In My Top 50 Tracks - Butler": "SELECT track_json FROM saved_tracks WHERE" +
+                " id NOT IN (SELECT id FROM top_tracks)",
+            "Pre-1980": "SELECT track_json FROM saved_tracks WHERE release_year < 1980",
+            "1980 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 1990 AND release_year" +
+                " >= 1980",
+            "1990 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2000 AND release_year" +
+                " >= 1990",
+            "2000 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2010 AND release_year" +
+                " >= 2000",
+            "2010 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2020 AND release_year" +
+                " >= 2010",
+            "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
+                " >= 2020",
         }
         const playlistResults = this.getResultsForPlaylistQueries(playlistQueries)
 
         for (let playlistName in playlistResults) {
             const playlistInfo = playlistResults[playlistName]
             if (playlistInfo.playlistId == null) {
-                // TODO: figure out how to parallelize all my edits... probably a similar loop as above
-                const newPlaylist = await this.library.createPlaylistWithName(playlistName)
-                await this.library.addTracksToPlaylist(newPlaylist.id, playlistInfo.allTracks)
                 const trackNames = playlistInfo.allTracks.map(x => x.name)
-                console.log(`Created new playlist with name ${playlistName} and the following ${trackNames.length} tracks: ${JSON.stringify(trackNames)}`)
+                const logString = `Created new playlist with name ${playlistName} and the following ${trackNames.length} tracks: ${JSON.stringify(trackNames)}`
+                if (!this.dryRun) {
+                    const newPlaylist = await this.library.createPlaylistWithName(playlistName)
+                    await this.library.addTracksToPlaylist(newPlaylist.id, playlistInfo.allTracks)
+                    console.log(logString)
+                } else {
+                    console.log("DRY RUN --- " + logString)
+                }
             } else {
                 // TODO: add a way to do shuffle without removing/re-adding, if possible...
                 const addedNames = playlistInfo.addedTracks.map(x => x.name)
                 const removedNames = playlistInfo.removedTracks.map(x => x.name)
-                const changes = []
-                if (playlistInfo.addedTracks.length > 0) {
-                    changes.push(this.library.addTracksToPlaylist(playlistInfo.playlistId, playlistInfo.addedTracks))
+                const logString = `For playlist with name ${playlistName} we added the following ${addedNames.length} tracks ${JSON.stringify(addedNames)}
+                   and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)}`
+                if (!this.dryRun) {
+                    const changes = []
+                    if (playlistInfo.addedTracks.length > 0) {
+                        changes.push(this.library.addTracksToPlaylist(playlistInfo.playlistId, playlistInfo.addedTracks))
+                    }
+                    if (playlistInfo.removedTracks.length > 0) {
+                        changes.push(this.library.removeTracksFromPlaylist(playlistInfo.playlistId, playlistInfo.removedTracks))
+                    }
+                    await Promise.all(changes)
+                    console.log(logString)
+                } else {
+                    console.log("DRY RUN --- " + logString)
                 }
-                if (playlistInfo.removedTracks.length > 0) {
-                    changes.push(this.library.removeTracksFromPlaylist(playlistInfo.playlistId, playlistInfo.removedTracks))
-                }
-                await Promise.all(changes)
-                console.log(`For playlist with name ${playlistName} we added the following ${addedNames.length} tracks ${JSON.stringify(addedNames)}
-                   and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)}`)
             }
             // TODO: build an object we can turn into an HTML response...
         }
@@ -159,7 +172,6 @@ export default class App {
      * playlist to the given list of desired tracks.
      */
     getAddedAndRemovedTracks(oldTracks: Track[], newTracks: Track[]): [Track[], Track[]] {
-        // TODO: what's URI vs ID going to do here...? will that help with reconciling multiple entries?
         const oldUris = new Set(oldTracks.map(x => x.uri))
         const newUris = new Set(newTracks.map(x => x.uri))
         const removedTracks = oldTracks.filter(x => !newUris.has(x.uri))
@@ -172,8 +184,13 @@ export default class App {
 
     loadTracksAndPlaylistsIntoDb(savedTracks: LibraryTrack[], topTracks: Track[], topArtists: Artist[],
                                  playlists: Playlist[], tracksForPlaylists: Record<string, PlaylistTrack[]>) {
+
+        // TODO: neither URI nor ID will help us dedupe, we'll also have to look at artist... build some separate audit
+        //  functions for that
+
         const savedTrackQuery = this.db.prepare("INSERT INTO saved_tracks (name, id, href, uri, added_at," +
-            " track_json) VALUES (@name, @id, @href, @uri, @added_at, @track_json)")
+            "release_date, release_year, primary_artist_id, track_json) VALUES (@name, @id, @href, @uri, @added_at," +
+            " @release_date, @release_year, @primary_artist_id, @track_json)")
         const insertManySavedTrack = this.db.transaction((tracks) => {
             for (const track of tracks) savedTrackQuery.run(track);
         })
@@ -184,6 +201,9 @@ export default class App {
                 href: x.track.href,
                 uri: x.track.uri,
                 added_at: x.added_at,
+                release_date: x.track.album.release_date,
+                release_year: x.track.album.release_date.split('-')[0],
+                primary_artist_id: x.track.artists[0].id,
                 track_json: JSON.stringify(x.track)
             }
         }));
@@ -233,8 +253,8 @@ export default class App {
         }));
 
         const playlistTracksQuery = this.db.prepare("INSERT INTO playlist_tracks (playlist_name, added_at, name, " +
-            "id, href, uri, track_json) VALUES (@playlist_name, @added_at, @name, @id, @href, @uri," +
-            " @track_json)")
+            "id, href, uri, release_date, release_year, primary_artist_id, track_json) VALUES (@playlist_name," +
+            " @added_at, @name, @id, @href, @uri, @release_date, @release_year, @primary_artist_id, @track_json)")
         const insertManyPlaylistTrack = this.db.transaction((playlistTracks) => {
             for (const track of playlistTracks) playlistTracksQuery.run(track);
         })
@@ -248,6 +268,9 @@ export default class App {
                     id: x.track.id,
                     href: x.track.href,
                     uri: x.track.uri,
+                    release_date: x.track.album.release_date,
+                    release_year: x.track.album.release_date.split('-')[0],
+                    primary_artist_id: x.track.artists[0].id,
                     track_json: JSON.stringify(x.track)
                 }
             }))

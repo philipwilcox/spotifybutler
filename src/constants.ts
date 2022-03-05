@@ -7,7 +7,8 @@ export default {
         PAGED_ITEM_FETCH_LIMIT: null
     },
     APP: {
-        MIN_YEAR_FOR_DISCOVER_WEEKLY: 2018
+        MIN_YEAR_FOR_DISCOVER_WEEKLY: 2018,
+        DRY_RUN: false
     },
     SERVER: {
         PORT: 8888,

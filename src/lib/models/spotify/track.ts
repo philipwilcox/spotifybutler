@@ -38,7 +38,8 @@ export class Album {
     @deserialize id: string;
     @deserialize images: Image[];
     @deserialize name: string;
-    @deserialize release_date: Date;
+    // TODO: this is not being parsed as a Date even though that's what the first api thing wanted it to be!
+    @deserialize release_date: string;
     @deserialize release_date_precision: string;
     @deserialize total_tracks: number;
     @deserialize type: string;
