@@ -72,6 +72,18 @@ export default class Library {
         }
     }
 
+    async replaceTracksInPlaylist(playlistId: string, trackList: Track[]) {
+        // NOTE: can't do more than 100 items at a time
+        const endpoint = `/v1/playlists/${playlistId}/tracks`
+        const chunkedTrackList = utils.chunkedList(trackList, 100)
+        for (const chunk of chunkedTrackList) {
+            const data = {
+                uris: chunk.map(x => x.uri)
+            }
+            await this.requestBackend.putData(endpoint, data)
+        }
+    }
+
     // TODO: could I go further and type playlist IDs to be "special" strings?
     async removeTracksFromPlaylist(playlistId: string, trackList: Track[]) {
         // NOTE: can't do more than 100 items at a time
@@ -141,6 +153,13 @@ class RequestBackend {
      */
     async postData<Type>(endpoint, data): Promise<Type> {
         return makeRequestWithJsonBody('POST', this.apiHost, endpoint, data, this.accessToken)
+    }
+
+    /**
+     * PUTs a JSON payload to a Spotify API endpoint.
+     */
+    async putData<Type>(endpoint, data): Promise<Type> {
+        return makeRequestWithJsonBody('PUT', this.apiHost, endpoint, data, this.accessToken)
     }
 
     /**
