@@ -74,7 +74,7 @@ export default class App {
         const numberedSubquery = "(SELECT id, row_number() OVER win1 AS rn FROM saved_tracks WINDOW win1 AS" +
             " (PARTITION BY primary_artist_id ORDER BY RANDOM())) as numbered"
         const playlistQueries = {
-            // // TODO: add like a "Random 100" mix...
+            // TODO: add like a "Random 100" mix...
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
                 " 100",
             "100 Random Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY RANDOM() LIMIT 100",
@@ -140,12 +140,14 @@ export default class App {
 
         for (let playlistName in playlistResults) {
             const playlistInfo = playlistResults[playlistName]
+            let playlistId = playlistInfo.playlistId
             if (playlistInfo.playlistId == null) {
                 const trackNames = playlistInfo.allTracks.map(x => x.name)
                 const logString = `Created new playlist with name ${playlistName} and the following ${trackNames.length} tracks: ${JSON.stringify(trackNames)}`
                 if (!this.dryRun) {
                     const newPlaylist = await this.library.createPlaylistWithName(playlistName)
                     await this.library.addTracksToPlaylist(newPlaylist.id, playlistInfo.allTracks)
+                    playlistId = newPlaylist.id
                     console.log(logString)
                 } else {
                     console.log("DRY RUN --- " + logString)
@@ -174,6 +176,8 @@ export default class App {
             // TODO: make shuffling a config-driven thing, per-playlist
             // In-place-shuffling of every track in every playlist, after adding the new ones
             // This will preserve original added-to-playlist timestamp
+
+            let snapshotId = (await this.library.getPlaylistInfo(playlistId)).snapshot_id
             const originalTracksWithIndex = playlistInfo.allTracks.map((x, i) => [x, i])
             const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex)
 
@@ -182,17 +186,18 @@ export default class App {
                 return [i, originalI]
             })
 
-            const logString = `For playlist with name ${playlistName} we shuffled the tracks in-place`
+            const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
             if (!this.dryRun) {
-                await asyncPool(6, changes, (c) => {
-                    // console.debug("Issuing command for " + c)
-                    return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, c[1], 1, c[0], playlistInfo.snapshotId)
-                })
                 console.log(logString)
+                await asyncPool(4, changes, (c) => {
+                    // console.debug("Issuing command for " + c)
+                    return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, c[1], 1, c[0], snapshotId)
+                })
             } else {
                 console.log("DRY RUN --- " + logString)
             }
         }
+        console.log("DONE!")
         // TODO: build an object we can turn into an HTML response...
     }
 

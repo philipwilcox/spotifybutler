@@ -40,6 +40,12 @@ export default class Library {
         )
     }
 
+    async getPlaylistInfo(playlistId: string): Promise<Playlist> {
+        return this.requestBackend.getOneResult('/v1/playlists/' + playlistId).then(
+            x => Deserialize(x, Playlist)
+        )
+    }
+
     async getTracksForPlaylist(tracks_href: string): Promise<PlaylistTrack[]> {
         // hydrate tracks data - only needed if existing playlist; new playlist we can assume is empty
         const tracksUrl = new URL(tracks_href)
@@ -142,6 +148,18 @@ class RequestBackend {
      *
      * Note that this assumes host is always this.spotify_api_host
      */
+    async getOneResult(path) {
+        return await getSingleItemOfResults(this.apiHost, path, this.accessToken)
+    }
+
+    /**
+     * This returns a set of parsed json response items from a spotify API such as:
+     * https://developer.spotify.com/documentation/web-api/reference/library/get-users-saved-tracks/
+     *
+     * Note that we discard the page-level reponse metadata and just accumulate the `items` from each page.
+     *
+     * Note that this assumes host is always this.spotify_api_host
+     */
     async getAllResults(path) {
         const pages = await this.getAllPages(this.apiHost, path)
         // @ts-ignore
@@ -219,6 +237,9 @@ class RequestBackend {
     }
 }
 
+const getSingleItemOfResults = function (host, path, accessToken) {
+    return makeGetRequest(host, `${path}`, accessToken)
+}
 
 const getSinglePageOfResults = function (host, path, accessToken, limit, offset) {
     const params = new URLSearchParams({
