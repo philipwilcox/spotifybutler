@@ -90,13 +90,15 @@ export default class Library {
         }
     }
 
-    async reorderTracksInPlaylist(playlistId: string, rangeStart: number, rangeLength: number, insertBefore: number, snapshotId: string) {
+    async reorderTracksInPlaylist(playlistId: string, rangeStart: number, rangeLength: number, insertBefore: number, snapshotId: null | string = null) {
         const endpoint = `/v1/playlists/${playlistId}/tracks`
         const data = {
             range_start: rangeStart,
             range_length: rangeLength,
-            insert_before: insertBefore,
-            snapshot_id: snapshotId
+            insert_before: insertBefore
+        }
+        if (snapshotId != null) {
+            data['snapshot_id'] = snapshotId
         }
         await this.requestBackend.putData(endpoint, data)
     }

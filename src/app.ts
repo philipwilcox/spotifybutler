@@ -71,10 +71,11 @@ export default class App {
         // Come up with new playlist contents based on the following queries!
         // TODO: check how well date sorting works here... maybe convert timestamps before storing...
         // TODO: make this config-driven with a new config class, including like shuffle and such
-        const numberedSubquery = "(SELECT id, row_number() OVER win1 AS rn FROM saved_tracks WINDOW win1 AS" +
-            " (PARTITION BY primary_artist_id ORDER BY RANDOM())) as numbered"
+        const createArtistCountLimitedQuery = (innerQuery, limit) => `SELECT track_json
+                                                                      FROM (SELECT track_json, row_number() OVER win1 AS rn
+                                                                            FROM (${innerQuery}) WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY RANDOM()))
+                                                                      WHERE rn <= ${limit}`
         const playlistQueries = {
-            // TODO: add like a "Random 100" mix...
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
                 " 100",
             "100 Random Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY RANDOM() LIMIT 100",
@@ -92,30 +93,12 @@ export default class App {
                        FROM playlist_tracks
                        WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler')
             `,
-            "Liked Tracks, Five Per Artist": `
-                SELECT track_json
-                FROM saved_tracks
-                         INNER JOIN ${numberedSubquery}
-                where saved_tracks.id = numbered.id
-                  and numbered.rn < 6`,
-            "2005-2024, Five Per Artist": `
-                SELECT track_json
-                FROM saved_tracks as s
-                         INNER JOIN ${numberedSubquery}
-                WHERE s.id = numbered.id
-                  and numbered.rn < 6
-                  and release_year >= 2005
-                  and release_year <= 2024
-            `,
-            "1985-2004, Five Per Artist": `
-                SELECT track_json
-                FROM saved_tracks as s
-                         INNER JOIN ${numberedSubquery}
-                WHERE s.id = numbered.id
-                  and numbered.rn < 6
-                  and release_year >= 1985
-                  and release_year <= 2004
-            `,
+            "Liked Tracks, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks", 5),
+            "2005-2024, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks WHERE release_year >= 2005 AND release_year <= 2024", 5),
+            "1985-2004, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks WHERE release_year >= 1985 and release_year <= 2004", 5),
             // TODO: how to know which artist is number 1 vs number 10, say
             // "Saved Tracks By My Top 20 Artists - Butler": "",
             // "Saved Tracks Not By My Top 10 Artists - Butler": "",
@@ -156,7 +139,7 @@ export default class App {
                 const addedNames = playlistInfo.addedTracks.map(x => x.name)
                 const removedNames = playlistInfo.removedTracks.map(x => x.name)
                 const logString = `For playlist with name ${playlistName} we added the following ${addedNames.length} tracks ${JSON.stringify(addedNames)}
-                   and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)}`
+                   and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)} to give ${playlistInfo.allTracks.length} tracks`
                 if (!this.dryRun) {
                     const changes = []
                     if (playlistInfo.addedTracks.length > 0) {
@@ -176,23 +159,35 @@ export default class App {
             // TODO: make shuffling a config-driven thing, per-playlist
             // In-place-shuffling of every track in every playlist, after adding the new ones
             // This will preserve original added-to-playlist timestamp
-
-            let snapshotId = (await this.library.getPlaylistInfo(playlistId)).snapshot_id
-            const originalTracksWithIndex = playlistInfo.allTracks.map((x, i) => [x, i])
-            const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex)
-            // TODO: evaluate this vs what ends up in the playlist to see if shuffle algo is actually working well...
+            const newPlaylistMeta = (await this.library.getPlaylistInfo(playlistId))
+            const newTrackList = (await this.library.getTracksForPlaylist(newPlaylistMeta.tracks.href)).map(x => x.track)
+            const originalTracksWithIndex = newTrackList.map((x, i) => [x, i]).slice()
+            const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex.slice())
 
             const changes = shuffledTracksWithOriginalIndex.map((originalTuple, i) => {
                 const originalI = originalTuple[1]
+                // "what was in originalI should now be in i"
                 return [i, originalI]
             })
 
             const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
+            // The problem here is that if we use the same, consistent snapshot ID, when we merge the "try to put a new
+            // track in position 0" + "try to put a new track in position 1", etc, changes, we end up skipping every
+            // other original track - we put the second one in front of what was the second originally, but that's now
+            // the 3rd, etc... This seems to be because it's inserting it before the position of something that is then
+            // moved, vs a specific index.
+            // If we use no snapshot ID, on the other hand... the same thing is happening for reasons I don't
+            // understand... maybe a new snapshot isn't being generated quickly enough?
+            // So let's just try adding each to the front, aka "in front of the original front one"
+            // But seems like sometimes these merges still resolve funny... :| so we'd rather go backwards to forward,
+            // synchronously, with no snapshot id... :| This doesn't give us what we want, but it seems more random
+            // than any other method I've tried to preserve original time-added...
             if (!this.dryRun) {
                 console.log(logString)
-                await asyncPool(3, changes, (c) => {
-                    // console.debug("Issuing command for " + c)
-                    return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, c[1], 1, c[0], snapshotId)
+                await asyncPool(1, changes.reverse(), (c) => {
+                    const oldLocation = c[1]// + i // update this as we move other things to the front of the list...
+                    // console.log(`Moving for ${c} - track at ${oldLocation} - ${originalTracksWithIndex[oldLocation][0].name} - to the front!`)
+                    return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, oldLocation, 1, 0)
                 })
             } else {
                 console.log("DRY RUN --- " + logString)
