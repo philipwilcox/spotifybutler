@@ -7,13 +7,15 @@ export default class NewPlaylistInfo {
     oldTracks: null | Track[]
     addedTracks: null | Track[]
     removedTracks: null | Track[]
+    snapshotId: null | string
 
     constructor(playlistName: string,
                 allTracks: Track[],
                 playlistId: null | string = null,
                 oldTracks: null | Track[] = null,
                 addedTracks: null | Track[] = null,
-                removedTracks: null | Track[] = null
+                removedTracks: null | Track[] = null,
+                snapshotId: null | string = null
     ) {
         this.playlistName = playlistName
         this.playlistId = playlistId
@@ -21,5 +23,6 @@ export default class NewPlaylistInfo {
         this.oldTracks = oldTracks
         this.addedTracks = addedTracks
         this.removedTracks = removedTracks
+        this.snapshotId = snapshotId
     }
 }

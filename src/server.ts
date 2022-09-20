@@ -82,7 +82,7 @@ function createDatabase() {
         "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)",
         "CREATE TABLE saved_tracks (name TEXT, id TEXT, primary_artist_id TEXT, release_date TEXT, release_year" +
         " NUMERIC, href TEXT, uri TEXT, added_at TEXT, track_json JSON)",
-        "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT)",
+        "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT, snapshot_id TEXT)",
         "CREATE TABLE playlist_tracks (playlist_name TEXT, added_at TEXT, release_date TEXT, release_year NUMERIC," +
         " name TEXT, primary_artist_id TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)"
     ]

@@ -84,6 +84,17 @@ export default class Library {
         }
     }
 
+    async reorderTracksInPlaylist(playlistId: string, rangeStart: number, rangeLength: number, insertBefore: number, snapshotId: string) {
+        const endpoint = `/v1/playlists/${playlistId}/tracks`
+        const data = {
+            range_start: rangeStart,
+            range_length: rangeLength,
+            insert_before: insertBefore,
+            snapshot_id: snapshotId
+        }
+        await this.requestBackend.putData(endpoint, data)
+    }
+
     // TODO: could I go further and type playlist IDs to be "special" strings?
     async removeTracksFromPlaylist(playlistId: string, trackList: Track[]) {
         // NOTE: can't do more than 100 items at a time
