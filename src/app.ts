@@ -180,6 +180,7 @@ export default class App {
             let snapshotId = (await this.library.getPlaylistInfo(playlistId)).snapshot_id
             const originalTracksWithIndex = playlistInfo.allTracks.map((x, i) => [x, i])
             const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex)
+            // TODO: evaluate this vs what ends up in the playlist to see if shuffle algo is actually working well...
 
             const changes = shuffledTracksWithOriginalIndex.map((originalTuple, i) => {
                 const originalI = originalTuple[1]
