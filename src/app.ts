@@ -189,7 +189,7 @@ export default class App {
             const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
             if (!this.dryRun) {
                 console.log(logString)
-                await asyncPool(4, changes, (c) => {
+                await asyncPool(3, changes, (c) => {
                     // console.debug("Issuing command for " + c)
                     return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, c[1], 1, c[0], snapshotId)
                 })
