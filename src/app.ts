@@ -141,14 +141,18 @@ export default class App {
                 const logString = `For playlist with name ${playlistName} we added the following ${addedNames.length} tracks ${JSON.stringify(addedNames)}
                    and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)} to give ${playlistInfo.allTracks.length} tracks`
                 if (!this.dryRun) {
-                    const changes = []
-                    if (playlistInfo.addedTracks.length > 0) {
-                        changes.push(this.library.addTracksToPlaylist(playlistInfo.playlistId, playlistInfo.addedTracks))
-                    }
-                    if (playlistInfo.removedTracks.length > 0) {
-                        changes.push(this.library.removeTracksFromPlaylist(playlistInfo.playlistId, playlistInfo.removedTracks))
-                    }
-                    await Promise.all(changes)
+                    const shuffledTracks = utils.shuffle(playlistInfo.allTracks)
+                    await this.library.replaceTracksInPlaylist(playlistInfo.playlistId, shuffledTracks)
+
+                    // TODO: clean up / extract out "in place" modifications in favor of shuffling completely every time
+                    // const changes = []
+                    // if (playlistInfo.addedTracks.length > 0) {
+                    //     changes.push(this.library.addTracksToPlaylist(playlistInfo.playlistId, playlistInfo.addedTracks))
+                    // }
+                    // if (playlistInfo.removedTracks.length > 0) {
+                    //     changes.push(this.library.removeTracksFromPlaylist(playlistInfo.playlistId, playlistInfo.removedTracks))
+                    // }
+                    // await Promise.all(changes)
                     // TODO: we could optimize this by async-ing these operations outside of this loop
                     console.log(logString)
                 } else {
@@ -156,42 +160,43 @@ export default class App {
                 }
             }
 
-            // TODO: make shuffling a config-driven thing, per-playlist
-            // In-place-shuffling of every track in every playlist, after adding the new ones
-            // This will preserve original added-to-playlist timestamp
-            const newPlaylistMeta = (await this.library.getPlaylistInfo(playlistId))
-            const newTrackList = (await this.library.getTracksForPlaylist(newPlaylistMeta.tracks.href)).map(x => x.track)
-            const originalTracksWithIndex = newTrackList.map((x, i) => [x, i]).slice()
-            const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex.slice())
-
-            const changes = shuffledTracksWithOriginalIndex.map((originalTuple, i) => {
-                const originalI = originalTuple[1]
-                // "what was in originalI should now be in i"
-                return [i, originalI]
-            })
-
-            const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
-            // The problem here is that if we use the same, consistent snapshot ID, when we merge the "try to put a new
-            // track in position 0" + "try to put a new track in position 1", etc, changes, we end up skipping every
-            // other original track - we put the second one in front of what was the second originally, but that's now
-            // the 3rd, etc... This seems to be because it's inserting it before the position of something that is then
-            // moved, vs a specific index.
-            // If we use no snapshot ID, on the other hand... the same thing is happening for reasons I don't
-            // understand... maybe a new snapshot isn't being generated quickly enough?
-            // So let's just try adding each to the front, aka "in front of the original front one"
-            // But seems like sometimes these merges still resolve funny... :| so we'd rather go backwards to forward,
-            // synchronously, with no snapshot id... :| This doesn't give us what we want, but it seems more random
-            // than any other method I've tried to preserve original time-added...
-            if (!this.dryRun) {
-                console.log(logString)
-                await asyncPool(1, changes.reverse(), (c) => {
-                    const oldLocation = c[1]// + i // update this as we move other things to the front of the list...
-                    // console.log(`Moving for ${c} - track at ${oldLocation} - ${originalTracksWithIndex[oldLocation][0].name} - to the front!`)
-                    return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, oldLocation, 1, 0)
-                })
-            } else {
-                console.log("DRY RUN --- " + logString)
-            }
+            // TODO: remove / clean up / extract attempt at "in place" shuffling due to poor speed and results
+            // // TODO: make shuffling a config-driven thing, per-playlist
+            // // In-place-shuffling of every track in every playlist, after adding the new ones
+            // // This will preserve original added-to-playlist timestamp
+            // const newPlaylistMeta = (await this.library.getPlaylistInfo(playlistId))
+            // const newTrackList = (await this.library.getTracksForPlaylist(newPlaylistMeta.tracks.href)).map(x => x.track)
+            // const originalTracksWithIndex = newTrackList.map((x, i) => [x, i]).slice()
+            // const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex.slice())
+            //
+            // const changes = shuffledTracksWithOriginalIndex.map((originalTuple, i) => {
+            //     const originalI = originalTuple[1]
+            //     // "what was in originalI should now be in i"
+            //     return [i, originalI]
+            // })
+            //
+            // const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
+            // // The problem here is that if we use the same, consistent snapshot ID, when we merge the "try to put a new
+            // // track in position 0" + "try to put a new track in position 1", etc, changes, we end up skipping every
+            // // other original track - we put the second one in front of what was the second originally, but that's now
+            // // the 3rd, etc... This seems to be because it's inserting it before the position of something that is then
+            // // moved, vs a specific index.
+            // // If we use no snapshot ID, on the other hand... the same thing is happening for reasons I don't
+            // // understand... maybe a new snapshot isn't being generated quickly enough?
+            // // So let's just try adding each to the front, aka "in front of the original front one"
+            // // But seems like sometimes these merges still resolve funny... :| so we'd rather go backwards to forward,
+            // // synchronously, with no snapshot id... :| This doesn't give us what we want, but it seems more random
+            // // than any other method I've tried to preserve original time-added...
+            // if (!this.dryRun) {
+            //     console.log(logString)
+            //     await asyncPool(1, changes.reverse(), (c) => {
+            //         const oldLocation = c[1]// + i // update this as we move other things to the front of the list...
+            //         // console.log(`Moving for ${c} - track at ${oldLocation} - ${originalTracksWithIndex[oldLocation][0].name} - to the front!`)
+            //         return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, oldLocation, 1, 0)
+            //     })
+            // } else {
+            //     console.log("DRY RUN --- " + logString)
+            // }
         }
         console.log("DONE!")
         // TODO: build an object we can turn into an HTML response...

@@ -80,13 +80,21 @@ export default class Library {
 
     async replaceTracksInPlaylist(playlistId: string, trackList: Track[]) {
         // NOTE: can't do more than 100 items at a time
+        // But because PUT is an overwrite we can't use the PUT method every time...
+        // Instead we can PUT the first and the POST the rest.
         const endpoint = `/v1/playlists/${playlistId}/tracks`
         const chunkedTrackList = utils.chunkedList(trackList, 100)
+        let first = true
         for (const chunk of chunkedTrackList) {
             const data = {
                 uris: chunk.map(x => x.uri)
             }
-            await this.requestBackend.putData(endpoint, data)
+            if (first) {
+                await this.requestBackend.putData(endpoint, data)
+                first = false
+            } else {
+                await this.requestBackend.postData(endpoint, data)
+            }
         }
     }
 
