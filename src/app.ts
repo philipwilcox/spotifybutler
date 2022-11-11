@@ -65,12 +65,12 @@ export default class App {
 
         this.loadTracksAndPlaylistsIntoDb(mySavedTracks, myTopTracks, myTopArtists, myPlaylists, tracksForPlaylists);
 
-        // TODO: do some deduplication analysis
+        await this.removeLikedSongDupesFromServerAndDb(); // TODO: do I always want to run this?
 
         const newPlaylistResults = this.queryForNewPlaylistResults();
 
         await this.saveNewPlaylistsToServer(newPlaylistResults);
-        
+
         console.log("DONE!")
         // TODO: build an object we can turn into an HTML response...
     }
@@ -83,8 +83,6 @@ export default class App {
                 Deserialize(JSON.parse(x.track_json), Track)
             )
 
-            // TODO: now, based on this... look for any existing ones in the playlist track table and find the
-            //  change sets!
             const oldTracks = this.db.prepare("SELECT track_json FROM playlist_tracks WHERE playlist_name =" +
                 " @playlist_name").all({playlist_name: playlistName})
                 .map(x => Deserialize(JSON.parse(x.track_json), Track))
@@ -127,10 +125,6 @@ export default class App {
 
     loadTracksAndPlaylistsIntoDb(savedTracks: LibraryTrack[], topTracks: Track[], topArtists: Artist[],
                                  playlists: Playlist[], tracksForPlaylists: Record<string, PlaylistTrack[]>) {
-
-        // TODO: neither URI nor ID will help us dedupe, we'll also have to look at artist... build some separate audit
-        //  functions for that
-
         const savedTrackQuery = this.db.prepare("INSERT INTO saved_tracks (name, id, href, uri, added_at," +
             "release_date, release_year, primary_artist_id, track_json) VALUES (@name, @id, @href, @uri, @added_at," +
             " @release_date, @release_year, @primary_artist_id, @track_json)")
@@ -225,6 +219,49 @@ export default class App {
         // console.log(JSON.stringify(x))
     }
 
+    private async removeLikedSongDupesFromServerAndDb() {
+        // This will return all dupes in my saved tracks, sorted by artist/name and then most-recently-added-first
+        // My theory is that the most recent added one most accurately represents which one would show as "currently"
+        // available browsing in spotify, so is most likely to avoid "re-adding" a dupe
+        const query = `select saved_tracks.primary_artist_id, saved_tracks.name, id, added_at
+                       from saved_tracks
+                                inner join (select name, primary_artist_id, count(*)
+                                            from saved_tracks
+                                            group by 1, 2
+                                            having count(*) > 1) dupes
+                       where saved_tracks.name = dupes.name
+                         and saved_tracks.primary_artist_id = dupes.primary_artist_id
+                       order by 1, 2, 4 desc;`
+
+        const seenTracks = new Set<string>();
+        const idsToRemove = new Set<string>();
+        const dupeResults = this.db.prepare(query).all();
+        dupeResults.forEach((x) => {
+            const artistName = x.primary_artist_id + "--" + x.name
+            // Let's keep the first one we see, as mentioned above
+            if (seenTracks.has(artistName)) {
+                idsToRemove.add(x.id)
+            } else {
+                seenTracks.add(artistName)
+            }
+        })
+        const idArray = Array.from(idsToRemove);
+        if (idArray.length > 0) {
+            console.log(`Removing dupes from library for ${idArray}`)
+        } else {
+            console.log("No duplicates found in library!")
+        }
+
+        this.library.removeFromMySavedTracks(idArray)
+
+        // remove these from saved tracks table
+        const removeQuery = `DELETE
+                             FROM saved_tracks
+                             WHERE id IN (${idArray.map(x => "?").join(",")})`;
+        this.db.prepare(removeQuery).run(...idArray)
+    }
+
+
     private async saveNewPlaylistsToServer(newPlaylistResults: Record<string, NewPlaylistInfo>) {
         for (let playlistName in newPlaylistResults) {
             const playlistInfo = newPlaylistResults[playlistName]
@@ -305,7 +342,7 @@ export default class App {
         }
     }
 
-    private queryForNewPlaylistResults() {
+    private queryForNewPlaylistResults(): Record<string, NewPlaylistInfo> {
         // Come up with new playlist contents based on the following queries!
         // TODO: check how well date sorting works here... maybe convert timestamps before storing...
         // TODO: make this config-driven with a new config class, including like shuffle and such
@@ -357,7 +394,6 @@ export default class App {
             "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
                 " >= 2020",
         }
-        const playlistResults = this.getResultsForPlaylistQueries(playlistQueries)
-        return playlistResults;
+        return this.getResultsForPlaylistQueries(playlistQueries)
     }
 }

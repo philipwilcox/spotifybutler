@@ -24,7 +24,8 @@ export default class SpotifyAuth {
         const state = crypto.randomBytes(12).toString('base64')
         res.setHeader('Set-Cookie', [`${stateKey}=${state}`]);
 
-        const scope = 'user-read-private user-read-email user-top-read user-read-recently-played playlist-read-private user-library-read playlist-modify-private';
+        const scope = 'user-read-private user-read-email user-top-read user-read-recently-played' +
+            ' playlist-read-private user-library-modify user-library-read playlist-modify-private';
         res.writeHead(302, {
             'Location': `https://${this.spotify_accounts_hostname}/authorize?` +
                 new URLSearchParams({

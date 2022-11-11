@@ -126,6 +126,18 @@ export default class Library {
         }
     }
 
+    async removeFromMySavedTracks(idList: string[]) {
+        // NOTE: can't do more than 50 items at a time
+        // https://developer.spotify.com/documentation/web-api/reference/#/operations/remove-tracks-user
+        // This takes spotify ID's like "7ouMYWpwJ422jRcDASZB7P,4VqPOruhp5EdPBeR92t6lQ,2takcwOaAZWiXQijPHIx7B"
+        const endpoint = `/v1/me/tracks`
+        const chunkedIdList = utils.chunkedList(idList, 50)
+        for (const chunk of chunkedIdList) {
+            let response = await this.requestBackend.deleteData(endpoint, chunk)
+            console.log(`deleting ${chunk} for ${endpoint} produced response ${response}`)
+        }
+    }
+
 }
 
 
@@ -208,18 +220,23 @@ class RequestBackend {
         // NOTE: I was trying to avoid external dependencies, but `fetch` is needed here since the built in
         // https request stuff in Node wasn't letting me send a postbody in a DELETE, which is nonstandard but
         // required by the Spotify API...
-        const response = fetch(
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.accessToken}`
+        }
+        const response = await fetch(
             'https://' + this.apiHost + endpoint,
             {
                 method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.accessToken}`
-                },
+                headers: headers,
                 body: JSON.stringify(data)
             }
         )
-        return (await response).json()
+        if (response.status != 200) {
+            const errorString = `Saw a non-200 status code ${response.status} - ${response.json()} for response that so far is ${response} from ${host} ${path}`
+            throw new Error(errorString)
+        }
+        return response.json()
     }
 
     /**
