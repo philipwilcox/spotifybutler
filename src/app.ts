@@ -63,141 +63,14 @@ export default class App {
         const endPlaylistMs = Date.now()
         console.log(`Took ${endPlaylistMs - startPlaylistMs} milliseconds to fetch all playlist tracks`);
 
-
-        // Load all this into db
         this.loadTracksAndPlaylistsIntoDb(mySavedTracks, myTopTracks, myTopArtists, myPlaylists, tracksForPlaylists);
 
+        // TODO: do some deduplication analysis
 
-        // Come up with new playlist contents based on the following queries!
-        // TODO: check how well date sorting works here... maybe convert timestamps before storing...
-        // TODO: make this config-driven with a new config class, including like shuffle and such
-        const createArtistCountLimitedQuery = (innerQuery, limit) => `SELECT track_json
-                                                                      FROM (SELECT track_json, row_number() OVER win1 AS rn
-                                                                            FROM (${innerQuery}) WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY RANDOM()))
-                                                                      WHERE rn <= ${limit}`
-        const playlistQueries = {
-            "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
-                " 100",
-            "100 Random Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY RANDOM() LIMIT 100",
-            "Collected Discover Weekly 2016 And On - Butler": `
-                SELECT track_json
-                FROM playlist_tracks
-                WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler'
-                UNION
-                SELECT track_json
-                FROM playlist_tracks
-                WHERE playlist_name = 'Discover Weekly'
-                  AND release_year >= ${this.minYearForDiscoverWeekly}
-                  AND id NOT IN
-                      (SELECT id
-                       FROM playlist_tracks
-                       WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler')
-            `,
-            "Liked Tracks, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks", 5),
-            "2005-2024, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks WHERE release_year >= 2005 AND release_year <= 2024", 5),
-            "1985-2004, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks WHERE release_year >= 1985 and release_year <= 2004", 5),
-            // TODO: how to know which artist is number 1 vs number 10, say
-            // "Saved Tracks By My Top 20 Artists - Butler": "",
-            // "Saved Tracks Not By My Top 10 Artists - Butler": "",
-            // "Saved Tracks Not By My Top 25 Artists - Butler": "",
-            "Saved Tracks Not By My Top 50 Artists - Butler": "SELECT track_json FROM saved_tracks WHERE" +
-                " primary_artist_id NOT IN (SELECT id FROM top_artists)",
-            "Saved Tracks Not In My Top 50 Tracks - Butler": "SELECT track_json FROM saved_tracks WHERE" +
-                " id NOT IN (SELECT id FROM top_tracks)",
-            "Pre-1980": "SELECT track_json FROM saved_tracks WHERE release_year < 1980",
-            "1980 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 1990 AND release_year" +
-                " >= 1980",
-            "1990 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2000 AND release_year" +
-                " >= 1990",
-            "2000 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2010 AND release_year" +
-                " >= 2000",
-            "2010 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2020 AND release_year" +
-                " >= 2010",
-            "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
-                " >= 2020",
-        }
-        const playlistResults = this.getResultsForPlaylistQueries(playlistQueries)
+        const newPlaylistResults = this.queryForNewPlaylistResults();
 
-        for (let playlistName in playlistResults) {
-            const playlistInfo = playlistResults[playlistName]
-            let playlistId = playlistInfo.playlistId
-            if (playlistInfo.playlistId == null) {
-                const trackNames = playlistInfo.allTracks.map(x => x.name)
-                const logString = `Created new playlist with name ${playlistName} and the following ${trackNames.length} tracks: ${JSON.stringify(trackNames)}`
-                if (!this.dryRun) {
-                    const newPlaylist = await this.library.createPlaylistWithName(playlistName)
-                    await this.library.addTracksToPlaylist(newPlaylist.id, playlistInfo.allTracks)
-                    playlistId = newPlaylist.id
-                    console.log(logString)
-                } else {
-                    console.log("DRY RUN --- " + logString)
-                }
-            } else {
-                const addedNames = playlistInfo.addedTracks.map(x => x.name)
-                const removedNames = playlistInfo.removedTracks.map(x => x.name)
-                const logString = `For playlist with name ${playlistName} we added the following ${addedNames.length} tracks ${JSON.stringify(addedNames)}
-                   and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)} to give ${playlistInfo.allTracks.length} tracks`
-                if (!this.dryRun) {
-                    const shuffledTracks = utils.shuffle(playlistInfo.allTracks)
-                    await this.library.replaceTracksInPlaylist(playlistInfo.playlistId, shuffledTracks)
-
-                    // TODO: clean up / extract out "in place" modifications in favor of shuffling completely every time
-                    // const changes = []
-                    // if (playlistInfo.addedTracks.length > 0) {
-                    //     changes.push(this.library.addTracksToPlaylist(playlistInfo.playlistId, playlistInfo.addedTracks))
-                    // }
-                    // if (playlistInfo.removedTracks.length > 0) {
-                    //     changes.push(this.library.removeTracksFromPlaylist(playlistInfo.playlistId, playlistInfo.removedTracks))
-                    // }
-                    // await Promise.all(changes)
-                    // TODO: we could optimize this by async-ing these operations outside of this loop
-                    console.log(logString)
-                } else {
-                    console.log("DRY RUN --- " + logString)
-                }
-            }
-
-            // TODO: remove / clean up / extract attempt at "in place" shuffling due to poor speed and results
-            // // TODO: make shuffling a config-driven thing, per-playlist
-            // // In-place-shuffling of every track in every playlist, after adding the new ones
-            // // This will preserve original added-to-playlist timestamp
-            // const newPlaylistMeta = (await this.library.getPlaylistInfo(playlistId))
-            // const newTrackList = (await this.library.getTracksForPlaylist(newPlaylistMeta.tracks.href)).map(x => x.track)
-            // const originalTracksWithIndex = newTrackList.map((x, i) => [x, i]).slice()
-            // const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex.slice())
-            //
-            // const changes = shuffledTracksWithOriginalIndex.map((originalTuple, i) => {
-            //     const originalI = originalTuple[1]
-            //     // "what was in originalI should now be in i"
-            //     return [i, originalI]
-            // })
-            //
-            // const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
-            // // The problem here is that if we use the same, consistent snapshot ID, when we merge the "try to put a new
-            // // track in position 0" + "try to put a new track in position 1", etc, changes, we end up skipping every
-            // // other original track - we put the second one in front of what was the second originally, but that's now
-            // // the 3rd, etc... This seems to be because it's inserting it before the position of something that is then
-            // // moved, vs a specific index.
-            // // If we use no snapshot ID, on the other hand... the same thing is happening for reasons I don't
-            // // understand... maybe a new snapshot isn't being generated quickly enough?
-            // // So let's just try adding each to the front, aka "in front of the original front one"
-            // // But seems like sometimes these merges still resolve funny... :| so we'd rather go backwards to forward,
-            // // synchronously, with no snapshot id... :| This doesn't give us what we want, but it seems more random
-            // // than any other method I've tried to preserve original time-added...
-            // if (!this.dryRun) {
-            //     console.log(logString)
-            //     await asyncPool(1, changes.reverse(), (c) => {
-            //         const oldLocation = c[1]// + i // update this as we move other things to the front of the list...
-            //         // console.log(`Moving for ${c} - track at ${oldLocation} - ${originalTracksWithIndex[oldLocation][0].name} - to the front!`)
-            //         return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, oldLocation, 1, 0)
-            //     })
-            // } else {
-            //     console.log("DRY RUN --- " + logString)
-            // }
-        }
+        await this.saveNewPlaylistsToServer(newPlaylistResults);
+        
         console.log("DONE!")
         // TODO: build an object we can turn into an HTML response...
     }
@@ -350,5 +223,141 @@ export default class App {
         // TODO: only do this on debug
         // let x = this.db.prepare("SELECT playlist_name, count(*) from playlist_tracks group by playlist_name").all();
         // console.log(JSON.stringify(x))
+    }
+
+    private async saveNewPlaylistsToServer(newPlaylistResults: Record<string, NewPlaylistInfo>) {
+        for (let playlistName in newPlaylistResults) {
+            const playlistInfo = newPlaylistResults[playlistName]
+            let playlistId = playlistInfo.playlistId
+            if (playlistInfo.playlistId == null) {
+                const trackNames = playlistInfo.allTracks.map(x => x.name)
+                const logString = `Created new playlist with name ${playlistName} and the following ${trackNames.length} tracks: ${JSON.stringify(trackNames)}`
+                if (!this.dryRun) {
+                    const newPlaylist = await this.library.createPlaylistWithName(playlistName)
+                    await this.library.addTracksToPlaylist(newPlaylist.id, playlistInfo.allTracks)
+                    playlistId = newPlaylist.id
+                    console.log(logString)
+                } else {
+                    console.log("DRY RUN --- " + logString)
+                }
+            } else {
+                const addedNames = playlistInfo.addedTracks.map(x => x.name)
+                const removedNames = playlistInfo.removedTracks.map(x => x.name)
+                const logString = `For playlist with name ${playlistName} we added the following ${addedNames.length} tracks ${JSON.stringify(addedNames)}
+                   and removed the following ${removedNames.length}  tracks ${JSON.stringify(removedNames)} to give ${playlistInfo.allTracks.length} tracks`
+                if (!this.dryRun) {
+                    const shuffledTracks = utils.shuffle(playlistInfo.allTracks)
+                    await this.library.replaceTracksInPlaylist(playlistInfo.playlistId, shuffledTracks)
+
+                    // TODO: clean up / extract out "in place" modifications in favor of shuffling completely every time
+                    // const changes = []
+                    // if (playlistInfo.addedTracks.length > 0) {
+                    //     changes.push(this.library.addTracksToPlaylist(playlistInfo.playlistId, playlistInfo.addedTracks))
+                    // }
+                    // if (playlistInfo.removedTracks.length > 0) {
+                    //     changes.push(this.library.removeTracksFromPlaylist(playlistInfo.playlistId, playlistInfo.removedTracks))
+                    // }
+                    // await Promise.all(changes)
+                    // TODO: we could optimize this by async-ing these operations outside of this loop
+                    console.log(logString)
+                } else {
+                    console.log("DRY RUN --- " + logString)
+                }
+            }
+
+            // TODO: remove / clean up / extract attempt at "in place" shuffling due to poor speed and results
+            // // TODO: make shuffling a config-driven thing, per-playlist
+            // // In-place-shuffling of every track in every playlist, after adding the new ones
+            // // This will preserve original added-to-playlist timestamp
+            // const newPlaylistMeta = (await this.library.getPlaylistInfo(playlistId))
+            // const newTrackList = (await this.library.getTracksForPlaylist(newPlaylistMeta.tracks.href)).map(x => x.track)
+            // const originalTracksWithIndex = newTrackList.map((x, i) => [x, i]).slice()
+            // const shuffledTracksWithOriginalIndex = utils.shuffle(originalTracksWithIndex.slice())
+            //
+            // const changes = shuffledTracksWithOriginalIndex.map((originalTuple, i) => {
+            //     const originalI = originalTuple[1]
+            //     // "what was in originalI should now be in i"
+            //     return [i, originalI]
+            // })
+            //
+            // const logString = `For playlist with name ${playlistName} we are shuffling the tracks in-place`
+            // // The problem here is that if we use the same, consistent snapshot ID, when we merge the "try to put a new
+            // // track in position 0" + "try to put a new track in position 1", etc, changes, we end up skipping every
+            // // other original track - we put the second one in front of what was the second originally, but that's now
+            // // the 3rd, etc... This seems to be because it's inserting it before the position of something that is then
+            // // moved, vs a specific index.
+            // // If we use no snapshot ID, on the other hand... the same thing is happening for reasons I don't
+            // // understand... maybe a new snapshot isn't being generated quickly enough?
+            // // So let's just try adding each to the front, aka "in front of the original front one"
+            // // But seems like sometimes these merges still resolve funny... :| so we'd rather go backwards to forward,
+            // // synchronously, with no snapshot id... :| This doesn't give us what we want, but it seems more random
+            // // than any other method I've tried to preserve original time-added...
+            // if (!this.dryRun) {
+            //     console.log(logString)
+            //     await asyncPool(1, changes.reverse(), (c) => {
+            //         const oldLocation = c[1]// + i // update this as we move other things to the front of the list...
+            //         // console.log(`Moving for ${c} - track at ${oldLocation} - ${originalTracksWithIndex[oldLocation][0].name} - to the front!`)
+            //         return this.library.reorderTracksInPlaylist(playlistInfo.playlistId, oldLocation, 1, 0)
+            //     })
+            // } else {
+            //     console.log("DRY RUN --- " + logString)
+            // }
+        }
+    }
+
+    private queryForNewPlaylistResults() {
+        // Come up with new playlist contents based on the following queries!
+        // TODO: check how well date sorting works here... maybe convert timestamps before storing...
+        // TODO: make this config-driven with a new config class, including like shuffle and such
+        const createArtistCountLimitedQuery = (innerQuery, limit) => `SELECT track_json
+                                                                      FROM (SELECT track_json, row_number() OVER win1 AS rn
+                                                                            FROM (${innerQuery}) WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY RANDOM()))
+                                                                      WHERE rn <= ${limit}`
+        const playlistQueries = {
+            "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
+                " 100",
+            "100 Random Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY RANDOM() LIMIT 100",
+            "Collected Discover Weekly 2016 And On - Butler": `
+                SELECT track_json
+                FROM playlist_tracks
+                WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler'
+                UNION
+                SELECT track_json
+                FROM playlist_tracks
+                WHERE playlist_name = 'Discover Weekly'
+                  AND release_year >= ${this.minYearForDiscoverWeekly}
+                  AND id NOT IN
+                      (SELECT id
+                       FROM playlist_tracks
+                       WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler')
+            `,
+            "Liked Tracks, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks", 5),
+            "2005-2024, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks WHERE release_year >= 2005 AND release_year <= 2024", 5),
+            "1985-2004, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks WHERE release_year >= 1985 and release_year <= 2004", 5),
+            // TODO: how to know which artist is number 1 vs number 10, say
+            // "Saved Tracks By My Top 20 Artists - Butler": "",
+            // "Saved Tracks Not By My Top 10 Artists - Butler": "",
+            // "Saved Tracks Not By My Top 25 Artists - Butler": "",
+            "Saved Tracks Not By My Top 50 Artists - Butler": "SELECT track_json FROM saved_tracks WHERE" +
+                " primary_artist_id NOT IN (SELECT id FROM top_artists)",
+            "Saved Tracks Not In My Top 50 Tracks - Butler": "SELECT track_json FROM saved_tracks WHERE" +
+                " id NOT IN (SELECT id FROM top_tracks)",
+            "Pre-1980": "SELECT track_json FROM saved_tracks WHERE release_year < 1980",
+            "1980 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 1990 AND release_year" +
+                " >= 1980",
+            "1990 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2000 AND release_year" +
+                " >= 1990",
+            "2000 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2010 AND release_year" +
+                " >= 2000",
+            "2010 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2020 AND release_year" +
+                " >= 2010",
+            "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
+                " >= 2020",
+        }
+        const playlistResults = this.getResultsForPlaylistQueries(playlistQueries)
+        return playlistResults;
     }
 }
