@@ -270,8 +270,9 @@ export default class App {
                 const trackNames = playlistInfo.allTracks.map(x => x.name)
                 const logString = `Created new playlist with name ${playlistName} and the following ${trackNames.length} tracks: ${JSON.stringify(trackNames)}`
                 if (!this.dryRun) {
+                    const shuffledTracks = utils.shuffle(playlistInfo.allTracks)
                     const newPlaylist = await this.library.createPlaylistWithName(playlistName)
-                    await this.library.addTracksToPlaylist(newPlaylist.id, playlistInfo.allTracks)
+                    await this.library.addTracksToPlaylist(newPlaylist.id, shuffledTracks)
                     playlistId = newPlaylist.id
                     console.log(logString)
                 } else {
