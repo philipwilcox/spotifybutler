@@ -396,7 +396,7 @@ export default class App {
             "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
                 " >= 2020",
             "Last 5 Years, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
-                " FROM saved_tracks WHERE release_year >= (strftime('%Y', 'now') - 10)", 5),
+                " FROM saved_tracks WHERE release_year >= (strftime('%Y', 'now') - 5)", 5),
         }
         return this.getResultsForPlaylistQueries(playlistQueries)
     }
