@@ -233,7 +233,7 @@ class RequestBackend {
             }
         )
         if (response.status != 200) {
-            const errorString = `Saw a non-200 status code ${response.status} - ${response.json()} for response that so far is ${response} from ${host} ${path}`
+            const errorString = `Saw a non-200 status code ${response.status} - ${response.json()} for response that so far is ${response} from ${this.apiHost} ${endpoint}`
             throw new Error(errorString)
         }
         return response.json()

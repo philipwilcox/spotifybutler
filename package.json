@@ -6,13 +6,17 @@
   "type": "module",
   "dependencies": {
     "@types/better-sqlite3": "^7.5.0",
-    "@types/node": "^17.0.21",
     "better-sqlite3": "^7.5.0",
     "cerialize": "^0.1.18",
     "node-fetch": "^3.2.10",
     "tiny-async-pool": "^1.2.0"
   },
   "scripts": {
-    "start": "node server.js"
+    "build": "npx tsc --project .  --removeComments true",
+    "start": "npm run build && node src/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.11",
+    "typescript": "^5.0.3"
   }
 }
