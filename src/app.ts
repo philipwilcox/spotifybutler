@@ -47,9 +47,12 @@ export default class App {
         const tracksForPlaylists: Record<string, PlaylistTrack[]> = {}
         // Parallel fetch at level two cuts this from like 40 seconds to 20 for my playlists as of Mar 2022, but
         // unfortunately higher hits a rate limit sometimes.
-        await asyncPool(2, myPlaylists, (p: Playlist) => {
+
+        // TODO: if we can't go higher parallelism reliably, what's even the point?
+        await this.asyncPoolAll(2, myPlaylists, (p: Playlist) => {
             console.debug(`Will try to fetch ${p.tracks.total} tracks for ${p.name} from ${p.tracks.href}`)
             // TODO: wrap console in a proper level-having logger...
+            // TODO: add retries for these
             return this.library.getTracksForPlaylist(p.tracks.href).then(x => {
                 tracksForPlaylists[p.name] = x
                 console.info(`Found ${x.length} tracks for playlist ${p.name}`)
@@ -73,6 +76,15 @@ export default class App {
 
         console.log("DONE!")
         // TODO: build an object we can turn into an HTML response...
+    }
+
+    // Wrapper from migration instructions from v1 to v2 https://www.npmjs.com/package/tiny-async-pool?activeTab=code
+    async asyncPoolAll(...args) {
+        const results = [];
+        for await (const result of asyncPool(...args)) {
+            results.push(result);
+        }
+        return results;
     }
 
     getResultsForPlaylistQueries(playlistQueries: Record<string, string>): Record<string, NewPlaylistInfo> {
@@ -349,7 +361,8 @@ export default class App {
         // TODO: make this config-driven with a new config class, including like shuffle and such
         const createArtistCountLimitedQuery = (innerQuery, limit) => `SELECT track_json
                                                                       FROM (SELECT track_json, row_number() OVER win1 AS rn
-                                                                            FROM (${innerQuery}) WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY RANDOM()))
+                                                                            FROM (${innerQuery})
+                                                                            WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY RANDOM()))
                                                                       WHERE rn <= ${limit}`
         const playlistQueries = {
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
