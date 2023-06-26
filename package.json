@@ -9,7 +9,7 @@
     "better-sqlite3": "^7.5.0",
     "cerialize": "^0.1.18",
     "node-fetch": "^3.2.10",
-    "tiny-async-pool": "^1.2.0"
+    "tiny-async-pool": "^2.1.0"
   },
   "scripts": {
     "build": "npx tsc --project .  --removeComments true",
