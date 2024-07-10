@@ -382,13 +382,13 @@ export default class App {
                        FROM playlist_tracks
                        WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler')
             `,
-            "Liked Tracks, Eight Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
+            "Liked Tracks, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
                 " FROM" +
-                " saved_tracks", 8),
-            "2005-2024, Eight Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks WHERE release_year >= 2005 AND release_year <= 2024", 8),
-            "1985-2004, Eight Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks WHERE release_year >= 1985 and release_year <= 2004", 8),
+                " saved_tracks", 12),
+            "2005-2024, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks WHERE release_year >= 2005 AND release_year <= 2024", 12),
+            "1985-2004, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                " saved_tracks WHERE release_year >= 1985 and release_year <= 2004", 12),
             // TODO: how to know which artist is number 1 vs number 10, say
             // "Saved Tracks By My Top 20 Artists - Butler": "",
             // "Saved Tracks Not By My Top 10 Artists - Butler": "",
@@ -408,8 +408,8 @@ export default class App {
                 " >= 2010",
             "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
                 " >= 2020",
-            "Last 5 Years, Five Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
-                " FROM saved_tracks WHERE release_year >= (strftime('%Y', 'now') - 5)", 5),
+            "Last 5 Years, Eight Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
+                " FROM saved_tracks WHERE release_year >= (strftime('%Y', 'now') - 5)", 8),
         }
         return this.getResultsForPlaylistQueries(playlistQueries)
     }
