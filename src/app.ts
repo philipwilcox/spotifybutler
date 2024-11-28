@@ -48,19 +48,25 @@ export default class App {
         // Parallel fetch at level two cuts this from like 40 seconds to 20 for my playlists as of Mar 2022, but
         // unfortunately higher hits a rate limit sometimes.
 
+        console.debug(`Playlist list is ${myPlaylists}`)
         // TODO: if we can't go higher parallelism reliably, what's even the point?
         await this.asyncPoolAll(2, myPlaylists, (p: Playlist) => {
-            console.debug(`Will try to fetch ${p.tracks.total} tracks for ${p.name} from ${p.tracks.href}`)
-            // TODO: wrap console in a proper level-having logger...
-            // TODO: add retries for these
-            return this.library.getTracksForPlaylist(p.tracks.href).then(x => {
-                tracksForPlaylists[p.name] = x
-                console.info(`Found ${x.length} tracks for playlist ${p.name}`)
-                // For some reason this is breaking on my shared duo playlist, it's expecting 0 tracks...
-                // if (x.length != p.tracks.total) {
-                //     throw new Error(`Expected ${p.tracks.total} tracks for ${p.name}, got ${x.length}`)
-                // }
-            })
+            // console.debug(`Playlist is ${p}`)
+            if (p != null) {
+                console.debug(`Will try to fetch ${p.tracks.total} tracks for ${p.name} from ${p.tracks.href}`)
+                // TODO: wrap console in a proper level-having logger...
+                // TODO: add retries for these
+                return this.library.getTracksForPlaylist(p.tracks.href).then(x => {
+                    tracksForPlaylists[p.name] = x
+                    console.info(`Found ${x.length} tracks for playlist ${p.name}`)
+                    // For some reason this is breaking on my shared duo playlist, it's expecting 0 tracks...
+                    // if (x.length != p.tracks.total) {
+                    //     throw new Error(`Expected ${p.tracks.total} tracks for ${p.name}, got ${x.length}`)
+                    // }
+                })
+            } else {
+                console.debug(`Playlist was null - ${p}`)
+            }
         })
 
         const endPlaylistMs = Date.now()
@@ -175,9 +181,13 @@ export default class App {
         const topArtistQuery = this.db.prepare("INSERT INTO top_artists (name, id, href, uri) " +
             "VALUES (@name, @id, @href, @uri)")
         const insertManyTopArtist = this.db.transaction((tracks) => {
-            for (const track of tracks) topArtistQuery.run(track);
+            for (const track of tracks) {
+                if (track != null) {
+                    topArtistQuery.run(track);
+                }
+            }
         })
-        insertManyTopArtist(topArtists.map(x => {
+        insertManyTopArtist(topArtists.filter(x => x != null).map(x => {
             return {
                 name: x.name,
                 id: x.id,
@@ -191,7 +201,7 @@ export default class App {
         const insertManyPlaylist = this.db.transaction((tracks) => {
             for (const track of tracks) playlistQuery.run(track);
         })
-        insertManyPlaylist(playlists.map(x => {
+        insertManyPlaylist(playlists.filter(x => x != null).map(x => {
             return {
                 name: x.name,
                 id: x.id,
@@ -225,6 +235,8 @@ export default class App {
                 }
             }))
         }
+
+        // TODO pmw: add more debug logging to try to see what's coming back null now
 
         // TODO: only do this on debug
         // let x = this.db.prepare("SELECT playlist_name, count(*) from playlist_tracks group by playlist_name").all();

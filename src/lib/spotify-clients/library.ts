@@ -36,7 +36,9 @@ export default class Library {
 
     async getMyPlaylists(): Promise<Playlist[]> {
         return this.requestBackend.getAllResults('/v1/me/playlists').then(
-            items => Deserialize(items, Playlist)
+            items => {
+                return Deserialize(items, Playlist)
+            }
         )
     }
 
