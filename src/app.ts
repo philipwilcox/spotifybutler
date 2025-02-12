@@ -259,19 +259,22 @@ export default class App {
 
         const seenTracks = new Set<string>();
         const idsToRemove = new Set<string>();
+        const namesToRemove = new Set<string>();
         const dupeResults = this.db.prepare(query).all();
         dupeResults.forEach((x) => {
             const artistName = x.primary_artist_id + "--" + x.name
             // Let's keep the first one we see, as mentioned above
             if (seenTracks.has(artistName)) {
                 idsToRemove.add(x.id)
+                namesToRemove.add(artistName)
             } else {
                 seenTracks.add(artistName)
             }
         })
         const idArray = Array.from(idsToRemove);
+        const namesToRemoveArray = Array.from(namesToRemove)
         if (idArray.length > 0) {
-            console.log(`Removing dupes from library for ${idArray}`)
+            console.log(`Removing dupes from library for ${idArray} - ${namesToRemoveArray}`)
         } else {
             console.log("No duplicates found in library!")
         }

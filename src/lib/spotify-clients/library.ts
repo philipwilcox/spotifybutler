@@ -219,15 +219,17 @@ class RequestBackend {
      * DELETEs a JSON payload to a Spotify API endpoint.
      */
     async deleteData(endpoint, data) {
+        console.log(`will make delete request ${endpoint} - data ${data}`)
         // NOTE: I was trying to avoid external dependencies, but `fetch` is needed here since the built in
         // https request stuff in Node wasn't letting me send a postbody in a DELETE, which is nonstandard but
         // required by the Spotify API...
+        // TODO pmw: looks like this no longer needs a POSTBODY vs url params? https://developer.spotify.com/documentation/web-api/reference/remove-tracks-user
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${this.accessToken}`
         }
         const response = await fetch(
-            'https://' + this.apiHost + endpoint,
+            'https://' + this.apiHost + endpoint + `?ids=${data}`,
             {
                 method: 'DELETE',
                 headers: headers,
@@ -235,7 +237,7 @@ class RequestBackend {
             }
         )
         if (response.status != 200) {
-            const errorString = `Saw a non-200 status code ${response.status} - ${response.json()} for response that so far is ${response} from ${this.apiHost} ${endpoint}`
+            const errorString = `Saw a non-200 status code ${response.status} - ${await response.text()} for response from DELETE ${this.apiHost} ${endpoint} ${data}`
             throw new Error(errorString)
         }
         return response.json()
