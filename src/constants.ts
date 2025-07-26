@@ -12,7 +12,7 @@ export default {
     },
     SERVER: {
         PORT: 8888,
-        HOSTNAME: "127.0.0.1"
+        HOSTNAME: "0.0.0.0"
     },
     SQLITE: {
         DB_FILE: ":memory:"

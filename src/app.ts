@@ -24,6 +24,7 @@ export default class App {
     }
 
     async runButler() {
+        console.log("Fetching from spotify API")
         // TODO: another way of doing the typing for these would be using "@types/spotify-api"
         const startInitialMs = Date.now()
         const [

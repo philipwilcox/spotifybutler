@@ -34,3 +34,4 @@ src/secrets.json
 src/secrets.js
 *.js
 *.js.map
+deploy/secrets.docker.*

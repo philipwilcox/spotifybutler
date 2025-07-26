@@ -63,9 +63,13 @@ server.listen(constants.SERVER.PORT, constants.SERVER.HOSTNAME, () => {
 });
 
 async function buildResponse(accessToken: string, res: ServerResponse) {
+    console.log("starting to build response")
     const library = new Library(constants.SPOTIFY.SPOTIFY_API_HOSTNAME, constants.SPOTIFY.PAGED_ITEM_FETCH_LIMIT, accessToken);
+    console.log("about to create database")
     const db = createDatabase();
+    console.log("created database")
     const app = new App(library, db, constants.APP.MIN_YEAR_FOR_DISCOVER_WEEKLY, constants.APP.DRY_RUN)
+    console.log("built databases/created app");
     // Once we're here, the main logic begins!
     const stringResult = await app.runButler();
     res.statusCode = 200

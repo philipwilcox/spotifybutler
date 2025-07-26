@@ -18,25 +18,35 @@ export default class Library {
     async getMySavedTracks(): Promise<LibraryTrack[]> {
         // TODO: move the type awareness into a templated generic requestBackend method?
         return this.requestBackend.getAllResults('/v1/me/tracks').then(
-            items => Deserialize(items, LibraryTrack)
+            items => {
+                console.log("got library tracks");
+                return Deserialize(items, LibraryTrack)
+            }
         )
     }
 
     async getMyTopTracks(): Promise<Track[]> {
         return this.requestBackend.getAllResults('/v1/me/top/tracks').then(
-            items => Deserialize(items, Track)
+            items => {
+                console.log("got top tracks");
+                return Deserialize(items, Track)
+            }
         )
     }
 
     async getMyTopArtists(): Promise<Artist[]> {
         return this.requestBackend.getAllResults('/v1/me/top/artists').then(
-            items => Deserialize(items, Artist)
+            items => {
+                console.log("got top artists");
+                return Deserialize(items, Artist)
+            }
         )
     }
 
     async getMyPlaylists(): Promise<Playlist[]> {
         return this.requestBackend.getAllResults('/v1/me/playlists').then(
             items => {
+                console.log("got playlists");
                 return Deserialize(items, Playlist)
             }
         )
