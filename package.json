@@ -14,7 +14,7 @@
   "scripts": {
     "build": "npx tsc --project .  --removeComments true",
     "start": "npm run build && node src/server.js",
-    "build-image": "docker build -t spotify-butler:0.1 .",
+    "build-image": "docker buildx build --platform=linux/amd64  -t spotify-butler:0.1 .",
     "publish-image": "docker image tag spotify-butler:0.1 192.168.1.201:5000/phil/spotify-butler:latest && docker image push 192.168.1.201:5000/phil/spotify-butler:latest"
   },
   "devDependencies": {
