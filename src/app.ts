@@ -375,11 +375,19 @@ export default class App {
         // Come up with new playlist contents based on the following queries!
         // TODO: check how well date sorting works here... maybe convert timestamps before storing...
         // TODO: make this config-driven with a new config class, including like shuffle and such
+        // TODO: make this able to delete butler-generated ones we no longer generate,
+        //    for instance, to clean up when year rolls over
         const createArtistCountLimitedQuery = (innerQuery, limit) => `SELECT track_json
                                                                       FROM (SELECT track_json, row_number() OVER win1 AS rn
                                                                             FROM (${innerQuery})
                                                                             WINDOW win1 AS (PARTITION BY primary_artist_id ORDER BY RANDOM()))
                                                                       WHERE rn <= ${limit}`
+        let currentDate = new Date();
+        let currentYear = currentDate.getFullYear();
+        let yearsPlaylistLimitPerArtist = 12
+        let yearsPlaylistLastTwentyYearsName: string = `${currentYear - 19}-${currentYear}, ${yearsPlaylistLimitPerArtist} Per Artist`
+        let yearsPlaylistFortyToTwentyOneYearsName: string = `${currentYear - 39}-${currentYear - 20}, ${yearsPlaylistLimitPerArtist} Per Artist`
+        let yearsPlaylistMoreThanFortyYearsName: string = `Pre-${currentYear - 39}, ${yearsPlaylistLimitPerArtist} Per Artist`
         const playlistQueries = {
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
                 " 100",
@@ -401,10 +409,12 @@ export default class App {
             "Liked Tracks, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
                 " FROM" +
                 " saved_tracks", 12),
-            "2005-2024, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks WHERE release_year >= 2005 AND release_year <= 2024", 12),
-            "1985-2004, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
-                " saved_tracks WHERE release_year >= 1985 and release_year <= 2004", 12),
+            [yearsPlaylistLastTwentyYearsName]: createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                ` saved_tracks WHERE release_year >= ${currentYear - 19} AND release_year <= ${currentYear}`, yearsPlaylistLimitPerArtist),
+            [yearsPlaylistFortyToTwentyOneYearsName]: createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                ` saved_tracks WHERE release_year >= ${currentYear - 39} AND release_year <= ${currentYear - 20}`, yearsPlaylistLimitPerArtist),
+            [yearsPlaylistMoreThanFortyYearsName]: createArtistCountLimitedQuery("SELECT track_json, primary_artist_id FROM" +
+                ` saved_tracks WHERE release_year <= ${currentYear - 40}`, yearsPlaylistLimitPerArtist),
             // TODO: how to know which artist is number 1 vs number 10, say
             // "Saved Tracks By My Top 20 Artists - Butler": "",
             // "Saved Tracks Not By My Top 10 Artists - Butler": "",
@@ -413,7 +423,6 @@ export default class App {
                 " primary_artist_id NOT IN (SELECT id FROM top_artists)",
             "Saved Tracks Not In My Top 50 Tracks - Butler": "SELECT track_json FROM saved_tracks WHERE" +
                 " id NOT IN (SELECT id FROM top_tracks)",
-            "Pre-1980": "SELECT track_json FROM saved_tracks WHERE release_year < 1980",
             "1980 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 1990 AND release_year" +
                 " >= 1980",
             "1990 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2000 AND release_year" +
@@ -425,7 +434,7 @@ export default class App {
             "2020 - Butler Created": "SELECT track_json FROM saved_tracks WHERE release_year < 2030 AND release_year" +
                 " >= 2020",
             "Last 5 Years, Eight Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
-                " FROM saved_tracks WHERE release_year >= (strftime('%Y', 'now') - 5)", 8),
+                ` FROM saved_tracks WHERE release_year >= ${currentYear - 4}`, 8),
         }
         return this.getResultsForPlaylistQueries(playlistQueries)
     }
