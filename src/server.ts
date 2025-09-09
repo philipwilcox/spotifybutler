@@ -5,6 +5,7 @@ import secrets from './secrets.js'
 import SpotifyAuth from './lib/spotify-clients/spotify-auth.js'
 import App from "./app.js";
 import Database from 'better-sqlite3';
+import {execSync} from "node:child_process";
 
 
 /***
@@ -60,6 +61,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(constants.SERVER.PORT, constants.SERVER.HOSTNAME, () => {
     console.log(`Server running at http://${constants.SERVER.HOSTNAME}:${constants.SERVER.PORT}/`);
     console.log(`Initialized with client ID ${secrets.client_id}`)
+    console.log(`Running from sha ${execSync('git rev-parse HEAD').toString().trim()}`)
 });
 
 async function buildResponse(accessToken: string, res: ServerResponse) {
