@@ -2,8 +2,6 @@ ARG NODE_VERSION=16.14.0
 
 FROM node:${NODE_VERSION}-bullseye
 
-ENV NODE_ENV=production
-
 RUN apt-get install libsqlite3-dev
 
 WORKDIR /usr/spotify-butler
