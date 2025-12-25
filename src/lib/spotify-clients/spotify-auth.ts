@@ -19,9 +19,15 @@ export default class SpotifyAuth {
      * This will redirect the user over to Spotify to log in and grant permission (or redirect back to
      * our callback page here if permission is already granted).
      */
-    initialAuthRequest(res: ServerResponse) {
+    initialAuthRequest(res: ServerResponse, refresh: boolean = false) {
+        console.log(`Using redirect_uri: ${this.redirect_uri}`)
         const stateKey = 'spotify_auth_state'
-        const state = crypto.randomBytes(12).toString('base64')
+        const nonce = crypto.randomBytes(12).toString('base64')
+        const stateObj = {
+            nonce: nonce,
+            refresh: refresh
+        }
+        const state = Buffer.from(JSON.stringify(stateObj)).toString('base64')
         res.setHeader('Set-Cookie', [`${stateKey}=${state}`]);
 
         const scope = 'user-read-private user-read-email user-top-read user-read-recently-played' +
@@ -55,12 +61,26 @@ export default class SpotifyAuth {
         const callbackParams = new URLSearchParams(callbackQuerystring)
         // TODO: how to put typing on this internal stuff?
         const callbackCode = callbackParams.get("code")
+        const callbackState = callbackParams.get("state")
+
+        let refresh = false
+        if (callbackState) {
+            try {
+                const stateObj = JSON.parse(Buffer.from(callbackState, 'base64').toString('utf-8'))
+                refresh = stateObj.refresh || false
+            } catch (e) {
+                console.error("Failed to parse state from callback", e)
+            }
+        }
         // We don't check the callback state value because we're just running a local server-side script that calls back to localhost
 
         const tokenPayload = await this.getAccessAndRefreshTokens(callbackCode)
         // TODO: need to know type of return JSON for this...
-        // @ts-ignore
-        return tokenPayload.access_token
+        return {
+            // @ts-ignore
+            accessToken: tokenPayload.access_token,
+            refresh: refresh
+        }
     }
 
 
@@ -120,6 +140,3 @@ export default class SpotifyAuth {
         })
     }
 }
-
-
-

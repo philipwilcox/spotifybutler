@@ -15,6 +15,6 @@ export default {
         HOSTNAME: "0.0.0.0"
     },
     SQLITE: {
-        DB_FILE: ":memory:"
+        DB_FILE: "spotify.db"
     }
 }

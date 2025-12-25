@@ -39,17 +39,20 @@ const server = http.createServer(async (req, res) => {
             if (secrets.access_token && !newLogin) {
                 console.log(`Using stored access token ${secrets.access_token}`)
                 // Once we're here, the application begins!
-                buildResponse(secrets.access_token, res)
+                // Defaults to false for refresh since we're using a stored token
+                buildResponse(secrets.access_token, false, res)
             } else {
-                const accessToken = await spotifyAuth.getAccessTokenFromCallback(req, res);
+                const { accessToken, refresh } = await spotifyAuth.getAccessTokenFromCallback(req, res);
                 console.log(`Got access token: ${accessToken}`)
                 // Once we're here, the application begins!
-                buildResponse(accessToken, res)
+                buildResponse(accessToken, refresh, res)
             }
             break;
         case '/start':
             console.log("Starting auth flow!")
-            spotifyAuth.initialAuthRequest(res)
+            const queryParams = new URLSearchParams(req.url.split('?')[1]);
+            const refresh = queryParams.get("refresh") === "true";
+            spotifyAuth.initialAuthRequest(res, refresh)
             newLogin = true
             break;
         default:
@@ -64,7 +67,7 @@ server.listen(constants.SERVER.PORT, constants.SERVER.HOSTNAME, () => {
     console.log(`Running from sha ${execSync('git rev-parse HEAD').toString().trim()}`)
 });
 
-async function buildResponse(accessToken: string, res: ServerResponse) {
+async function buildResponse(accessToken: string, refresh: boolean, res: ServerResponse) {
     console.log("starting to build response")
     const library = new Library(constants.SPOTIFY.SPOTIFY_API_HOSTNAME, constants.SPOTIFY.PAGED_ITEM_FETCH_LIMIT, accessToken);
     console.log("about to create database")
@@ -72,8 +75,15 @@ async function buildResponse(accessToken: string, res: ServerResponse) {
     console.log("created database")
     const app = new App(library, db, constants.APP.MIN_YEAR_FOR_DISCOVER_WEEKLY, constants.APP.DRY_RUN)
     console.log("built databases/created app");
+
+    // Check if DB is empty
+    const syncStatus = db.prepare("SELECT count(*) as count FROM sync_status").get();
+    const hasSyncStatusRow = syncStatus && syncStatus.count > 0;
+    const shouldFetch = refresh || !hasSyncStatusRow;
+    console.log(`Will fetch data? ${shouldFetch} (refresh=${refresh}, hasSyncStatusRow=${hasSyncStatusRow})`)
+
     // Once we're here, the main logic begins!
-    const stringResult = await app.runButler();
+    const stringResult = await app.runButler(shouldFetch);
     res.statusCode = 200
     res.setHeader("Content-Type", "text/plain")
     res.end(stringResult)
@@ -84,13 +94,14 @@ function createDatabase() {
     const db = new Database(constants.SQLITE.DB_FILE);
 
     // TODO: add a distinct constraint on playlist name
-    const tableCreations = ["CREATE TABLE top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)",
-        "CREATE TABLE top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)",
-        "CREATE TABLE saved_tracks (name TEXT, id TEXT, primary_artist_id TEXT, release_date TEXT, release_year" +
+    const tableCreations = ["CREATE TABLE IF NOT EXISTS top_artists (name TEXT, id TEXT, href TEXT, uri TEXT)",
+        "CREATE TABLE IF NOT EXISTS top_tracks (name TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)",
+        "CREATE TABLE IF NOT EXISTS saved_tracks (name TEXT, id TEXT, primary_artist_id TEXT, release_date TEXT, release_year" +
         " NUMERIC, href TEXT, uri TEXT, added_at TEXT, track_json JSON)",
-        "CREATE TABLE playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT, snapshot_id TEXT)",
-        "CREATE TABLE playlist_tracks (playlist_name TEXT, added_at TEXT, release_date TEXT, release_year NUMERIC," +
-        " name TEXT, primary_artist_id TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)"
+        "CREATE TABLE IF NOT EXISTS playlists (name TEXT, id TEXT, href TEXT, uri TEXT, tracks_href TEXT, snapshot_id TEXT)",
+        "CREATE TABLE IF NOT EXISTS playlist_tracks (playlist_name TEXT, added_at TEXT, release_date TEXT, release_year NUMERIC," +
+        " name TEXT, primary_artist_id TEXT, id TEXT, href TEXT, uri TEXT, track_json JSON)",
+        "CREATE TABLE IF NOT EXISTS sync_status (sync_timestamp_millis INTEGER)"
     ]
 
     tableCreations.map(query => db.prepare(query).run())

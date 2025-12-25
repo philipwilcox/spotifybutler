@@ -23,59 +23,67 @@ export default class App {
         this.dryRun = dryRun
     }
 
-    async runButler() {
-        console.log("Fetching from spotify API")
-        // TODO: another way of doing the typing for these would be using "@types/spotify-api"
-        const startInitialMs = Date.now()
-        const [
-            mySavedTracks,
-            myTopTracks,
-            myTopArtists,
-            myPlaylists
-        ] = await Promise.all([
-            this.library.getMySavedTracks(),
-            this.library.getMyTopTracks(),
-            this.library.getMyTopArtists(),
-            this.library.getMyPlaylists()
-        ]);
-        const endInitialMs = Date.now()
+    async runButler(shouldFetch: boolean) {
+        if (shouldFetch) {
+            console.log("Fetching from spotify API")
+            this.clearDatabase()
+            // TODO: another way of doing the typing for these would be using "@types/spotify-api"
+            const startInitialMs = Date.now()
+            const [
+                mySavedTracks,
+                myTopTracks,
+                myTopArtists,
+                myPlaylists
+            ] = await Promise.all([
+                this.library.getMySavedTracks(),
+                this.library.getMyTopTracks(),
+                this.library.getMyTopArtists(),
+                this.library.getMyPlaylists()
+            ]);
+            const endInitialMs = Date.now()
 
-        console.log(`I got ${mySavedTracks.length} saved tracks, ${myTopTracks.length} top tracks, 
+            console.log(`I got ${mySavedTracks.length} saved tracks, ${myTopTracks.length} top tracks, 
             ${myTopArtists.length} top artists, and ${myPlaylists.length} playlists in 
             ${endInitialMs - startInitialMs} milliseconds`)
 
-        const startPlaylistMs = Date.now()
-        const tracksForPlaylists: Record<string, PlaylistTrack[]> = {}
-        // Parallel fetch at level two cuts this from like 40 seconds to 20 for my playlists as of Mar 2022, but
-        // unfortunately higher hits a rate limit sometimes.
+            const startPlaylistMs = Date.now()
+            const tracksForPlaylists: Record<string, PlaylistTrack[]> = {}
+            // Parallel fetch at level two cuts this from like 40 seconds to 20 for my playlists as of Mar 2022, but
+            // unfortunately higher hits a rate limit sometimes.
 
-        console.debug(`Playlist list is ${myPlaylists}`)
-        // TODO: if we can't go higher parallelism reliably, what's even the point?
-        await this.asyncPoolAll(2, myPlaylists, (p: Playlist) => {
-            // console.debug(`Playlist is ${p}`)
-            if (p != null) {
-                console.debug(`Will try to fetch ${p.tracks.total} tracks for ${p.name} from ${p.tracks.href}`)
-                // TODO: wrap console in a proper level-having logger...
-                // TODO: add retries for these
-                return this.library.getTracksForPlaylist(p.tracks.href).then(x => {
-                    tracksForPlaylists[p.name] = x
-                    console.info(`Found ${x.length} tracks for playlist ${p.name}`)
-                    // For some reason this is breaking on my shared duo playlist, it's expecting 0 tracks...
-                    // if (x.length != p.tracks.total) {
-                    //     throw new Error(`Expected ${p.tracks.total} tracks for ${p.name}, got ${x.length}`)
-                    // }
-                })
-            } else {
-                console.debug(`Playlist was null - ${p}`)
-            }
-        })
+            console.debug(`Playlist list is ${myPlaylists.map(p => `${p.name} (${p.tracks.total})`).join(', ')}`)
+            // TODO: if we can't go higher parallelism reliably, what's even the point?
+            await this.asyncPoolAll(2, myPlaylists, (p: Playlist) => {
+                // console.debug(`Playlist is ${p}`)
+                if (p != null) {
+                    console.debug(`Will try to fetch ${p.tracks.total} tracks for ${p.name} from ${p.tracks.href}`)
+                    // TODO: wrap console in a proper level-having logger...
+                    // TODO: add retries for these
+                    return this.library.getTracksForPlaylist(p.tracks.href).then(x => {
+                        tracksForPlaylists[p.name] = x
+                        console.info(`Found ${x.length} tracks for playlist ${p.name}`)
+                        // For some reason this is breaking on my shared duo playlist, it's expecting 0 tracks...
+                        // if (x.length != p.tracks.total) {
+                        //     throw new Error(`Expected ${p.tracks.total} tracks for ${p.name}, got ${x.length}`)
+                        // }
+                    })
+                } else {
+                    console.debug(`Playlist was null - ${p}`)
+                }
+            })
 
-        const endPlaylistMs = Date.now()
-        console.log(`Took ${endPlaylistMs - startPlaylistMs} milliseconds to fetch all playlist tracks`);
+            const endPlaylistMs = Date.now()
+            console.log(`Took ${endPlaylistMs - startPlaylistMs} milliseconds to fetch all playlist tracks`);
 
-        this.loadTracksAndPlaylistsIntoDb(mySavedTracks, myTopTracks, myTopArtists, myPlaylists, tracksForPlaylists);
+            this.loadTracksAndPlaylistsIntoDb(mySavedTracks, myTopTracks, myTopArtists, myPlaylists, tracksForPlaylists);
 
-        await this.removeLikedSongDupesFromServerAndDb(); // TODO: do I always want to run this?
+            await this.removeLikedSongDupesFromServerAndDb(); // TODO: do I always want to run this?
+
+            this.db.prepare("DELETE FROM sync_status").run();
+            this.db.prepare("INSERT INTO sync_status (sync_timestamp_millis) VALUES (?)").run(Date.now());
+        } else {
+            console.log("Skipping data fetch and using existing database...")
+        }
 
         const newPlaylistResults = this.queryForNewPlaylistResults();
 
@@ -83,6 +91,15 @@ export default class App {
 
         console.log("DONE!")
         // TODO: build an object we can turn into an HTML response...
+        return "DONE!"
+    }
+
+    private clearDatabase() {
+        const tables = ["top_artists", "top_tracks", "saved_tracks", "playlists", "playlist_tracks"];
+        tables.forEach(table => {
+            this.db.prepare(`DELETE
+                             FROM ${table}`).run();
+        });
     }
 
     // Wrapper from migration instructions from v1 to v2 https://www.npmjs.com/package/tiny-async-pool?activeTab=code

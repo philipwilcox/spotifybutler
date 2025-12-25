@@ -2,3 +2,4 @@
 .idea
 src/lib/secrets.ts
 node_modules
+spotify.db
