@@ -1,4 +1,4 @@
-import {Track} from "./track";
+import {Track} from "./track.js";
 import {deserialize} from "cerialize";
 
 export class LibraryTrack {

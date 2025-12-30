@@ -1,4 +1,4 @@
-import Library from "./lib/spotify-clients/library";
+import Library from "./lib/spotify-clients/library.js";
 import {LibraryTrack} from "./lib/models/spotify/library-track.js";
 import {Artist} from "./lib/models/spotify/artist.js";
 import {Playlist} from "./lib/models/spotify/playlist.js";
@@ -278,7 +278,7 @@ export default class App {
         const seenTracks = new Set<string>();
         const idsToRemove = new Set<string>();
         const namesToRemove = new Set<string>();
-        const dupeResults = this.db.prepare(query).all();
+        const dupeResults = this.db.prepare(query).all() as { primary_artist_id: string, name: string, id: string }[];
         dupeResults.forEach((x) => {
             const artistName = x.primary_artist_id + "--" + x.name
             // Let's keep the first one we see, as mentioned above

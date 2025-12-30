@@ -4,9 +4,11 @@
   "description": "Basic playlist curation",
   "version": "0.0.2",
   "type": "module",
+  "engines": {
+    "node": "24.12.0"
+  },
   "dependencies": {
-    "@types/better-sqlite3": "^7.5.0",
-    "better-sqlite3": "^7.5.0",
+    "better-sqlite3": "^11.3.0",
     "cerialize": "^0.1.18",
     "node-fetch": "^3.2.10",
     "tiny-async-pool": "^2.1.0"
@@ -18,7 +20,7 @@
     "publish-image": "docker image tag spotify-butler:0.1 192.168.1.201:5000/phil/spotify-butler:latest && docker image push 192.168.1.201:5000/phil/spotify-butler:latest"
   },
   "devDependencies": {
-    "@types/node": "^18.15.11",
-    "typescript": "^5.0.3"
+    "@types/node": "^24.10.4",
+    "typescript": "^5.9.3"
   }
 }

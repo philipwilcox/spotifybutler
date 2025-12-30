@@ -77,8 +77,8 @@ async function buildResponse(accessToken: string, refresh: boolean, res: ServerR
     console.log("built databases/created app");
 
     // Check if DB is empty
-    const syncStatus = db.prepare("SELECT count(*) as count FROM sync_status").get();
-    const hasSyncStatusRow = syncStatus && syncStatus.count > 0;
+    const syncStatus = db.prepare("SELECT count(*) as count FROM sync_status").get() as { count: number } | undefined;
+    const hasSyncStatusRow = (syncStatus?.count ?? 0) > 0;
     const shouldFetch = refresh || !hasSyncStatusRow;
     console.log(`Will fetch data? ${shouldFetch} (refresh=${refresh}, hasSyncStatusRow=${hasSyncStatusRow})`)
 

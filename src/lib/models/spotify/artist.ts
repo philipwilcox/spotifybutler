@@ -1,7 +1,7 @@
 /**
  * This class is based on the artist response from the My Top Artists endpoint query.
  */
-import {ExternalUrls, Image} from "./track";
+import {ExternalUrls, Image} from "./track.js";
 import {deserialize} from "cerialize";
 
 export class Artist {

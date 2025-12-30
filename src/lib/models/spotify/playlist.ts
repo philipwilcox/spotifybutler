@@ -1,4 +1,4 @@
-import {ExternalUrls, Image} from "./track";
+import {ExternalUrls, Image} from "./track.js";
 import {deserialize} from "cerialize";
 import {Followers} from "./artist.js";
 
