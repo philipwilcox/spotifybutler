@@ -16,11 +16,15 @@
   "scripts": {
     "build": "npx tsc --project .  --removeComments true",
     "start": "npm run build && node src/server.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "build-image": "docker buildx build --platform=linux/amd64  -t spotify-butler:0.1 .",
     "publish-image": "docker image tag spotify-butler:0.1 192.168.1.201:5000/phil/spotify-butler:latest && docker image push 192.168.1.201:5000/phil/spotify-butler:latest"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.10.4",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.9.3"
   }
 }
