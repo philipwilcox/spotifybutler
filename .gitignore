@@ -35,5 +35,8 @@ src/secrets.js
 *.js
 *.js.map
 deploy/secrets.docker.*
+kt/raw-captures/
+kt/build/spotify-fixtures/
+*.draft.jsonl
 
 spotify.db

@@ -9,12 +9,15 @@ data class ServiceConfig(
 ) {
     companion object {
         private const val CONFIG_FILE_ENV = "SPOTIFY_BUTLER_CONFIG_FILE"
+        private const val DATABASE_PATH_ENV = "SPOTIFY_BUTLER_DATABASE_PATH"
         private const val DATABASE_PATH_PROPERTY = "spotify.databasePath"
 
         fun load(): ServiceConfig {
             val configFile = configuredFile()
             val properties = configFile?.let(::loadProperties) ?: Properties()
-            val configuredPath = properties.getProperty(DATABASE_PATH_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
+            val configuredPath =
+                System.getenv(DATABASE_PATH_ENV)?.trim()?.takeIf(String::isNotEmpty)
+                    ?: properties.getProperty(DATABASE_PATH_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
             return ServiceConfig(
                 databasePath =
                     configuredPath?.let { path -> resolveConfiguredPath(path, configFile) } ?: defaultDatabasePath(),

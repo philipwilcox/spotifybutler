@@ -1,0 +1,11 @@
+complexity:
+  LongMethod:
+    allowedLines: 120
+  TooManyFunctions:
+    allowedFunctionsPerFile: 22
+
+style:
+  ReturnCount:
+    max: 4
+  MaxLineLength:
+    maxLineLength: 120

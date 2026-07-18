@@ -3,6 +3,11 @@
 These instructions apply to the Kotlin service under `kt/`. It is an independent Gradle application and should remain
 buildable without relying on the Node service.
 
+## General modifications
+
+- DO NOT run lint and unit tests on every step and modification. I like to sequence smaller changes then just run those
+  manually before commit.
+
 ## Build and quality checks
 
 - Use the Gradle wrapper from this directory: `./gradlew <task>`.
@@ -36,6 +41,8 @@ buildable without relying on the Node service.
 - Keep business intent visible at the top level of module files. A top-level function should make the important what/why
   decisions readable from its name, parameters, and control flow.
 - Please minimize imports of third-party dependencies without prompting the user.
+- Use `kotlin-logging` for application and support-tool logging instead of direct `println` calls. Keep log formatting
+  and timestamps centralized in the SLF4J configuration.
 - Avoid deeply nested helper functions that contain business-logic decisions. Extract helpers for discrete mechanical
   steps—such as parsing, encoding, request construction, batching, or mapping—while keeping orchestration and policy
   decisions in the clearer top-level function or service method that owns them.

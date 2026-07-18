@@ -15,14 +15,47 @@ interface SpotifyCacheFetcher {
     fun fetchCache(accessToken: String): SpotifyCacheSnapshot
 }
 
+data class SpotifyHttpResponse(
+    val statusCode: Int,
+    val body: String,
+)
+
+fun interface SpotifyHttpTransport {
+    fun get(
+        uri: URI,
+        accessToken: String,
+    ): SpotifyHttpResponse
+}
+
+private class JdkSpotifyHttpTransport(
+    private val httpClient: HttpClient,
+) : SpotifyHttpTransport {
+    override fun get(
+        uri: URI,
+        accessToken: String,
+    ): SpotifyHttpResponse {
+        val request =
+            HttpRequest
+                .newBuilder(uri)
+                .header("Authorization", "Bearer $accessToken")
+                .timeout(Duration.ofSeconds(20))
+                .GET()
+                .build()
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        return SpotifyHttpResponse(response.statusCode(), response.body())
+    }
+}
+
 class SpotifyApiClient(
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
     private val apiBaseUri: URI = URI("https://api.spotify.com/"),
+    private val transport: SpotifyHttpTransport = JdkSpotifyHttpTransport(httpClient),
 ) : SpotifyCacheFetcher {
     private val logger = KotlinLogging.logger {}
+    private val captureLogger = SpotifyCaptureLogger()
 
     fun getCurrentUser(accessToken: String): SpotifyCurrentUser {
-        val response = getJsonObject(apiUri("/v1/me"), accessToken)
+        val response = getJsonObject(apiUri("/v1/me"), accessToken, pageSequence = 0)
         return parseSpotifyCurrentUser(response)
     }
 
@@ -97,10 +130,12 @@ class SpotifyApiClient(
     ): List<JsonObject> {
         val items = mutableListOf<JsonObject>()
         var page: URI? = firstPageUri(apiUri(path))
+        var pageSequence = 1
         while (page != null) {
-            val response = getJsonObject(page, accessToken)
+            val response = getJsonObject(page, accessToken, pageSequence)
             items += parsePageItems(response, page)
             page = response.optionalString("next")?.takeIf(String::isNotBlank)?.let(::apiUri)
+            pageSequence++
         }
         return items
     }
@@ -108,22 +143,22 @@ class SpotifyApiClient(
     private fun getJsonObject(
         uri: URI,
         accessToken: String,
+        pageSequence: Int,
     ): JsonObject {
-        val request =
-            HttpRequest
-                .newBuilder(uri)
-                .header("Authorization", "Bearer $accessToken")
-                .timeout(Duration.ofSeconds(20))
-                .GET()
-                .build()
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        val response = transport.get(uri, accessToken)
+        require(response.statusCode in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
+            "Spotify API request failed with HTTP ${response.statusCode} for $uri"
+        }
         logger.info {
-            "Spotify API scraped response: method=GET uri=$uri status=${response.statusCode()} body=${response.body()}"
+            "$SPOTIFY_CAPTURE_EVENT_MARKER ${captureLogger.successfulResponse(
+                method = "GET",
+                uri = uri,
+                status = response.statusCode,
+                pageSequence = pageSequence,
+                body = response.body,
+            )}"
         }
-        require(response.statusCode() in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
-            "Spotify API request failed with HTTP ${response.statusCode()} for $uri"
-        }
-        return parseSpotifyResponse(response.body())
+        return parseSpotifyResponse(response.body)
     }
 
     private fun apiUri(pathOrUri: String): URI {

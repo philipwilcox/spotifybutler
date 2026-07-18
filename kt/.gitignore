@@ -5,3 +5,6 @@ build/
 secrets*.properties
 !secrets.properties.example
 spotify.db
+raw-captures/
+build/spotify-fixtures/
+*.draft.jsonl

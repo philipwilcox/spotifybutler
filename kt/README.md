@@ -16,12 +16,56 @@ The loader reads saved tracks, top tracks, top artists, playlists, and the track
 playlist queries or make any Spotify playlist/library modifications. SQLDelight owns the SQLite schema and its named
 cache-load statements.
 
-## Response capture for future tests
+## Capturing and building fixtures
 
-Every successful Spotify API response is logged in full at INFO level with the `Spotify API scraped response` marker.
-These responses contain personal listening data, so capture and sanitize representative pages before committing them as
-fake test fixtures. The disabled cache-load contracts under `src/test/kotlin` name the response families and SQLite
-assertions needed once those fixtures exist.
+The support pipeline is developer-only. It performs only the normal cache reads and never makes Spotify writes. Raw
+logs, draft fixtures, and the captured SQLite database can contain personal listening data; `raw-captures/` and draft
+outputs are ignored by Git and must be reviewed and sanitized before anything is copied into test resources.
+
+1. Start the service with output visible in the terminal and captured to an ignored log. From the repository root:
+
+   ```sh
+   ./kt/gradlew -p kt captureSpotifyRun \
+     -PcaptureLog=raw-captures/spotify-run.log \
+     -PdatabasePath=raw-captures/spotify-run.db
+   ```
+
+   The task prints the resolved log and database paths, then runs the normal service. Visit `/start` (or
+   `/start?refresh=true`) and complete one intentional cache load. Stop the service after the callback finishes.
+
+2. Build an ignored draft from that log and database:
+
+   ```sh
+   ./kt/gradlew -p kt buildSpotifyFixtures \
+     -PcaptureLog=raw-captures/spotify-run.log \
+     -PdatabasePath=raw-captures/spotify-run.db
+   ```
+
+   The task writes one `spotify-run.draft.jsonl` and a concise `.report.txt` beside the log. The draft contains one
+   complete scenario line for the selected capture run. When the log contains multiple runs and no
+   `-PcaptureRunId=...` is supplied, the builder validates, scrubs, and writes all runs through one bounded worker pool,
+   deriving a distinct draft/report filename for each run. Use `-PcaptureRunId=...` to build only one run or to use an
+   explicit output path. Set `-PscrubWorkers=6` to choose the shared scrub worker count; it defaults to the available
+   processor count and must be a positive integer. To keep large drafts small, `-PmaxSavedTracks=N` retains the first
+   N saved tracks plus the final saved-tracks page (default: 10), while `-PmaxTopItems=N` does the same for each
+   `top_*` endpoint (default: 10).
+   `-PmaxPlaylistTracksCalls=N` limits the number of playlist-track endpoints included.
+   `-PmaxPlaylistTracks=N` limits generated `playlist_tracks` rows (default: 100).
+   `-PmaxAvailableMarkets=N` limits each `available_markets` array (default: 5).
+   It consumes only structured `SPOTIFY_CAPTURE_EVENT` lines, validates successful JSON pagination, opens SQLite
+   read-only, and exports all six cache tables through SQLDelight diagnostic queries. If the database path is omitted,
+   it uses the path printed by the service startup line.
+
+3. Treat the draft as personal data. Track IDs and URIs are not secrets, but they can identify a user's library or
+   listening context when combined with playlist names, owner data, timestamps, and raw `track_json`; they can also
+   leak through repository history, reviews, backups, or build artifacts. Replace names, IDs, URIs, owners,
+   descriptions, timestamps, and other identifying fields with synthetic values while preserving response shapes and
+   edge cases. Copy only the sanitized line into `src/test/resources/spotify-fixtures/*.jsonl`.
+
+   The committed fixture directory may contain multiple `.jsonl` files, and each file may contain multiple scenarios,
+   one complete scenario per nonblank line. Run `./kt/gradlew -p kt test` to execute every line through the real
+   Spotify parser and cache service. The scripted client fails on unexpected requests or unused responses and the test
+   compares all six exported tables, including canonical `track_json` and `sync_status`.
 
 ## Linting
 

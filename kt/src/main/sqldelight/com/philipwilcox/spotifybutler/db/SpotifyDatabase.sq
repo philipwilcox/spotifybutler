@@ -1,0 +1,149 @@
+CREATE TABLE top_artists (
+    name TEXT,
+    id TEXT,
+    href TEXT,
+    uri TEXT
+);
+
+CREATE TABLE top_tracks (
+    name TEXT,
+    id TEXT,
+    href TEXT,
+    uri TEXT,
+    track_json TEXT
+);
+
+CREATE TABLE saved_tracks (
+    name TEXT,
+    id TEXT,
+    primary_artist_id TEXT,
+    release_date TEXT,
+    release_year INTEGER,
+    href TEXT,
+    uri TEXT,
+    added_at TEXT,
+    track_json TEXT
+);
+
+CREATE TABLE playlists (
+    name TEXT,
+    id TEXT,
+    href TEXT,
+    uri TEXT,
+    tracks_href TEXT,
+    snapshot_id TEXT
+);
+
+CREATE TABLE playlist_tracks (
+    playlist_name TEXT,
+    added_at TEXT,
+    release_date TEXT,
+    release_year INTEGER,
+    name TEXT,
+    primary_artist_id TEXT,
+    id TEXT,
+    href TEXT,
+    uri TEXT,
+    track_json TEXT
+);
+
+CREATE TABLE sync_status (
+    sync_timestamp_millis INTEGER
+);
+
+syncStatusCount:
+SELECT count(*)
+FROM sync_status;
+
+exportTopArtists:
+SELECT name, id, href, uri
+FROM top_artists
+ORDER BY name, id, href, uri;
+
+exportTopTracks:
+SELECT name, id, href, uri, track_json
+FROM top_tracks
+ORDER BY name, id, href, uri, track_json;
+
+exportSavedTracks:
+SELECT name, id, primary_artist_id, release_date, release_year, href, uri, added_at, track_json
+FROM saved_tracks
+ORDER BY name, id, primary_artist_id, release_date, release_year, href, uri, added_at, track_json;
+
+exportPlaylists:
+SELECT name, id, href, uri, tracks_href, snapshot_id
+FROM playlists
+ORDER BY name, id, href, uri, tracks_href, snapshot_id;
+
+exportPlaylistTracks:
+SELECT playlist_name, added_at, release_date, release_year, name, primary_artist_id, id, href, uri, track_json
+FROM playlist_tracks
+ORDER BY playlist_name, name, id, primary_artist_id, release_date, release_year, href, uri, added_at, track_json;
+
+exportSyncStatus:
+SELECT sync_timestamp_millis
+FROM sync_status
+ORDER BY sync_timestamp_millis;
+
+clearTopArtists:
+DELETE FROM top_artists;
+
+clearTopTracks:
+DELETE FROM top_tracks;
+
+clearSavedTracks:
+DELETE FROM saved_tracks;
+
+clearPlaylists:
+DELETE FROM playlists;
+
+clearPlaylistTracks:
+DELETE FROM playlist_tracks;
+
+clearSyncStatus:
+DELETE FROM sync_status;
+
+insertSavedTrack:
+INSERT INTO saved_tracks (
+    name,
+    id,
+    primary_artist_id,
+    release_date,
+    release_year,
+    href,
+    uri,
+    added_at,
+    track_json
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertTopTrack:
+INSERT INTO top_tracks (name, id, href, uri, track_json)
+VALUES (?, ?, ?, ?, ?);
+
+insertTopArtist:
+INSERT INTO top_artists (name, id, href, uri)
+VALUES (?, ?, ?, ?);
+
+insertPlaylist:
+INSERT INTO playlists (name, id, href, uri, tracks_href, snapshot_id)
+VALUES (?, ?, ?, ?, ?, ?);
+
+insertPlaylistTrack:
+INSERT INTO playlist_tracks (
+    playlist_name,
+    added_at,
+    release_date,
+    release_year,
+    name,
+    primary_artist_id,
+    id,
+    href,
+    uri,
+    track_json
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertSyncStatus:
+INSERT INTO sync_status (sync_timestamp_millis)
+VALUES (?);
