@@ -31,6 +31,10 @@ class SpotifyAuthClient(
         val refreshToken: String?,
     )
 
+    data class CallbackAuthorization(
+        val refresh: Boolean,
+    )
+
     private data class PendingAuthorization(
         val refresh: Boolean,
         val expiresAt: Instant,
@@ -54,13 +58,13 @@ class SpotifyAuthClient(
         return AuthorizationRequest(URI("https://accounts.spotify.com/authorize?${formEncode(parameters)}"), state)
     }
 
-    fun validateCallback(
+    fun consumeCallbackAuthorization(
         state: String?,
         cookieState: String?,
-    ): Boolean {
-        if (state.isNullOrBlank() || state != cookieState) return false
-        val pending = pendingAuthorizations.remove(state) ?: return false
-        return pending.expiresAt.isAfter(clock.instant())
+    ): CallbackAuthorization? {
+        if (state.isNullOrBlank() || state != cookieState) return null
+        val pending = pendingAuthorizations.remove(state) ?: return null
+        return pending.takeIf { it.expiresAt.isAfter(clock.instant()) }?.let { CallbackAuthorization(it.refresh) }
     }
 
     fun exchangeAuthorizationCode(code: String): TokenResponse {

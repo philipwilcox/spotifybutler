@@ -1,5 +1,6 @@
 package com.philipwilcox.spotifybutler.http
 
+import com.philipwilcox.spotifybutler.service.SpotifyCacheService
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
 import com.sun.net.httpserver.HttpExchange
@@ -15,6 +16,7 @@ import java.util.concurrent.Executors
 class ButlerHttpServer(
     private val authClient: SpotifyAuthClient,
     private val apiClient: SpotifyApiClient,
+    private val cacheService: SpotifyCacheService,
     private val host: String = "127.0.0.1",
     private val port: Int = 8888,
 ) {
@@ -76,12 +78,12 @@ class ButlerHttpServer(
         requireGet(exchange)
         val parameters = exchange.requestURI.queryParameters()
         val state = parameters["state"]
-        if (!authClient.validateCallback(state, exchange.requestCookies()[SpotifyAuthClient.STATE_COOKIE])) {
-            return exchange.respond(
-                HttpURLConnection.HTTP_BAD_REQUEST,
-                "Invalid or expired Spotify authorization state.",
-            )
-        }
+        val authorization =
+            authClient.consumeCallbackAuthorization(state, exchange.requestCookies()[SpotifyAuthClient.STATE_COOKIE])
+                ?: return exchange.respond(
+                    HttpURLConnection.HTTP_BAD_REQUEST,
+                    "Invalid or expired Spotify authorization state.",
+                )
         exchange.responseHeaders.add(
             "Set-Cookie",
             "${SpotifyAuthClient.STATE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
@@ -94,6 +96,7 @@ class ButlerHttpServer(
                 )
             }
         val token = authClient.exchangeAuthorizationCode(code)
+        cacheService.loadIfNeeded(token.accessToken, authorization.refresh)
         exchange.responseHeaders.add(
             "Set-Cookie",
             "spotify_access_token=${token.accessToken}; " +

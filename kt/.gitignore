@@ -4,3 +4,4 @@ build/
 *.iml
 secrets*.properties
 !secrets.properties.example
+spotify.db

@@ -1,0 +1,4 @@
+# By default the service uses kt/spotify.db when run from the repository root.
+# Relative paths are resolved from this file, so this default also keeps the database in kt/.
+# A deployed application can place application.properties in its working directory and keep spotify.db there.
+spotify.databasePath=spotify.db
