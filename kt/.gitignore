@@ -1,0 +1,6 @@
+.gradle/
+build/
+.idea/
+*.iml
+secrets*.properties
+!secrets.properties.example

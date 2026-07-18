@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+echo "Formatting Kotlin sources..."
+./kt/gradlew -p kt ktlintFormat
+
+if ! git diff --quiet -- kt/src/main/kotlin; then
+    echo "Kotlin formatting changed source files. Review and stage the changes, then commit again."
+    exit 1
+fi
+
+echo "Running detekt..."
+./kt/gradlew -p kt detekt
