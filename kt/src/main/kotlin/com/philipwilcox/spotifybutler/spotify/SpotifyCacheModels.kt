@@ -32,6 +32,10 @@ data class SpotifyTrack(
     val releaseDate: String?,
     val primaryArtistId: String?,
     val rawJson: String,
+    val albumId: String? = null,
+    val durationMs: Long? = null,
+    val explicit: Boolean? = null,
+    val artistIds: List<String> = emptyList(),
 )
 
 data class SpotifyArtist(

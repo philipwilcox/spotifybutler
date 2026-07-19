@@ -2,7 +2,11 @@ package com.philipwilcox.spotifybutler.db
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import com.philipwilcox.spotifybutler.service.CandidateSource
+import com.philipwilcox.spotifybutler.service.CandidateTrack
 import com.philipwilcox.spotifybutler.service.PlaylistQuery
+import com.philipwilcox.spotifybutler.service.PlaylistRecipeEngine
+import com.philipwilcox.spotifybutler.service.RecipeExecutionContext
 import com.philipwilcox.spotifybutler.spotify.PlaylistTrack
 import com.philipwilcox.spotifybutler.spotify.SavedTrack
 import com.philipwilcox.spotifybutler.spotify.SpotifyArtist
@@ -48,6 +52,59 @@ class SpotifyStore private constructor(
                 require(track.uri == row.uri) { "Stored track uri does not match query row id=${row.id}" }
             }
         }
+
+    fun candidates(source: CandidateSource): List<CandidateTrack> =
+        when (source) {
+            CandidateSource.SavedTracks ->
+                queries.selectAllSavedCandidates().executeAsList().mapIndexed { index, row ->
+                    CandidateTrack(
+                        decodeStoredTrack(requireNotNull(row.track_json), "saved candidate $index"),
+                        row.added_at,
+                        index,
+                    )
+                }
+            CandidateSource.TopTracks ->
+                queries.selectAllTopCandidates().executeAsList().mapIndexed { index, row ->
+                    CandidateTrack(
+                        decodeStoredTrack(requireNotNull(row.track_json), "top candidate $index"),
+                        null,
+                        index,
+                    )
+                }
+            is CandidateSource.PlaylistItems ->
+                queries.selectPlaylistCandidatesByName(source.playlistName).executeAsList().mapIndexed { index, row ->
+                    CandidateTrack(
+                        decodeStoredTrack(requireNotNull(row.track_json), "playlist candidate $index"),
+                        row.added_at,
+                        index,
+                    )
+                }
+            is CandidateSource.Union -> source.sources.flatMap { candidates(it) }
+            is CandidateSource.Difference -> {
+                val excluded = candidates(source.right).mapTo(mutableSetOf(), CandidateTrack::identity)
+                candidates(source.left).filterNot { it.identity in excluded }
+            }
+            is CandidateSource.Filtered ->
+                candidates(source.source).filter { candidate ->
+                    PlaylistRecipeEngine.matches(source.predicate, candidate)
+                }
+        }
+
+    fun recipeExecutionContext(): RecipeExecutionContext =
+        RecipeExecutionContext(
+            topArtistIds =
+                queries
+                    .selectTopArtistIds()
+                    .executeAsList()
+                    .mapNotNull { it.id }
+                    .toSet(),
+            topTrackIds =
+                queries
+                    .selectTopTrackIds()
+                    .executeAsList()
+                    .mapNotNull { it.id }
+                    .toSet(),
+        )
 
     fun findPlaylistByName(name: String): ExistingPlaylistMetadata? {
         val matches = queries.selectPlaylistByName(name).executeAsList()

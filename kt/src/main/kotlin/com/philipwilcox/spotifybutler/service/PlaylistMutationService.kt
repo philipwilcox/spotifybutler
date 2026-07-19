@@ -73,7 +73,7 @@ class PlaylistMutationFailure(
 
 class PlaylistMutationService(
     private val client: PlaylistMutationClient,
-    private val shuffler: TrackShuffler = TrackShuffler { tracks -> tracks.shuffled() },
+    private val shuffler: TrackShuffler = TrackShuffler { tracks -> tracks },
 ) {
     @Suppress("TooGenericExceptionCaught")
     fun apply(

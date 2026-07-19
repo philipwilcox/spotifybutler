@@ -175,6 +175,32 @@ FROM saved_tracks
 ORDER BY RANDOM()
 LIMIT ?;
 
+selectAllSavedCandidates:
+SELECT id, uri, primary_artist_id, added_at, track_json
+FROM saved_tracks
+ORDER BY added_at DESC, id, uri, track_json;
+
+selectAllTopCandidates:
+SELECT id, uri, track_json
+FROM top_tracks
+ORDER BY id, uri, track_json;
+
+selectTopArtistIds:
+SELECT id
+FROM top_artists
+ORDER BY id;
+
+selectTopTrackIds:
+SELECT id
+FROM top_tracks
+ORDER BY id;
+
+selectPlaylistCandidatesByName:
+SELECT id, uri, added_at, track_json
+FROM playlist_tracks
+WHERE playlist_name = ?
+ORDER BY added_at, id, uri, track_json;
+
 selectCollectedDiscoverWeekly:
 SELECT id, uri, primary_artist_id, track_json
 FROM playlist_tracks

@@ -2,11 +2,13 @@ package com.philipwilcox.spotifybutler.service
 
 import com.philipwilcox.spotifybutler.db.SpotifyStore
 import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
+import org.junit.jupiter.api.Tag
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@Tag("playlist-generation-contract")
 class PlaylistQueryFixtureTest {
     @Test
     fun `sanitized fixture validates and exercises every production query`() {
@@ -30,6 +32,24 @@ class PlaylistQueryFixtureTest {
                 definitions.forEach { definition ->
                     val expectation = requireNotNull(expectations[definition.id.name])
                     val tracks = store.execute(definition.query)
+                    logPlaylistGenerationReport(
+                        PlaylistGenerationTestReport(
+                            fixtureName = fixture.name,
+                            definition = definition,
+                            executionPath = "legacy",
+                            actualTracks = tracks,
+                            expectedUris = expectation.exactDesiredUris,
+                            notes =
+                                expectation.selectionConstraints
+                                    ?.let { constraints ->
+                                        listOf(
+                                            "eligibleCount=${constraints.eligibleUris.size}",
+                                            "expectedCount=${constraints.expectedCount}",
+                                            "maxPerPrimaryArtist=${constraints.maxPerPrimaryArtist}",
+                                        )
+                                    }.orEmpty(),
+                        ),
+                    )
                     assertQueryExpectation(definition.id, tracks, expectation)
                 }
                 assertPlanningExpectations(store, definitions, expectations)

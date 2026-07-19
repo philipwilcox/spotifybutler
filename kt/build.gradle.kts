@@ -67,6 +67,44 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.register<Test>("playlistGenerationContractTest") {
+    group = "verification"
+    description = "Run playlist-generation contract tests with visible deterministic reports."
+    dependsOn("testClasses")
+    testClassesDirs =
+        sourceSets.test
+            .get()
+            .output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("playlist-generation-contract")
+    }
+    testLogging.showStandardStreams = true
+    systemProperty(
+        "playlistGenerationReportDir",
+        layout.buildDirectory
+            .dir("reports/playlist-generation-contract")
+            .get()
+            .asFile.absolutePath,
+    )
+}
+
+tasks.register("proposePlaylistGenerationGoldens") {
+    group = "verification"
+    description = "Generate sanitized playlist-generation reports for explicit golden review."
+    dependsOn("playlistGenerationContractTest")
+    doLast {
+        logger.lifecycle(
+            "Review proposed playlist-generation reports under " +
+                layout.buildDirectory
+                    .dir("reports/playlist-generation-contract")
+                    .get()
+                    .asFile,
+        )
+        logger.lifecycle("This task never overwrites committed fixture expectations.")
+    }
+}
+
 open class TeeOutputStream(
     private val terminal: OutputStream,
     private val file: OutputStream,

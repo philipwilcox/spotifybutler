@@ -3,9 +3,11 @@ package com.philipwilcox.spotifybutler.spotify
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.net.URI
 
 private val spotifyJson = Json { ignoreUnknownKeys = true }
@@ -26,7 +28,8 @@ internal fun parseSpotifyTrack(
     context: String,
 ): SpotifyTrack {
     val album = item["album"] as? JsonObject
-    val firstArtist = (item["artists"] as? JsonArray)?.firstOrNull() as? JsonObject
+    val artists = (item["artists"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+    val firstArtist = artists.firstOrNull()
     return SpotifyTrack(
         name = item.requiredString("name", context),
         id = item.requiredString("id", context),
@@ -35,6 +38,10 @@ internal fun parseSpotifyTrack(
         releaseDate = album?.optionalString("release_date"),
         primaryArtistId = firstArtist?.optionalString("id"),
         rawJson = item.toString(),
+        albumId = album?.optionalString("id"),
+        durationMs = item.optionalLong("duration_ms"),
+        explicit = item.optionalBoolean("explicit"),
+        artistIds = artists.mapNotNull { it.optionalString("id") },
     )
 }
 
@@ -90,6 +97,10 @@ internal fun parsePageItems(
         ?: error("Spotify page at $uri did not contain an items array")
 
 internal fun JsonObject.optionalString(key: String): String? = get(key)?.jsonPrimitive?.contentOrNull
+
+internal fun JsonObject.optionalLong(key: String): Long? = get(key)?.jsonPrimitive?.longOrNull
+
+internal fun JsonObject.optionalBoolean(key: String): Boolean? = get(key)?.jsonPrimitive?.booleanOrNull
 
 private fun JsonObject.requiredString(
     key: String,

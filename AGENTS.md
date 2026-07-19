@@ -70,3 +70,62 @@ buildable without relying on the Node service.
   `./kt/gradlew -p kt run`.
 - Keep generated build output, IDE files, and real secret properties untracked. The committed
   `secrets.properties.example` is the safe template.
+
+## Durable design best practices
+
+- Represent extensible domain behavior with immutable, serializable data models
+  or sealed ASTs. Kotlin DSLs and builders may be authoring conveniences, but
+  the immutable model—not mutable builder state, SQL text, or an enum—is the
+  persisted, compared, versioned, and wire-level contract.
+- For randomized behavior that must be reproducible, keep randomness outside
+  databases: capture a cryptographically strong seed, derive deterministic ranks
+  from canonical versioned inputs, and use explicit identity tie-breakers. Do
+  not use SQLite `RANDOM()` or a seeded JVM PRNG as a generation contract.
+- Version semantic inputs separately from implementation details. Persist the
+  canonical recipe/domain revision, data/cache revision, and algorithm version
+  with generated results. Performance optimizations may not change a revision's
+  observable output.
+- Make null behavior, range inclusivity, multi-valued dimensions, distinctness,
+  quota admission, and ordering direction explicit in the model and tests.
+  Avoid hidden behavior that depends on SQL planner order, insertion order, or
+  `rowid`.
+- Normalize data needed by supported domain behavior into typed projections and
+  relation tables. Retain raw upstream JSON for compatibility, but do not make
+  raw JSON the query or business-logic surface.
+
+## Durable testing best practices
+
+- Prefer module-level contract tests over exhaustive helper tests for business
+  behavior. The strongest playlist-generation contract is real SQLite fixture
+  data flowing through definition/recipe resolution, generation, generation
+  storage, planning, and a recording mutation boundary, with exact ordered
+  identifiers asserted at the end.
+- Keep fixtures small, readable, deterministic, sanitized, and schema-versioned.
+  Use meaningful symbolic track names, explicit boundary/null/duplicate data,
+  and one expected identifier per line where practical. Never use real accounts,
+  tokens, captures, or personal payloads.
+- Golden tests must assert exact ordered results, not only sets, counts, or
+  eligibility. During migrations, run legacy and new implementations over the
+  same fixture; characterize inherently random legacy behavior with invariants
+  while establishing fixed-seed goldens for the new implementation.
+- Prove determinism across repeated runs, SQLite insertion-order permutations,
+  database close/reopen, and pushdown-versus-non-pushdown execution. Add
+  known-answer tests for canonical hashes, encoding, domain separation, and
+  tie-breaking.
+- Emit a human-readable INFO report for sanitized playlist-generation contract
+  cases containing the normalized definition/recipe, seed and revisions,
+  counts, and every selected song in final order. Reports are diagnostics only;
+  assertions must remain independent of log text. Production logs should use
+  identity and counts rather than private song lists.
+- Test validation failures and complexity/resource limits as deliberately as
+  successful recipes. Unsupported fields, ambiguous dimensions, invalid ranges,
+  excessive ASTs, and arbitrary SQL must fail with stable actionable errors.
+
+## Formatting and verification workflow
+
+- Before any formatting check, always run the CLI autoformatter first (for
+  Kotlin, `./gradlew ktlintFormat`) so formatting is deterministic and repeatable
+  and manual fixups are minimized. Review the resulting diff, then run
+  `./gradlew lint` and the appropriate focused tests.
+- Keep lint/detekt and full-build verification at the final verification stage
+  of a sequenced change unless a task explicitly requires an earlier check.

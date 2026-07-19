@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "name": "composability-and-boundaries",
+  "tracks": {
+    "artist_a_album_1": {
+      "name": "Artist A Album 1",
+      "id": "artist-a-album-1",
+      "uri": "spotify:track:artist-a-album-1",
+      "releaseDate": "2020-01-01",
+      "primaryArtistId": "artist-a",
+      "albumId": "album-1",
+      "durationMs": 180000,
+      "explicit": false,
+      "addedAt": "2026-01-01T00:00:00Z"
+    },
+    "artist_a_album_2": {
+      "name": "Artist A Album 2",
+      "id": "artist-a-album-2",
+      "uri": "spotify:track:artist-a-album-2",
+      "releaseDate": "2020-06-01",
+      "primaryArtistId": "artist-a",
+      "albumId": "album-2",
+      "durationMs": 240000,
+      "explicit": false,
+      "addedAt": "2026-01-02T00:00:00Z"
+    },
+    "artist_b_album_2": {
+      "name": "Artist B Album 2",
+      "id": "artist-b-album-2",
+      "uri": "spotify:track:artist-b-album-2",
+      "releaseDate": "2021-01-01",
+      "primaryArtistId": "artist-b",
+      "albumId": "album-2",
+      "durationMs": 300000,
+      "explicit": true,
+      "addedAt": "2026-01-03T00:00:00Z"
+    },
+    "artist_b_album_3": {
+      "name": "Artist B Album 3",
+      "id": "artist-b-album-3",
+      "uri": "spotify:track:artist-b-album-3",
+      "releaseDate": "2019-12-31",
+      "primaryArtistId": "artist-b",
+      "albumId": "album-3",
+      "durationMs": 360000,
+      "explicit": false,
+      "addedAt": "2026-01-04T00:00:00Z"
+    },
+    "artist_null_album_null": {
+      "name": "Unknown Dimensions",
+      "id": "unknown-dimensions",
+      "uri": "spotify:track:unknown-dimensions",
+      "releaseDate": null,
+      "primaryArtistId": null,
+      "albumId": null,
+      "durationMs": null,
+      "explicit": null,
+      "addedAt": null
+    }
+  },
+  "cases": [
+    {
+      "name": "year-and-simultaneous-quotas",
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "recipe": {
+        "schemaVersion": 1,
+        "source": { "type": "saved_tracks" },
+        "predicate": { "type": "release_year_range", "minInclusive": 2020 },
+        "distinctness": { "type": "by", "identity": "SpotifyUri" },
+        "selection": {
+          "target": 2,
+          "quotas": [
+            { "dimension": "PrimaryArtistId", "maximum": 1 },
+            { "dimension": "AlbumId", "maximum": 1 }
+          ],
+          "rankBy": { "type": "added_at_ascending" }
+        },
+        "ordering": { "type": "added_at_ascending" }
+      },
+      "expectedIds": ["artist-a-album-1", "artist-b-album-2"]
+    },
+    {
+      "name": "duration-and-explicitness",
+      "seedHex": "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100",
+      "recipe": {
+        "schemaVersion": 1,
+        "source": { "type": "saved_tracks" },
+        "predicate": {
+          "type": "and",
+          "predicates": [
+            { "type": "duration_range", "minMsInclusive": 180000, "maxMsExclusive": 300000 },
+            { "type": "explicitness", "value": false }
+          ]
+        },
+        "distinctness": { "type": "by", "identity": "SpotifyUri" },
+        "selection": {
+          "target": null,
+          "quotas": [],
+          "rankBy": { "type": "added_at_ascending" }
+        },
+        "ordering": { "type": "added_at_ascending" }
+      },
+      "expectedIds": ["artist-a-album-1", "artist-a-album-2"]
+    },
+    {
+      "name": "seeded-random-cutoff",
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "recipe": {
+        "schemaVersion": 1,
+        "source": { "type": "saved_tracks" },
+        "predicate": { "type": "all" },
+        "distinctness": { "type": "by", "identity": "SpotifyUri" },
+        "selection": {
+          "target": 2,
+          "quotas": [],
+          "rankBy": { "type": "seeded_random" }
+        },
+        "ordering": { "type": "seeded_random" }
+      },
+      "expectedIds": ["artist-a-album-2", "artist-b-album-3"]
+    }
+  ]
+}

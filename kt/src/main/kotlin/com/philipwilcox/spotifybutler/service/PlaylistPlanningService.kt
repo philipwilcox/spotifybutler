@@ -30,6 +30,16 @@ class PlaylistPlanningService(
             classify(definition, desired, existing)
         }
 
+    fun planGenerated(
+        definition: PlaylistDefinition,
+        desiredTracks: List<SpotifyTrack>,
+    ): PlaylistPlan {
+        val metadata = store.findPlaylistByName(definition.name)
+        val existingTracks = store.findPlaylistTracksByName(definition.name)
+        val existing = metadata?.let { ExistingPlaylist(it.id, it.snapshotId, existingTracks) }
+        return classify(definition, desiredTracks, existing)
+    }
+
     private fun classify(
         definition: PlaylistDefinition,
         desired: List<SpotifyTrack>,

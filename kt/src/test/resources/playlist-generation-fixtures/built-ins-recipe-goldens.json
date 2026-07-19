@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "fixtureName": "spotify-run-query-results-sanitized",
+  "seedHex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "algorithmVersion": "playlist-generation-v1",
+  "goldens": [
+    {
+      "definitionId": "RECENT_LIKED_100",
+      "recipeRevision": "bd75a5ba1e5181dfdf65198b5edd4ade0c4ebea0dcab41ca4c4353ecf7af2014",
+      "orderedUris": ["spotify:track:a01", "spotify:track:a02", "spotify:track:a03", "spotify:track:a04", "spotify:track:a05", "spotify:track:a06", "spotify:track:a07", "spotify:track:a08", "spotify:track:a09", "spotify:track:a10", "spotify:track:a11", "spotify:track:a12", "spotify:track:a13", "spotify:track:b01", "spotify:track:b02", "spotify:track:n01"]
+    },
+    {
+      "definitionId": "RANDOM_LIKED_100",
+      "recipeRevision": "9eb4882f417e91e6d89fb79dd24a6de13f9432c49ef604ace211db847b7f049e",
+      "orderedUris": ["spotify:track:a05", "spotify:track:a06", "spotify:track:a10", "spotify:track:a02", "spotify:track:a04", "spotify:track:a03", "spotify:track:n01", "spotify:track:b01", "spotify:track:a07", "spotify:track:a09", "spotify:track:a12", "spotify:track:a13", "spotify:track:a08", "spotify:track:b02", "spotify:track:a11", "spotify:track:a01"]
+    },
+    {
+      "definitionId": "COLLECTED_DISCOVER_WEEKLY",
+      "recipeRevision": "50d8c9a5449816c817510601a618214e7fa165917889d292679270a77344b4a6",
+      "orderedUris": ["spotify:track:dw-collected", "spotify:track:dw-new"]
+    },
+    {
+      "definitionId": "LIKED_PER_ARTIST",
+      "recipeRevision": "e2d4670123dc5b3b78e9cdecf427bfcce40bea6a18a155cdb2b9297e9920078a",
+      "orderedUris": ["spotify:track:a08", "spotify:track:a13", "spotify:track:a05", "spotify:track:a06", "spotify:track:a09", "spotify:track:n01", "spotify:track:a04", "spotify:track:a11", "spotify:track:b01", "spotify:track:a01", "spotify:track:a12", "spotify:track:b02", "spotify:track:a10", "spotify:track:a03", "spotify:track:a07"]
+    },
+    {
+      "definitionId": "ROLLING_RECENT_20",
+      "recipeRevision": "10ae258d01d3efb22a329f5f3a317876dd1299a14be1fed75e07cba542a97f25",
+      "orderedUris": ["spotify:track:a09", "spotify:track:a12", "spotify:track:b01", "spotify:track:b02", "spotify:track:a07", "spotify:track:a10", "spotify:track:a08", "spotify:track:a11", "spotify:track:a13"]
+    },
+    {
+      "definitionId": "ROLLING_PRIOR_20",
+      "recipeRevision": "ffb9934305fc109ca1e3ecf109943ce6a3824767c9d9ab3a85613a645db5f2bc",
+      "orderedUris": ["spotify:track:a03", "spotify:track:a04", "spotify:track:a06", "spotify:track:a05"]
+    },
+    {
+      "definitionId": "ROLLING_PRE_40",
+      "recipeRevision": "42662510ca68e487506e9a92981838084e387dc5cf72873a09d84ef8da3ed3bf",
+      "orderedUris": ["spotify:track:a01", "spotify:track:a02"]
+    },
+    {
+      "definitionId": "NOT_TOP_ARTISTS",
+      "recipeRevision": "0fa7b3fafe9eb898aaff25f54d851ce6865f16d57c1fbbdb1c261eb8ebd6e3f8",
+      "orderedUris": ["spotify:track:b01", "spotify:track:b02"]
+    },
+    {
+      "definitionId": "NOT_TOP_TRACKS",
+      "recipeRevision": "6efd1784e1a003ad153b8f64727b3bb0a3c59c7aa0eeb31f88350d101f4fc99c",
+      "orderedUris": ["spotify:track:a02", "spotify:track:a03", "spotify:track:a04", "spotify:track:a05", "spotify:track:a06", "spotify:track:a07", "spotify:track:a08", "spotify:track:a09", "spotify:track:a10", "spotify:track:a11", "spotify:track:a12", "spotify:track:a13", "spotify:track:b01", "spotify:track:b02", "spotify:track:n01"]
+    },
+    {
+      "definitionId": "DECADE_1980",
+      "recipeRevision": "64594fd661cb2a427f813213d05234fdb353af119ac5727dc9e5ba4cf27660a4",
+      "orderedUris": ["spotify:track:a01", "spotify:track:a02"]
+    },
+    {
+      "definitionId": "DECADE_1990",
+      "recipeRevision": "7139b1c9f51145681ce44d7588b4fb19770278fdba252473aac9eea6a0695f44",
+      "orderedUris": ["spotify:track:a03", "spotify:track:a04"]
+    },
+    {
+      "definitionId": "DECADE_2000",
+      "recipeRevision": "1dbce898018356e8301fecf203e212366e1cb227fed4afc7ebafc4646f65b0f8",
+      "orderedUris": ["spotify:track:a05", "spotify:track:a06"]
+    },
+    {
+      "definitionId": "DECADE_2010",
+      "recipeRevision": "a0af2ee92c98274c108dc623644517c6a4f19139ebdb29509822d79f6642cc88",
+      "orderedUris": ["spotify:track:a07", "spotify:track:a08"]
+    },
+    {
+      "definitionId": "DECADE_2020",
+      "recipeRevision": "c1119f649156af73f4a49eedcc1641e7ab51b84c0c43a2a50205425d747bc116",
+      "orderedUris": ["spotify:track:a09", "spotify:track:a10", "spotify:track:a11", "spotify:track:a12", "spotify:track:a13", "spotify:track:b01", "spotify:track:b02"]
+    },
+    {
+      "definitionId": "RECENT_5_PER_ARTIST",
+      "recipeRevision": "6b19422a67ddd6f0a24f2ab057d4b490e2f40b96edb29b24fb65a58f84731dd2",
+      "orderedUris": ["spotify:track:a11", "spotify:track:a13", "spotify:track:b02", "spotify:track:a12", "spotify:track:b01"]
+    }
+  ]
+}
