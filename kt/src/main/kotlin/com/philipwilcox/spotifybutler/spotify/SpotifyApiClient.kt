@@ -2,6 +2,10 @@ package com.philipwilcox.spotifybutler.spotify
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.http.HttpClient
@@ -25,6 +29,23 @@ fun interface SpotifyHttpTransport {
         uri: URI,
         accessToken: String,
     ): SpotifyHttpResponse
+
+    fun post(
+        uri: URI,
+        accessToken: String,
+        body: String,
+    ): SpotifyHttpResponse = error("HTTP POST is not supported by this transport")
+
+    fun put(
+        uri: URI,
+        accessToken: String,
+        body: String,
+    ): SpotifyHttpResponse = error("HTTP PUT is not supported by this transport")
+
+    fun delete(
+        uri: URI,
+        accessToken: String,
+    ): SpotifyHttpResponse = error("HTTP DELETE is not supported by this transport")
 }
 
 private class JdkSpotifyHttpTransport(
@@ -33,19 +54,46 @@ private class JdkSpotifyHttpTransport(
     override fun get(
         uri: URI,
         accessToken: String,
+    ): SpotifyHttpResponse = request("GET", uri, accessToken, null)
+
+    override fun post(
+        uri: URI,
+        accessToken: String,
+        body: String,
+    ): SpotifyHttpResponse = request("POST", uri, accessToken, body)
+
+    override fun put(
+        uri: URI,
+        accessToken: String,
+        body: String,
+    ): SpotifyHttpResponse = request("PUT", uri, accessToken, body)
+
+    override fun delete(
+        uri: URI,
+        accessToken: String,
+    ): SpotifyHttpResponse = request("DELETE", uri, accessToken, null)
+
+    private fun request(
+        method: String,
+        uri: URI,
+        accessToken: String,
+        body: String?,
     ): SpotifyHttpResponse {
-        val request =
+        val builder =
             HttpRequest
                 .newBuilder(uri)
                 .header("Authorization", "Bearer $accessToken")
                 .timeout(Duration.ofSeconds(20))
-                .GET()
-                .build()
+                .method(method, body?.let(HttpRequest.BodyPublishers::ofString) ?: HttpRequest.BodyPublishers.noBody())
+        if (body != null) builder.header("Content-Type", "application/json")
+        val request = builder.build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         return SpotifyHttpResponse(response.statusCode(), response.body())
     }
 }
 
+// This client intentionally owns the Spotify endpoint operations so batching and HTTP details stay at the API boundary.
+@Suppress("TooManyFunctions")
 class SpotifyApiClient(
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
     private val apiBaseUri: URI = URI("https://api.spotify.com/"),
@@ -57,6 +105,69 @@ class SpotifyApiClient(
     fun getCurrentUser(accessToken: String): SpotifyCurrentUser {
         val response = getJsonObject(apiUri("/v1/me"), accessToken, pageSequence = 0)
         return parseSpotifyCurrentUser(response)
+    }
+
+    fun createPlaylist(
+        accessToken: String,
+        name: String,
+    ): String {
+        val user = getCurrentUser(accessToken)
+        val body =
+            buildJsonObject {
+                put("name", name)
+                put("public", false)
+                put("collaborative", false)
+                put("description", "Automatically generated playlist from Spotify Butler app")
+            }.toString()
+        val response = transport.post(apiUri("/v1/users/${user.id}/playlists"), accessToken, body)
+        return parseMutationResponse(response, "create playlist").optionalString("id")
+            ?: error("Spotify create playlist response did not contain id")
+    }
+
+    fun addTracks(
+        accessToken: String,
+        playlistId: String,
+        tracks: List<SpotifyTrack>,
+    ) {
+        tracks.chunked(PLAYLIST_WRITE_BATCH_SIZE).forEach { batch ->
+            val body = trackUrisBody(batch)
+            requireMutationSuccess(
+                transport.post(apiUri("/v1/playlists/$playlistId/tracks"), accessToken, body),
+                "add tracks to playlist",
+            )
+        }
+    }
+
+    fun replaceTracks(
+        accessToken: String,
+        playlistId: String,
+        tracks: List<SpotifyTrack>,
+    ) {
+        val batches = tracks.chunked(PLAYLIST_WRITE_BATCH_SIZE)
+        val firstBatch = batches.firstOrNull().orEmpty()
+        requireMutationSuccess(
+            transport.put(apiUri("/v1/playlists/$playlistId/tracks"), accessToken, trackUrisBody(firstBatch)),
+            "replace playlist tracks",
+        )
+        batches.drop(1).forEach { batch ->
+            requireMutationSuccess(
+                transport.post(apiUri("/v1/playlists/$playlistId/tracks"), accessToken, trackUrisBody(batch)),
+                "append playlist tracks",
+            )
+        }
+    }
+
+    fun removeSavedTracks(
+        accessToken: String,
+        trackIds: List<String>,
+    ) {
+        trackIds.distinct().chunked(SAVED_TRACK_WRITE_BATCH_SIZE).forEach { batch ->
+            val ids = batch.joinToString(",") { java.net.URLEncoder.encode(it, Charsets.UTF_8) }
+            requireMutationSuccess(
+                transport.delete(apiUri("/v1/me/tracks?ids=$ids"), accessToken),
+                "remove saved tracks",
+            )
+        }
     }
 
     override fun fetchCache(accessToken: String): SpotifyCacheSnapshot {
@@ -161,6 +272,28 @@ class SpotifyApiClient(
         return parseSpotifyResponse(response.body)
     }
 
+    private fun parseMutationResponse(
+        response: SpotifyHttpResponse,
+        operation: String,
+    ): JsonObject {
+        requireMutationSuccess(response, operation)
+        return parseSpotifyResponse(response.body)
+    }
+
+    private fun requireMutationSuccess(
+        response: SpotifyHttpResponse,
+        operation: String,
+    ) {
+        require(response.statusCode in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
+            "Spotify API request failed with HTTP ${response.statusCode} during $operation"
+        }
+    }
+
+    private fun trackUrisBody(tracks: List<SpotifyTrack>): String =
+        buildJsonObject {
+            putJsonArray("uris") { tracks.forEach { add(JsonPrimitive(it.uri)) } }
+        }.toString()
+
     private fun apiUri(pathOrUri: String): URI {
         val candidate = URI(pathOrUri)
         val uri = if (candidate.isAbsolute) candidate else apiBaseUri.resolve(candidate)
@@ -181,5 +314,7 @@ class SpotifyApiClient(
     companion object {
         private const val PAGE_SIZE = 50
         private const val PLAYLIST_FETCH_CONCURRENCY = 2
+        private const val PLAYLIST_WRITE_BATCH_SIZE = 100
+        private const val SAVED_TRACK_WRITE_BATCH_SIZE = 50
     }
 }

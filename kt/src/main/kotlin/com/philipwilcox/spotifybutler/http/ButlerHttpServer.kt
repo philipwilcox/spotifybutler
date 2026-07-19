@@ -1,6 +1,12 @@
 package com.philipwilcox.spotifybutler.http
 
+import com.philipwilcox.spotifybutler.db.SpotifyStore
+import com.philipwilcox.spotifybutler.service.ButlerService
+import com.philipwilcox.spotifybutler.service.PlaylistMutationService
+import com.philipwilcox.spotifybutler.service.PlaylistPlanningService
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
+import com.philipwilcox.spotifybutler.service.SpotifyDuplicateCleanupService
+import com.philipwilcox.spotifybutler.service.SpotifyPlaylistMutationClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
 import com.sun.net.httpserver.HttpExchange
@@ -17,6 +23,8 @@ class ButlerHttpServer(
     private val authClient: SpotifyAuthClient,
     private val apiClient: SpotifyApiClient,
     private val cacheService: SpotifyCacheService,
+    private val store: SpotifyStore,
+    private val dryRun: Boolean = false,
     private val host: String = "127.0.0.1",
     private val port: Int = 8888,
 ) {
@@ -96,13 +104,23 @@ class ButlerHttpServer(
                 )
             }
         val token = authClient.exchangeAuthorizationCode(code)
-        cacheService.loadIfNeeded(token.accessToken, authorization.refresh)
+        val runResult =
+            ButlerService(
+                cacheService = cacheService,
+                planningService = PlaylistPlanningService(store),
+                mutationService =
+                    PlaylistMutationService(
+                        SpotifyPlaylistMutationClient(apiClient, token.accessToken),
+                    ),
+                duplicateCleanupService = SpotifyDuplicateCleanupService(store, apiClient),
+                dryRun = dryRun || parameters["dryRun"].equals("true", ignoreCase = true),
+            ).run(token.accessToken, authorization.refresh)
         exchange.responseHeaders.add(
             "Set-Cookie",
             "spotify_access_token=${token.accessToken}; " +
                 "Path=/; Max-Age=${token.expiresInSeconds}; HttpOnly; SameSite=Lax",
         )
-        return exchange.redirect(URI("/hello"))
+        return exchange.respond(HttpURLConnection.HTTP_OK, runResult.summary())
     }
 
     private fun handleHello(exchange: HttpExchange): Int {
@@ -165,6 +183,15 @@ class ButlerHttpServer(
                     it to pieces.getOrElse(1) { "" }
                 }
             }.toMap()
+
+    private fun com.philipwilcox.spotifybutler.service.ButlerRunResult.summary(): String =
+        buildString {
+            appendLine("Spotify Butler run complete")
+            appendLine("sync=$sync duplicateTracksRemoved=${duplicateCleanup.removedTrackCount}")
+            playlistOutcomes.forEach { outcome ->
+                appendLine("${outcome.name}: ${outcome.trackCount} tracks dryRun=${outcome.dryRun}")
+            }
+        }
 
     private data class RequestAlreadyHandled(
         val status: Int,

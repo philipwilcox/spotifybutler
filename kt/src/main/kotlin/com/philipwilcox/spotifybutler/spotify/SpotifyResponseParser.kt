@@ -38,6 +38,16 @@ internal fun parseSpotifyTrack(
     )
 }
 
+internal fun decodeStoredTrack(
+    trackJson: String,
+    context: String,
+): SpotifyTrack =
+    try {
+        parseSpotifyTrack(spotifyJson.parseToJsonElement(trackJson).jsonObject, context)
+    } catch (exception: IllegalArgumentException) {
+        throw IllegalArgumentException("Could not decode stored track for $context", exception)
+    }
+
 internal fun parseSpotifyArtist(item: JsonObject): SpotifyArtist =
     SpotifyArtist(
         name = item.requiredString("name", "top artist"),
@@ -84,4 +94,4 @@ internal fun JsonObject.optionalString(key: String): String? = get(key)?.jsonPri
 private fun JsonObject.requiredString(
     key: String,
     context: String,
-): String = optionalString(key) ?: error("Spotify $context response did not contain $key")
+): String = optionalString(key) ?: throw IllegalArgumentException("Spotify $context response did not contain $key")

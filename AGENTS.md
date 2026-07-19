@@ -8,6 +8,14 @@ buildable without relying on the Node service.
 - DO NOT run lint and unit tests on every step and modification. I like to sequence smaller changes then just run those
   manually before commit.
 
+## Git staging
+
+- Always stage source code files, tests, and sanitized test fixtures created or modified for the requested work before
+  handoff.
+- Never stage planning documents, including `*plan.md`, `resume.md`, or `todo.md`.
+- Never stage secrets, secret properties, raw Spotify captures, draft fixtures, access tokens, or other personal
+  payloads. Keep those files ignored or untracked.
+
 ## Build and quality checks
 
 - Use the Gradle wrapper from this directory: `./gradlew <task>`.

@@ -16,25 +16,34 @@ class SpotifyCacheService(
         accessToken: String,
         refresh: Boolean,
     ): CacheLoadResult {
+        val result = prepareLoadIfNeeded(accessToken, refresh)
+        if (result is CacheLoadResult.Loaded) completeSync()
+        return result
+    }
+
+    fun prepareLoadIfNeeded(
+        accessToken: String,
+        refresh: Boolean,
+    ): CacheLoadResult {
         val hasCompletedSync = store.hasCompletedSync()
         if (!refresh && hasCompletedSync) {
             logger.info { "Spotify SQLite cache already has a completed sync; skipping fetch." }
             return CacheLoadResult.SkippedExistingCache
         }
-
         logger.info { "Loading Spotify API data into SQLite: refresh=$refresh hasCompletedSync=$hasCompletedSync" }
         val snapshot = apiClient.fetchCache(accessToken)
-        store.replaceCache(snapshot, clock.millis())
-        val result =
-            CacheLoadResult.Loaded(
-                savedTrackCount = snapshot.savedTracks.size,
-                topTrackCount = snapshot.topTracks.size,
-                topArtistCount = snapshot.topArtists.size,
-                playlistCount = snapshot.playlists.size,
-                playlistTrackCount = snapshot.playlistTracks.size,
-            )
-        logger.info { "Loaded Spotify SQLite cache: $result" }
-        return result
+        store.replaceCacheContent(snapshot)
+        return CacheLoadResult.Loaded(
+            savedTrackCount = snapshot.savedTracks.size,
+            topTrackCount = snapshot.topTracks.size,
+            topArtistCount = snapshot.topArtists.size,
+            playlistCount = snapshot.playlists.size,
+            playlistTrackCount = snapshot.playlistTracks.size,
+        )
+    }
+
+    fun completeSync() {
+        store.markSyncComplete(clock.millis())
     }
 }
 

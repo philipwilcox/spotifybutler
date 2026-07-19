@@ -22,5 +22,6 @@ fun main() {
         authClient = SpotifyAuthClient(secrets),
         apiClient = apiClient,
         cacheService = SpotifyCacheService(apiClient, store),
+        store = store,
     ).start()
 }

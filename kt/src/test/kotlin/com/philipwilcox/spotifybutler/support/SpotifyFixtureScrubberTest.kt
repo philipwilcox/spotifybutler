@@ -91,7 +91,7 @@ class SpotifyFixtureScrubberTest {
             spotifyFixtureJson
                 .parseToJsonElement(
                     scrubbed.expectedTables.savedTracks
-                        .first()["track_json"]!!
+                        .first { it["name"] == responseTrack["name"] }["track_json"]!!
                         .jsonPrimitive.content,
                 ).jsonObject
         assertEquals(responseTrack["id"]!!.jsonPrimitive.content, storedTrack["id"]!!.jsonPrimitive.content)

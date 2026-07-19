@@ -147,3 +147,121 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 insertSyncStatus:
 INSERT INTO sync_status (sync_timestamp_millis)
 VALUES (?);
+
+selectDuplicateSavedTrackRows:
+SELECT primary_artist_id, name, id, added_at
+FROM saved_tracks
+WHERE (name, primary_artist_id) IN (
+    SELECT name, primary_artist_id
+    FROM saved_tracks
+    GROUP BY name, primary_artist_id
+    HAVING COUNT(*) > 1
+)
+ORDER BY primary_artist_id, name, added_at DESC;
+
+deleteSavedTracksById:
+DELETE FROM saved_tracks
+WHERE id = ?;
+
+selectRecentLikedTracks:
+SELECT id, uri, primary_artist_id, track_json
+FROM saved_tracks
+ORDER BY added_at DESC
+LIMIT ?;
+
+selectRandomLikedTracks:
+SELECT id, uri, primary_artist_id, track_json
+FROM saved_tracks
+ORDER BY RANDOM()
+LIMIT ?;
+
+selectCollectedDiscoverWeekly:
+SELECT id, uri, primary_artist_id, track_json
+FROM playlist_tracks
+WHERE playlist_name = ?
+UNION
+SELECT id, uri, primary_artist_id, track_json
+FROM playlist_tracks
+WHERE playlist_name = ?
+  AND release_year >= ?
+  AND id NOT IN (
+      SELECT id
+      FROM playlist_tracks
+      WHERE playlist_name = ?
+  );
+
+selectSavedTracksPerArtist:
+SELECT id, uri, primary_artist_id, track_json
+FROM (
+    SELECT id, uri, primary_artist_id, track_json,
+           row_number() OVER (
+               PARTITION BY primary_artist_id
+               ORDER BY RANDOM()
+           ) AS row_number
+    FROM saved_tracks
+)
+WHERE row_number <= ?;
+
+selectSavedTracksInYearRangePerArtist:
+SELECT id, uri, primary_artist_id, track_json
+FROM (
+    SELECT id, uri, primary_artist_id, track_json,
+           row_number() OVER (
+               PARTITION BY primary_artist_id
+               ORDER BY RANDOM()
+           ) AS row_number
+    FROM saved_tracks
+    WHERE release_year >= ? AND release_year <= ?
+)
+WHERE row_number <= ?;
+
+selectSavedTracksThroughYearPerArtist:
+SELECT id, uri, primary_artist_id, track_json
+FROM (
+    SELECT id, uri, primary_artist_id, track_json,
+           row_number() OVER (
+               PARTITION BY primary_artist_id
+               ORDER BY RANDOM()
+           ) AS row_number
+    FROM saved_tracks
+    WHERE release_year <= ?
+)
+WHERE row_number <= ?;
+
+selectSavedTracksSinceYearPerArtist:
+SELECT id, uri, primary_artist_id, track_json
+FROM (
+    SELECT id, uri, primary_artist_id, track_json,
+           row_number() OVER (
+               PARTITION BY primary_artist_id
+               ORDER BY RANDOM()
+           ) AS row_number
+    FROM saved_tracks
+    WHERE release_year >= ?
+)
+WHERE row_number <= ?;
+
+selectSavedTracksNotByTopArtists:
+SELECT id, uri, primary_artist_id, track_json
+FROM saved_tracks
+WHERE primary_artist_id NOT IN (SELECT id FROM top_artists);
+
+selectSavedTracksNotInTopTracks:
+SELECT id, uri, primary_artist_id, track_json
+FROM saved_tracks
+WHERE id NOT IN (SELECT id FROM top_tracks);
+
+selectSavedTracksInYearRange:
+SELECT id, uri, primary_artist_id, track_json
+FROM saved_tracks
+WHERE release_year >= ? AND release_year < ?;
+
+selectPlaylistByName:
+SELECT id, snapshot_id
+FROM playlists
+WHERE name = ?;
+
+selectPlaylistTracksByName:
+SELECT id, uri, track_json
+FROM playlist_tracks
+WHERE playlist_name = ?;
