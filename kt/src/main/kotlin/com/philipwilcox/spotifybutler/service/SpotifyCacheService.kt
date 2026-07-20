@@ -15,15 +15,13 @@ class SpotifyCacheService(
     fun loadIfNeeded(
         accessToken: String,
         refresh: Boolean,
-    ): CacheLoadResult {
-        val result = prepareLoadIfNeeded(accessToken, refresh)
-        if (result is CacheLoadResult.Loaded) completeSync()
-        return result
-    }
+        ownerSpotifyUserId: String? = null,
+    ): CacheLoadResult = prepareLoadIfNeeded(accessToken, refresh, ownerSpotifyUserId)
 
     fun prepareLoadIfNeeded(
         accessToken: String,
         refresh: Boolean,
+        ownerSpotifyUserId: String? = null,
     ): CacheLoadResult {
         val hasCompletedSync = store.hasCompletedSync()
         if (!refresh && hasCompletedSync) {
@@ -32,7 +30,7 @@ class SpotifyCacheService(
         }
         logger.info { "Loading Spotify API data into SQLite: refresh=$refresh hasCompletedSync=$hasCompletedSync" }
         val snapshot = apiClient.fetchCache(accessToken)
-        store.replaceCacheContent(snapshot)
+        store.replaceCache(snapshot, clock.millis(), ownerSpotifyUserId)
         return CacheLoadResult.Loaded(
             savedTrackCount = snapshot.savedTracks.size,
             topTrackCount = snapshot.topTracks.size,

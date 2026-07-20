@@ -55,6 +55,20 @@ class ButlerServiceTest {
     }
 
     @Test
+    fun `refresh records the authenticated owner on the replacement cache`() {
+        withStore { store ->
+            ButlerService(
+                cacheService = SpotifyCacheService(StaticFetcher(emptySnapshot()), store, fixedClock()),
+                planningService = PlaylistPlanningService(store),
+                mutationService = PlaylistMutationService(RecordingButlerMutationClient(mutableListOf())),
+                clock = fixedClock(),
+            ).run("token", refresh = true, ownerSpotifyUserId = "owner-1")
+
+            assertEquals("owner-1", store.cacheMetadata()?.ownerSpotifyUserId)
+        }
+    }
+
+    @Test
     fun `sync failure prevents planning and mutation`() {
         val calls = mutableListOf<String>()
         withStore { store ->

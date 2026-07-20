@@ -156,6 +156,39 @@ class SpotifyApiClient(
         }
     }
 
+    fun getPlaylistSnapshot(
+        accessToken: String,
+        playlistId: String,
+    ): String? =
+        getJsonObject(apiUri("/v1/playlists/$playlistId"), accessToken, pageSequence = 0)
+            .optionalString("snapshot_id")
+
+    fun replaceTrackIds(
+        accessToken: String,
+        playlistId: String,
+        trackIds: List<String>,
+    ): String? {
+        val batches = trackIds.chunked(PLAYLIST_WRITE_BATCH_SIZE)
+        val firstBatch = batches.firstOrNull().orEmpty()
+        var snapshotId =
+            replaceTrackUris(
+                accessToken,
+                playlistId,
+                firstBatch.map(::trackUri),
+                append = false,
+            )
+        batches.drop(1).forEach { batch ->
+            snapshotId =
+                replaceTrackUris(
+                    accessToken,
+                    playlistId,
+                    batch.map(::trackUri),
+                    append = true,
+                ) ?: snapshotId
+        }
+        return snapshotId
+    }
+
     fun removeSavedTracks(
         accessToken: String,
         trackIds: List<String>,
@@ -199,21 +232,25 @@ class SpotifyApiClient(
         val topTracks = topTracksFuture.join()
         val topArtists = topArtistsFuture.join()
         val playlists = playlistsFuture.join()
-        val playlistTracks = fetchPlaylistTracks(playlists, accessToken)
+        val playlistItems = fetchPlaylistItems(playlists, accessToken)
+        val playlistTracks =
+            playlistItems.mapNotNull { item ->
+                item.track?.let { track -> PlaylistTrack(item.playlistName, item.addedAt, track) }
+            }
 
-        return SpotifyCacheSnapshot(savedTracks, topTracks, topArtists, playlists, playlistTracks)
+        return SpotifyCacheSnapshot(savedTracks, topTracks, topArtists, playlists, playlistTracks, playlistItems)
     }
 
-    private fun fetchPlaylistTracks(
+    private fun fetchPlaylistItems(
         playlists: List<SpotifyPlaylist>,
         accessToken: String,
-    ): List<PlaylistTrack> {
+    ): List<SpotifyPlaylistItem> {
         val executor = Executors.newFixedThreadPool(PLAYLIST_FETCH_CONCURRENCY)
         return try {
             playlists
                 .map { playlist ->
                     CompletableFuture.supplyAsync(
-                        { fetchPlaylistTracks(playlist, accessToken) },
+                        { fetchPlaylistItems(playlist, accessToken) },
                         executor,
                     )
                 }.flatMap { future -> future.join() }
@@ -222,19 +259,16 @@ class SpotifyApiClient(
         }
     }
 
-    private fun fetchPlaylistTracks(
+    private fun fetchPlaylistItems(
         playlist: SpotifyPlaylist,
         accessToken: String,
-    ): List<PlaylistTrack> {
-        val tracks =
-            pagedItems(playlist.tracksHref, accessToken).mapNotNull { item ->
-                parsePlaylistTrack(item, playlist.name) ?: run {
-                    logger.warn { "Skipping a playlist-track response item with no track object for ${playlist.name}." }
-                    null
-                }
+    ): List<SpotifyPlaylistItem> {
+        val items =
+            pagedItemsWithPositions(playlist.tracksHref, accessToken).map { (position, item) ->
+                parsePlaylistItem(item, playlist, position)
             }
-        logger.info { "Fetched ${tracks.size} tracks for Spotify playlist ${playlist.name}." }
-        return tracks
+        logger.info { "Fetched ${items.size} items for Spotify playlist ${playlist.name}." }
+        return items
     }
 
     private fun pagedItems(
@@ -247,6 +281,23 @@ class SpotifyApiClient(
         while (page != null) {
             val response = getJsonObject(page, accessToken, pageSequence)
             items += parsePageItems(response, page)
+            page = response.optionalString("next")?.takeIf(String::isNotBlank)?.let(::apiUri)
+            pageSequence++
+        }
+        return items
+    }
+
+    private fun pagedItemsWithPositions(
+        path: String,
+        accessToken: String,
+    ): List<Pair<Int, JsonObject>> {
+        val items = mutableListOf<Pair<Int, JsonObject>>()
+        var page: URI? = firstPageUri(apiUri(path))
+        var pageSequence = 1
+        while (page != null) {
+            val response = getJsonObject(page, accessToken, pageSequence)
+            val offset = response.optionalLong("offset")?.toInt() ?: items.size
+            items += parsePageItems(response, page).mapIndexed { index, item -> offset + index to item }
             page = response.optionalString("next")?.takeIf(String::isNotBlank)?.let(::apiUri)
             pageSequence++
         }
@@ -292,6 +343,24 @@ class SpotifyApiClient(
     }
 
     private fun trackUrisBody(tracks: List<SpotifyTrack>): String = uriBody(tracks.map(SpotifyTrack::uri))
+
+    private fun replaceTrackUris(
+        accessToken: String,
+        playlistId: String,
+        uris: List<String>,
+        append: Boolean,
+    ): String? {
+        val response =
+            if (append) {
+                transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
+            } else {
+                transport.put(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
+            }
+        return parseMutationResponse(response, if (append) "append playlist tracks" else "replace playlist tracks")
+            .optionalString("snapshot_id")
+    }
+
+    private fun trackUri(trackId: String): String = "spotify:track:$trackId"
 
     private fun uriBody(uris: List<String>): String =
         buildJsonObject {

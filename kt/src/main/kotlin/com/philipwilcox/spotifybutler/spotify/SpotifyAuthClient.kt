@@ -8,6 +8,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Clock
 import java.time.Duration
@@ -23,6 +24,7 @@ class SpotifyAuthClient(
     data class AuthorizationRequest(
         val location: URI,
         val state: String,
+        val returnTo: String,
     )
 
     data class TokenResponse(
@@ -33,20 +35,29 @@ class SpotifyAuthClient(
 
     data class CallbackAuthorization(
         val refresh: Boolean,
+        val codeVerifier: String,
+        val returnTo: String,
     )
 
     private data class PendingAuthorization(
         val refresh: Boolean,
         val expiresAt: Instant,
+        val codeVerifier: String,
+        val returnTo: String,
     )
 
     private val pendingAuthorizations = ConcurrentHashMap<String, PendingAuthorization>()
     private val random = SecureRandom()
 
-    fun beginAuthorization(refresh: Boolean): AuthorizationRequest {
+    fun beginAuthorization(
+        refresh: Boolean,
+        returnTo: String = "/",
+    ): AuthorizationRequest {
         removeExpiredAuthorizations()
         val state = newState(refresh)
-        pendingAuthorizations[state] = PendingAuthorization(refresh, clock.instant().plus(STATE_LIFETIME))
+        val codeVerifier = newCodeVerifier()
+        pendingAuthorizations[state] =
+            PendingAuthorization(refresh, clock.instant().plus(STATE_LIFETIME), codeVerifier, returnTo)
         val parameters =
             mapOf(
                 "response_type" to "code",
@@ -54,8 +65,14 @@ class SpotifyAuthClient(
                 "redirect_uri" to secrets.redirectUri,
                 "scope" to SCOPES.joinToString(" "),
                 "state" to state,
+                "code_challenge_method" to "S256",
+                "code_challenge" to codeChallenge(codeVerifier),
             )
-        return AuthorizationRequest(URI("https://accounts.spotify.com/authorize?${formEncode(parameters)}"), state)
+        return AuthorizationRequest(
+            URI("https://accounts.spotify.com/authorize?${formEncode(parameters)}"),
+            state,
+            returnTo,
+        )
     }
 
     fun consumeCallbackAuthorization(
@@ -64,17 +81,27 @@ class SpotifyAuthClient(
     ): CallbackAuthorization? {
         if (state.isNullOrBlank() || state != cookieState) return null
         val pending = pendingAuthorizations.remove(state) ?: return null
-        return pending.takeIf { it.expiresAt.isAfter(clock.instant()) }?.let { CallbackAuthorization(it.refresh) }
+        return pending
+            .takeIf { it.expiresAt.isAfter(clock.instant()) }
+            ?.let { CallbackAuthorization(it.refresh, it.codeVerifier, it.returnTo) }
     }
 
-    fun exchangeAuthorizationCode(code: String): TokenResponse {
+    fun exchangeAuthorizationCode(
+        code: String,
+        codeVerifier: String? = null,
+    ): TokenResponse {
         val credentials =
             Base64.getEncoder().encodeToString(
                 "${secrets.clientId}:${secrets.clientSecret}".toByteArray(),
             )
         val form =
             formEncode(
-                mapOf("code" to code, "redirect_uri" to secrets.redirectUri, "grant_type" to "authorization_code"),
+                buildMap {
+                    put("code", code)
+                    put("redirect_uri", secrets.redirectUri)
+                    put("grant_type", "authorization_code")
+                    codeVerifier?.let { put("code_verifier", it) }
+                },
             )
         val request =
             HttpRequest
@@ -95,12 +122,47 @@ class SpotifyAuthClient(
         )
     }
 
+    fun refreshAccessToken(refreshToken: String): TokenResponse {
+        val credentials =
+            Base64.getEncoder().encodeToString(
+                "${secrets.clientId}:${secrets.clientSecret}".toByteArray(),
+            )
+        val form = formEncode(mapOf("grant_type" to "refresh_token", "refresh_token" to refreshToken))
+        val request =
+            HttpRequest
+                .newBuilder(URI("https://accounts.spotify.com/api/token"))
+                .header("Authorization", "Basic $credentials")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .timeout(Duration.ofSeconds(20))
+                .POST(HttpRequest.BodyPublishers.ofString(form))
+                .build()
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        require(response.statusCode() in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
+            "Spotify token refresh failed with HTTP ${response.statusCode()}"
+        }
+        return TokenResponse(
+            accessToken = requiredJsonString(response.body(), "access_token"),
+            expiresInSeconds = requiredJsonNumber(response.body(), "expires_in"),
+            refreshToken = optionalJsonString(response.body(), "refresh_token") ?: refreshToken,
+        )
+    }
+
     private fun newState(refresh: Boolean): String =
         ByteArray(STATE_NONCE_BYTES).also(random::nextBytes).let { nonce ->
             val encodedNonce = Base64.getUrlEncoder().withoutPadding().encodeToString(nonce)
             val stateJson = "{\"nonce\":\"$encodedNonce\",\"refresh\":$refresh}"
             Base64.getUrlEncoder().withoutPadding().encodeToString(stateJson.toByteArray(StandardCharsets.UTF_8))
         }
+
+    private fun newCodeVerifier(): String =
+        ByteArray(CODE_VERIFIER_BYTES).also(random::nextBytes).let {
+            Base64.getUrlEncoder().withoutPadding().encodeToString(it)
+        }
+
+    private fun codeChallenge(codeVerifier: String): String =
+        Base64.getUrlEncoder().withoutPadding().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(codeVerifier.toByteArray()),
+        )
 
     private fun removeExpiredAuthorizations() {
         val now = clock.instant()
@@ -110,6 +172,7 @@ class SpotifyAuthClient(
     companion object {
         const val STATE_COOKIE = "spotify_auth_state"
         private const val STATE_NONCE_BYTES = 32
+        private const val CODE_VERIFIER_BYTES = 32
         private val STATE_LIFETIME: Duration = Duration.ofMinutes(10)
         private val SCOPES =
             listOf(

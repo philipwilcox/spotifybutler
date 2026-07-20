@@ -1,0 +1,447 @@
+openapi: 3.1.0
+info:
+  title: Spotify Butler API
+  version: 1.0.0
+  description: Browser-facing, owner-scoped API for cached Spotify views and submitted playlist synchronization.
+servers:
+  - url: /
+security:
+  - ButlerSession: []
+paths:
+  /health:
+    get:
+      security: []
+      responses:
+        '200':
+          description: Readiness only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/session:
+    get:
+      responses:
+        '200':
+          description: Current session and CSRF token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+    delete:
+      responses:
+        '204':
+          description: Session deleted.
+  /api/v1/session/refresh:
+    post:
+      responses:
+        '200':
+          description: Rotated session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+  /api/v1/playlists:
+    get:
+      responses:
+        '200':
+          description: Owner-scoped playlist definitions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistList'
+    post:
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlaylistRequest'
+      responses:
+        '201':
+          description: Created definition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistReference'
+  /api/v1/playlists/{definitionId}:
+    parameters:
+      - $ref: '#/components/parameters/DefinitionId'
+    get:
+      responses:
+        '200':
+          description: Playlist definition metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistReference'
+  /api/v1/playlists/{definitionId}/current:
+    get:
+      responses:
+        '200':
+          description: Current ID-only playlist view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentEnvelope'
+  /api/v1/playlists/{definitionId}/current/items:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/DefinitionId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Ordered current items, including inaccessible and unsupported items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistItems'
+        '409':
+          $ref: '#/components/responses/CursorStale'
+  /api/v1/playlists/{definitionId}/syncs:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/DefinitionId'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRequest'
+      responses:
+        '202':
+          description: Bounded idempotent sync operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+  /api/v1/playlists/{definitionId}/syncs/preview:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/DefinitionId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRequest'
+      responses:
+        '200':
+          description: Non-mutating ordered-list diff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preview'
+  /api/v1/library:
+    get:
+      responses:
+        '200':
+          description: Cache status and bounded counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Library'
+  /api/v1/library/refresh:
+    post:
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Cache refresh operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+  /api/v1/run:
+    post:
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Transitional cache-refresh operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+  /api/v1/songs:
+    get:
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+          description: One or more comma-separated Spotify track IDs, maximum 50.
+      responses:
+        '200':
+          description: Typed song enrichment in requested order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Songs'
+  /api/v1/songs/{trackId}:
+    get:
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One typed song enrichment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Song'
+  /api/v1/operations:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed]
+        - name: type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Owner-isolated operation history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operations'
+  /api/v1/operations/{operationId}:
+    get:
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+components:
+  securitySchemes:
+    ButlerSession:
+      type: apiKey
+      in: cookie
+      name: butler_session
+  parameters:
+    DefinitionId:
+      name: definitionId
+      in: path
+      required: true
+      schema:
+        type: string
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 200
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+  responses:
+    CursorStale:
+      description: Cursor was created against an older cache revision.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      required: [code, message, requestId, details]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        requestId: {type: string}
+        details: {type: object, additionalProperties: {type: string}}
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [ready]}
+    Session:
+      type: object
+      required: [userId, csrfToken, expiresAt]
+      properties:
+        userId: {type: string}
+        csrfToken: {type: string}
+        expiresAt: {type: string, format: date-time}
+    PlaylistReference:
+      type: object
+      required: [id, name, state, definitionRevision, trackIds]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        state: {type: string, enum: [mapped, unmapped]}
+        definitionRevision: {type: string}
+        cacheRevision: {type: [string, 'null']}
+        spotifyPlaylistId: {type: [string, 'null']}
+        trackIds: {type: array, items: {type: string}}
+    PlaylistList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PlaylistReference'}}
+        cacheRevision: {type: [string, 'null']}
+    CurrentEnvelope:
+      type: object
+      required: [current]
+      properties:
+        current:
+          anyOf:
+            - {$ref: '#/components/schemas/Current'}
+            - {type: 'null'}
+    Current:
+      type: object
+      required: [spotifyPlaylistId, cacheRevision, trackIds]
+      properties:
+        spotifyPlaylistId: {type: string}
+        snapshotId: {type: [string, 'null']}
+        cacheRevision: {type: string}
+        trackIds: {type: array, items: {type: string}}
+    PlaylistItem:
+      type: object
+      required: [playlistId, position, status, local, playable]
+      properties:
+        playlistId: {type: string}
+        position: {type: integer, minimum: 0}
+        type: {type: [string, 'null']}
+        status: {type: string}
+        trackId: {type: [string, 'null']}
+        uri: {type: [string, 'null']}
+        addedAt: {type: [string, 'null']}
+        addedById: {type: [string, 'null']}
+        local: {type: boolean}
+        playable: {type: boolean}
+    PlaylistItems:
+      type: object
+      required: [items, cacheRevision]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PlaylistItem'}}
+        nextCursor: {type: [string, 'null']}
+        cacheRevision: {type: string}
+    Library:
+      type: object
+      required: [status, counts]
+      properties:
+        status: {type: string, enum: [empty, ready, refreshing, stale]}
+        cacheRevision: {type: [string, 'null']}
+        ownerId: {type: [string, 'null']}
+        refreshOperationId: {type: [string, 'null']}
+        completedAt: {type: [string, 'null'], format: date-time}
+        counts: {type: object, additionalProperties: {type: integer}}
+    Album:
+      type: object
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: [string, 'null']}
+        href: {type: [string, 'null']}
+        uri: {type: [string, 'null']}
+        releaseDate: {type: [string, 'null']}
+    Artist:
+      type: object
+      properties:
+        id: {type: [string, 'null']}
+        name: {type: [string, 'null']}
+        href: {type: [string, 'null']}
+        uri: {type: [string, 'null']}
+    Song:
+      type: object
+      required: [id, name, href, uri, album, artists, available]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        href: {type: string}
+        uri: {type: string}
+        album: {$ref: '#/components/schemas/Album'}
+        artists: {type: array, items: {$ref: '#/components/schemas/Artist'}}
+        durationMs: {type: [integer, 'null']}
+        explicit: {type: [boolean, 'null']}
+        available: {type: boolean}
+        cacheRevision: {type: [string, 'null']}
+    Songs:
+      type: object
+      required: [items, missingIds]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Song'}}
+        missingIds: {type: array, items: {type: string}}
+        cacheRevision: {type: [string, 'null']}
+    SyncRequest:
+      type: object
+      required: [trackIds]
+      properties:
+        trackIds: {type: array, maxItems: 5000, items: {type: string}}
+        baseSnapshotId: {type: [string, 'null']}
+        baseCacheRevision: {type: [string, 'null']}
+    CreatePlaylistRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 200}
+        trackIds: {type: array, maxItems: 5000, items: {type: string}}
+    Preview:
+      type: object
+      required: [currentTrackIds, submittedTrackIds, toAdd, toRemove]
+      properties:
+        cacheRevision: {type: [string, 'null']}
+        baseSnapshotId: {type: [string, 'null']}
+        currentTrackIds: {type: array, items: {type: string}}
+        submittedTrackIds: {type: array, items: {type: string}}
+        toAdd: {type: array, items: {type: string}}
+        toRemove: {type: array, items: {type: string}}
+    Operation:
+      type: object
+      required: [id, type, status, createdAt]
+      properties:
+        id: {type: string}
+        type: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        createdAt: {type: string, format: date-time}
+        finishedAt: {type: [string, 'null'], format: date-time}
+        result: {type: [object, 'null']}
+        error: {anyOf: [{$ref: '#/components/schemas/Error'}, {type: 'null'}]}
+    Operations:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Operation'}}
+        nextCursor: {type: [string, 'null']}

@@ -50,11 +50,11 @@ class ButlerService(
     fun run(
         accessToken: String,
         refresh: Boolean,
+        ownerSpotifyUserId: String? = null,
     ): ButlerRunResult {
-        val sync = cacheService.prepareLoadIfNeeded(accessToken, refresh)
+        val sync = cacheService.prepareLoadIfNeeded(accessToken, refresh, ownerSpotifyUserId)
         val duplicateCleanup =
             if (sync is CacheLoadResult.Loaded) duplicateCleanupService.clean(accessToken) else DuplicateCleanupResult()
-        if (sync is CacheLoadResult.Loaded) cacheService.completeSync()
         val definitions = PlaylistQueries.definitions(Year.now(clock).value, minYearForDiscoverWeekly)
         val plans = planningService.plan(definitions)
         val outcomes = mutationService.apply(plans, dryRun)

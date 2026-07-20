@@ -7,14 +7,16 @@ import com.philipwilcox.spotifybutler.http.ButlerHttpServer
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
+import io.github.oshai.kotlinlogging.KotlinLogging
 
 fun main() {
+    val logger = KotlinLogging.logger {}
     val secrets = Secrets.load()
     val config = ServiceConfig.load()
     val captureLog = System.getenv("SPOTIFY_BUTLER_CAPTURE_LOG") ?: "disabled"
     val captureRunId = System.getenv("SPOTIFY_BUTLER_CAPTURE_RUN_ID") ?: "generated-by-client"
     val databasePath = config.databasePath.toAbsolutePath().normalize()
-    println("Spotify startup paths: database=$databasePath captureLog=$captureLog captureRunId=$captureRunId")
+    logger.info { "Spotify startup paths: database=$databasePath captureLog=$captureLog captureRunId=$captureRunId" }
     val apiClient = SpotifyApiClient()
     val store = SpotifyStore.open(config.databasePath)
     Runtime.getRuntime().addShutdownHook(Thread(store::close))
@@ -23,5 +25,6 @@ fun main() {
         apiClient = apiClient,
         cacheService = SpotifyCacheService(apiClient, store),
         store = store,
+        allowedSpotifyUserId = secrets.allowedSpotifyUserId,
     ).start()
 }

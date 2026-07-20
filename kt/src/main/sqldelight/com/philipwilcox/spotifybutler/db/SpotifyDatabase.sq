@@ -51,6 +51,75 @@ CREATE TABLE sync_status (
     sync_timestamp_millis INTEGER
 );
 
+CREATE TABLE cache_metadata (
+    singleton_id INTEGER NOT NULL PRIMARY KEY,
+    cache_revision TEXT NOT NULL,
+    sync_timestamp_millis INTEGER NOT NULL,
+    owner_spotify_user_id TEXT,
+    completion_state TEXT NOT NULL
+);
+
+CREATE TABLE playlist_details (
+    playlist_id TEXT NOT NULL PRIMARY KEY,
+    description TEXT,
+    is_public INTEGER,
+    collaborative INTEGER,
+    owner_id TEXT,
+    snapshot_id TEXT,
+    item_count INTEGER,
+    display_url TEXT
+);
+
+CREATE TABLE playlist_items (
+    playlist_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    added_at TEXT,
+    added_by_id TEXT,
+    is_local INTEGER NOT NULL,
+    item_type TEXT,
+    is_playable INTEGER NOT NULL,
+    item_id TEXT,
+    item_uri TEXT,
+    status TEXT NOT NULL,
+    complete_item_json TEXT NOT NULL,
+    PRIMARY KEY (playlist_id, position)
+);
+
+CREATE TABLE songs (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    href TEXT NOT NULL,
+    uri TEXT NOT NULL,
+    album_id TEXT,
+    album_name TEXT,
+    album_href TEXT,
+    album_uri TEXT,
+    release_date TEXT,
+    duration_ms INTEGER,
+    explicit INTEGER,
+    available INTEGER NOT NULL,
+    track_json TEXT NOT NULL
+);
+
+CREATE TABLE song_artists (
+    track_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    artist_id TEXT,
+    name TEXT,
+    href TEXT,
+    uri TEXT,
+    PRIMARY KEY (track_id, position)
+);
+
+CREATE TABLE managed_playlists (
+    definition_id TEXT NOT NULL,
+    definition_revision TEXT NOT NULL,
+    spotify_playlist_id TEXT NOT NULL,
+    owner_spotify_user_id TEXT NOT NULL,
+    PRIMARY KEY (definition_id, definition_revision),
+    UNIQUE (spotify_playlist_id, owner_spotify_user_id)
+);
+
 syncStatusCount:
 SELECT count(*)
 FROM sync_status;
@@ -291,3 +360,98 @@ selectPlaylistTracksByName:
 SELECT id, uri, track_json
 FROM playlist_tracks
 WHERE playlist_name = ?;
+
+selectCacheMetadata:
+SELECT singleton_id, cache_revision, sync_timestamp_millis, owner_spotify_user_id, completion_state
+FROM cache_metadata
+WHERE singleton_id = 1;
+
+selectPlaylistDetailsById:
+SELECT playlist_id, description, is_public, collaborative, owner_id, snapshot_id, item_count, display_url
+FROM playlist_details
+WHERE playlist_id = ?;
+
+selectPlaylistItemsById:
+SELECT playlist_id, position, added_at, added_by_id, is_local, item_type, is_playable,
+       item_id, item_uri, status, complete_item_json
+FROM playlist_items
+WHERE playlist_id = ?
+ORDER BY position;
+
+selectAllSongs:
+SELECT id, name, href, uri, album_id, album_name, album_href, album_uri, release_date,
+       duration_ms, explicit, available, track_json
+FROM songs
+ORDER BY id;
+
+selectSongArtists:
+SELECT track_id, position, artist_id, name, href, uri
+FROM song_artists
+WHERE track_id = ?
+ORDER BY position;
+
+selectManagedPlaylist:
+SELECT definition_id, definition_revision, spotify_playlist_id, owner_spotify_user_id
+FROM managed_playlists
+WHERE definition_id = ? AND definition_revision = ? AND owner_spotify_user_id = ?;
+
+insertCacheMetadata:
+INSERT INTO cache_metadata (singleton_id, cache_revision, sync_timestamp_millis, owner_spotify_user_id, completion_state)
+VALUES (1, ?, ?, ?, ?);
+
+clearCacheMetadata:
+DELETE FROM cache_metadata;
+
+clearPlaylistDetails:
+DELETE FROM playlist_details;
+
+clearPlaylistItems:
+DELETE FROM playlist_items;
+
+clearPlaylistItemsById:
+DELETE FROM playlist_items
+WHERE playlist_id = ?;
+
+clearSongs:
+DELETE FROM songs;
+
+clearSongArtists:
+DELETE FROM song_artists;
+
+insertPlaylistDetails:
+INSERT INTO playlist_details (
+    playlist_id, description, is_public, collaborative, owner_id, snapshot_id, item_count, display_url
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+insertPlaylistItem:
+INSERT INTO playlist_items (
+    playlist_id, position, added_at, added_by_id, is_local, item_type, is_playable,
+    item_id, item_uri, status, complete_item_json
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertSong:
+INSERT INTO songs (
+    id, name, href, uri, album_id, album_name, album_href, album_uri, release_date,
+    duration_ms, explicit, available, track_json
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertSongArtist:
+INSERT INTO song_artists (track_id, position, artist_id, name, href, uri)
+VALUES (?, ?, ?, ?, ?, ?);
+
+insertManagedPlaylist:
+INSERT INTO managed_playlists (
+    definition_id, definition_revision, spotify_playlist_id, owner_spotify_user_id
+)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(definition_id, definition_revision) DO UPDATE SET
+    spotify_playlist_id = excluded.spotify_playlist_id,
+    owner_spotify_user_id = excluded.owner_spotify_user_id;
+
+updatePlaylistSnapshot:
+UPDATE playlist_details
+SET snapshot_id = ?, item_count = ?
+WHERE playlist_id = ?;

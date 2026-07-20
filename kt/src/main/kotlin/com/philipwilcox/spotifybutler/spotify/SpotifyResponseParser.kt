@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -42,6 +43,20 @@ internal fun parseSpotifyTrack(
         durationMs = item.optionalLong("duration_ms"),
         explicit = item.optionalBoolean("explicit"),
         artistIds = artists.mapNotNull { it.optionalString("id") },
+        albumName = album?.optionalString("name"),
+        albumHref = album?.optionalString("href"),
+        albumUri = album?.optionalString("uri"),
+        available = item.optionalBoolean("is_playable") ?: item.optionalString("id") != null,
+        artists =
+            artists
+                .map { artist ->
+                    SpotifyArtistReference(
+                        id = artist.optionalString("id"),
+                        name = artist.optionalString("name"),
+                        href = artist.optionalString("href"),
+                        uri = artist.optionalString("uri"),
+                    )
+                }.filter { artist -> artist.name != null || artist.href != null || artist.uri != null },
     )
 }
 
@@ -76,6 +91,12 @@ internal fun parseSpotifyPlaylist(item: JsonObject): SpotifyPlaylist {
         uri = item.requiredString("uri", "playlist"),
         tracksHref = items.requiredString("href", "playlist items metadata"),
         snapshotId = item.optionalString("snapshot_id"),
+        description = item.optionalString("description"),
+        public = item.optionalBoolean("public"),
+        collaborative = item.optionalBoolean("collaborative"),
+        ownerId = (item["owner"] as? JsonObject)?.optionalString("id"),
+        itemCount = items["total"]?.jsonPrimitive?.intOrNull,
+        displayUrl = (item["external_urls"] as? JsonObject)?.optionalString("spotify"),
     )
 }
 
@@ -88,6 +109,47 @@ internal fun parsePlaylistTrack(
         playlistName,
         item.optionalString("added_at"),
         parseSpotifyTrack(track, "playlist track"),
+    )
+}
+
+@Suppress("CyclomaticComplexMethod")
+internal fun parsePlaylistItem(
+    item: JsonObject,
+    playlist: SpotifyPlaylist,
+    position: Int,
+): SpotifyPlaylistItem {
+    val nested = (item["item"] as? JsonObject) ?: (item["track"] as? JsonObject)
+    val itemType = nested?.optionalString("type") ?: item.optionalString("type")
+    val isLocal = item.optionalBoolean("is_local") ?: nested?.optionalBoolean("is_local") ?: false
+    val track =
+        nested?.takeIf { itemType == null || itemType == "track" }?.let {
+            runCatching { parseSpotifyTrack(it, "playlist item") }.getOrNull()
+        }
+    val itemId = nested?.optionalString("id")
+    val itemUri = nested?.optionalString("uri")
+    val isPlayable = track != null && !isLocal && itemType != "episode"
+    val status =
+        when {
+            nested == null -> "inaccessible"
+            itemType != null && itemType != "track" -> "unsupported_type"
+            isLocal -> "local"
+            track == null -> "unavailable"
+            else -> "playable"
+        }
+    return SpotifyPlaylistItem(
+        playlistId = playlist.id,
+        playlistName = playlist.name,
+        position = position,
+        addedAt = item.optionalString("added_at"),
+        addedById = (item["added_by"] as? JsonObject)?.optionalString("id"),
+        isLocal = isLocal,
+        itemType = itemType,
+        isPlayable = isPlayable,
+        itemId = itemId,
+        itemUri = itemUri,
+        status = status,
+        rawJson = item.toString(),
+        track = track?.takeIf { isPlayable },
     )
 }
 

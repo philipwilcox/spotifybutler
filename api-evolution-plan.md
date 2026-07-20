@@ -1,232 +1,185 @@
 # Kotlin API evolution plan — remaining work
 
-This document describes the remaining work for the browser-facing API. The
-appendix records only completed implementation facts that are relevant to the
-desired implementation.
+This document lists only work that is still incomplete after reviewing the
+uncommitted Kotlin/API changes against `HEAD` and the API demo script. The
+appendix records the completed implementation facts that form the compatibility
+baseline.
 
-The target is a browser-facing JSON API for the independent Kotlin service under
-`kt/`. Butler remains the backend-for-frontend: browsers call Butler, Butler
+The target remains a browser-facing JSON API for the independent Kotlin service
+under `kt/`. Butler is the backend-for-frontend: browsers call Butler, Butler
 calls Spotify, and Spotify credentials never enter browser JavaScript.
 
-## Remaining target contract
+## Invariants for the remaining work
 
-- Authenticate every `/api/v1` endpoint with a Butler session cookie. Keep only
-  a minimal, unauthenticated `GET /health` endpoint public.
-- Keep access and refresh tokens server-side. The browser receives only an
-  opaque session cookie and a CSRF token through the session resource.
+- Keep only a readiness-only `GET /health` endpoint unauthenticated. Every
+  `/api/v1` resource must be owner-scoped and session-authenticated.
+- Keep access and refresh tokens server-side. Use an opaque session cookie and
+  expose the CSRF token only through the session resource.
 - Treat a managed playlist as an ordered, client-editable list of Spotify track
-  IDs. The browser may reorder, remove, insert, and retain duplicate IDs, then
-  POST the final list back for synchronization.
-- Keep playlist responses ID-only. Return song metadata through a separate,
-  cacheable enrichment resource that accepts one track ID or a bounded list of
-  track IDs; clients may cache those enrichment responses.
-- Playlist content is never generated server-side. The submitted ordered ID
-  list is the complete mutation authority for that operation.
-- Publish opaque cache, playlist, and operation revisions where the resource
-  contracts require them.
-- Represent refresh and sync work as bounded, idempotent `Operation` resources.
-- Resolve managed playlists to Spotify IDs and never use mutable names as the
-  long-term identity boundary.
-- Keep the browser GUI and API on one origin by default.
+  IDs. Preserve order and duplicate IDs exactly; the submitted list is the
+  complete mutation authority.
+- Keep playlist responses ID-only. Song metadata belongs in a separate,
+  cacheable enrichment resource.
+- Never regenerate a playlist during synchronization. Publish opaque cache,
+  playlist, and operation revisions wherever the resource contract requires
+  them.
 
-## 1. Complete the cache and managed-playlist foundation
+## 1. Finish the durable cache and definition boundary
 
-Extend the SQLDelight schema and store boundary before exposing current-playlist
-or song-enrichment views:
+The schema, parser, and transactional replacement foundation exists, but the
+new projections are not yet the complete persisted/query contract:
 
-- Add cache metadata for opaque `cache_revision`, `sync_timestamp_millis`, the
-  owner Spotify user ID, and completion state. Publish a new revision only
-  after a complete successful replacement.
-- Expand playlist metadata with description, nullable public/collaborative
-  flags, owner ID, snapshot ID, item count, item accessibility/status, and
-  display URL metadata.
-- Add a normalized `playlist_items` projection with `playlist_id`, zero-based
-  `position`, nullable added-at/added-by data, local/type/playable flags,
-  nullable item ID/URI, and complete item JSON. Preserve raw upstream JSON for
-  compatibility, not as the query surface.
-- Preserve duplicate IDs at different positions and derive positions from the
-  response offset plus item index. Never use insertion order or `rowid`.
-- Preserve inaccessible items, episodes, local items, unavailable items, and
-  unknown future item types in the current view. Mark only playable Spotify
-  tracks as enrichable playlist songs; unsupported item types must never be
-  silently converted into track IDs.
-- Add normalized song and artist projections for enrichment. Keep album,
-  duration, explicitness, complete artist identity, availability, and URI
-  typed; raw upstream JSON remains compatibility data, not the query surface.
-- Fetch the complete replacement snapshot before opening the write transaction.
-  Replace cache tables and publish the revision atomically. A failed refresh
-  must leave the prior completed revision usable.
-- Add `managed_playlists` keyed by definition ID/revision and Spotify playlist
-  ID. Permit exact-name adoption only for one owned match; return a stable
-  conflict for multiple matches.
-- Carry this schema and parser change through fixture compatibility,
-  fixture export/scrubbing, synthetic tables, and contract tests for offsets,
-  duplicates, inaccessible items, non-track items, nulls, ordering, and atomic
-  replacement.
+- Extend `SpotifyTableSnapshot`, `ExpectedTables`, fixture export, scrubbing,
+  reports, and committed synthetic fixtures for `cache_metadata`,
+  `playlist_details`, `playlist_items`, `songs`, `song_artists`, and
+  `managed_playlists`. The cache contract currently still verifies only the
+  legacy six exported tables.
+- Make song and artist API reads use the normalized projections. Keep complete
+  upstream JSON only as compatibility data; do not reconstruct enrichment
+  responses by decoding `track_json`.
+- Persist user playlist definitions with their owner, ordered IDs, and
+  definition revision. The current `ConcurrentHashMap` loses definitions on
+  restart, does not provide durable owner isolation, and the user-definition
+  revision is not derived from the editable track list.
+- Filter exact-name adoption candidates by the authenticated owner before
+  deciding whether there is one match or a conflict. Return one stable conflict
+  when multiple owned matches remain, and never let a foreign cached playlist
+  block or satisfy adoption.
+- Add explicit cache lifecycle state for empty, refreshing, ready, and stale
+  data. A failed refresh must leave the prior completed revision usable while
+  reporting the failed/stale state and operation link to clients.
+- Keep revision publication atomic for refreshes and targeted mutation
+  publication. Define which owner, completion state, timestamp, and revision
+  survive restart and migration, and add schema-versioned migrations rather
+  than relying on a newly created database.
 
-## 2. Add the authenticated HTTP/API foundation
+## 2. Harden the HTTP, OAuth, and security contract
 
-Create an application facade so HTTP parsing and response mapping do not own
-business policy:
+- Make the OpenAPI document executable as the route contract: validate it in
+  tests, cover every implemented route and error response, and keep method,
+  security, content-type, pagination, and status behavior synchronized with the
+  embedded server.
+- Return one sanitized error envelope for transport, OAuth, and API failures.
+  Add the generated/request-supplied request ID to the response header as well
+  as the body. Server-level errors currently use a different envelope and the
+  API-generated ID is not returned as a header.
+- Sanitize token-exchange failure handling so Spotify response bodies, client
+  credentials, access tokens, refresh tokens, authorization codes, and secret
+  properties cannot enter exceptions, responses, or logs.
+- Require and validate a configured trusted `Origin` for state-changing
+  requests. Wire trusted origins, HTTPS callback/origin settings, secure cookie
+  mode, trusted-proxy handling, and Host validation from deployment
+  configuration; do not silently disable Origin checks when the configured set
+  is empty.
+- Complete session refresh concurrency control: serialize refreshes per
+  session, rotate exactly once, invalidate the old session, and preserve the
+  newest refresh token when Spotify rotates it. Enforce the single-user
+  allowlist as an explicit resource policy, not only as a callback check.
+- Keep bounded request bodies and pagination, but add limits and validation to
+  operation history and all cursor inputs. Unknown methods and paths must
+  consistently return JSON errors with the correct request ID.
 
-- Add an OpenAPI 3.1 document as the authoritative route, method, security,
-  status, and schema contract.
-- Add dedicated serializable wire DTOs. Do not expose persistence models,
-  Spotify response models, raw JSON, tokens, or secret material.
-- Add the stable error envelope with `code`, `message`, `requestId`, and
-  sanitized details. Enforce the planned status mapping for malformed input,
-  auth, ownership, conflicts, validation, rate limits, and Spotify failures.
-- Add request-correlation IDs, JSON content-type checks, bounded request bodies,
-  bounded pagination, and JSON `404` responses. Remove catch-all `200 Hello
-  World!` behavior for unknown routes.
-- Add `GET /health` outside `/api/v1`; it must expose readiness only.
-- Add `SessionStore` with opaque, expiring, owner-scoped sessions. Store access
-  and refresh tokens server-side and rotate the session after authentication.
-- Keep OAuth navigation at `GET /start` and `GET /callback`, but add configured
-  relative `returnTo` validation, server-side PKCE, state replay protection,
-  refresh-token handling, and safe failure responses.
-- Add `GET /api/v1/session`, `POST /api/v1/session/refresh`, and
-  `DELETE /api/v1/session`.
-- Require the session's CSRF token in a custom header on every state-changing
-  request and validate trusted `Origin` values. Configure secure cookie
-  attributes for HTTPS deployments.
-- Enforce single-user allowlisting and owner checks for every resource.
+## 3. Complete the ID-only resource semantics
 
-## 3. Add ID-only song and playlist resources
+- Make playlist definitions and all playlist lookups owner-scoped, including
+  `GET /api/v1/playlists/{definitionId}` and user-created definitions. Add the
+  definition update/persistence path needed for a client-editable list, or
+  explicitly keep creation disabled until that path exists.
+- Make library status accurately report `refreshing` and `stale`, expose the
+  active refresh operation, and keep refresh work bounded and idempotent. A
+  failed refresh must not continue to look `ready` merely because an older
+  cache revision exists.
+- Make song enrichment read normalized album/artist fields, preserve requested
+  order, and distinguish missing IDs from known-but-unavailable IDs. Add HTTP
+  cache validators or equivalent cache headers in addition to the revision
+  field in the JSON body.
+- Bind current-item cursors to the complete query shape, including every
+  applicable filter and page contract. Add real cursor pagination to operation
+  history; it currently returns a limited list with no continuation cursor.
+- Keep current metadata purely cache-backed and keep inaccessible, local,
+  unavailable, episode, and future item types visible in the item resource.
+  Add contract coverage that proves no current or enrichment read calls Spotify
+  or mutates a playlist.
 
-Implement these owner-scoped resources using the cache revision:
+## 4. Finish operations and client-submitted synchronization
 
-```text
-GET  /api/v1/playlists
-POST /api/v1/playlists
-GET  /api/v1/playlists/{definitionId}
-
-GET  /api/v1/library
-POST /api/v1/library/refresh
-
-GET  /api/v1/songs/{trackId}
-GET  /api/v1/songs?ids=trackId1,trackId2,...
-
-GET  /api/v1/playlists/{definitionId}/current
-GET  /api/v1/playlists/{definitionId}/current/items?limit=50&cursor=...
-```
-
-Requirements:
-
-- Playlist responses contain playlist identity, mapping state, revisions, and
-  ordered track references only. They must not embed full song objects or raw
-  Spotify JSON. User-created definitions may remain disabled initially, but a
-  definition directly holds an editable list.
-- Library status exposes `empty`, `ready`, `refreshing`, or `stale`, cache
-  revision, owner, refresh operation link, completion time, and bounded counts.
-  It never exposes raw track data in the metadata response.
-- Refresh requires `Idempotency-Key`, only refreshes the cache, and returns a
-  `library_refresh` operation. It must not clean duplicates or mutate Spotify
-  playlists.
-- Song enrichment accepts one ID or a bounded list, preserves requested order,
-  returns typed album/artist/duration/explicitness/availability data, and
-  reports missing or unavailable IDs without returning raw upstream payloads.
-  Responses are cacheable and carry the cache revision or equivalent validator
-  needed to invalidate client-side entries.
-- Current metadata must not perform selection or call Spotify. Return `current:
-  null` when no managed mapping exists.
-- Current items use explicit `(playlist_id, position)` ordering and ID-only item
-  records. Preserve inaccessible/unsupported entries with their type/status and
-  nullable ID, while a client-editable track list contains only playable track
-  IDs. Use opaque cursors bound to the cache revision and filters; return
-  `409 cursor_stale` when the revision changes.
-
-## 4. Add operations and client-submitted playlist sync
-
-Add bounded `OperationStore` and make the submitted ordered list the sync
-contract:
-
-```text
-GET  /api/v1/operations?status=running&type=playlist_sync&limit=50&cursor=...
-GET  /api/v1/operations/{operationId}
-POST /api/v1/playlists/{definitionId}/syncs
-```
-
-- Operations use `queued`, `running`, `succeeded`, and `failed` states, bounded
-  recent history, owner isolation, unguessable IDs, and discriminated results.
-  Cancellation is not implied until implemented.
-- Refresh and sync creation require `Idempotency-Key`. Reuse with the same
-  owner and request returns the original operation; reuse with a different
-  request returns `409 idempotency_conflict`.
-- The sync request contains an ordered `trackIds` array plus the base playlist
-  snapshot/revision the browser edited. IDs are converted to Spotify URIs only
-  inside the server. Preserve order and duplicate IDs exactly; reject unknown,
-  non-track, unavailable, or over-limit entries with stable validation errors.
-- Validate owner, route, cache readiness, and the submitted list before creating
-  the operation. The submitted IDs are the only playlist-content authority;
-  client song metadata is display data and is not trusted for mutation.
-- Lock the concrete playlist or definition instance. Immediately before
-  mutation, fetch live metadata and compare the expected snapshot ID; report
-  `playlist_changed` without mutating on conflict. The client can then refresh,
-  reapply its edits, and submit again.
-- For unmapped definitions, repeat exact-name adoption/mapping checks while
-  holding the definition lock. Never create a duplicate arbitrarily.
-- Apply the submitted ordered URIs exactly; never rerun selection during sync.
-- Capture mutation snapshot IDs, serialize cache publication with refreshes,
-  and atomically update the managed mapping and targeted cache projection after
-  an authoritative post-write read.
-- Return sanitized partial results for later-batch failures, mark the cache
-  stale, and require refresh after partial mutation or failed post-write read.
-- Make retries safe through idempotency and applied-request records.
+- Replace the in-memory, unbounded operation map with an atomic idempotency
+  index and bounded recent history (persistent if restart survival is part of
+  the deployment contract). Owner, type, key, and request fingerprint lookup
+  plus create must be one atomic operation; concurrent requests must not create
+  duplicate operations.
+- Define whether work is queued asynchronously or deliberately completed in
+  the request, then make the `202`/`queued`/`running`/`succeeded` contract match
+  that choice. Retain discriminated, sanitized results and partial outcomes.
+- Require the edited base cache revision and playlist snapshot where a sync
+  needs optimistic concurrency. Lock the concrete definition/playlist before
+  rechecking ownership, exact-name adoption, cache readiness, and live Spotify
+  metadata. Fail closed if the live snapshot cannot be read.
+- Before mutating, compare the live snapshot while holding the lock. For an
+  unmapped definition, repeat exact-name adoption/mapping under that same lock;
+  never choose a duplicate or create an arbitrary replacement.
+- Make Spotify replacement batch-safe. Record the applied request and mutation
+  snapshot IDs, handle a later-batch failure as a partial mutation, mark the
+  affected cache stale, and require a refresh when the authoritative post-write
+  read is unavailable.
+- After a successful mutation, perform an authoritative post-write read and
+  atomically publish the ordered item projection, playlist snapshot, managed
+  mapping, cache revision, and completion state. Do not synthesize a fully
+  playable cache view that discards unsupported or inaccessible items.
+- Make retries safe across process races and restarts through persisted
+  idempotency/applied-request records. Return `playlist_changed`, stale
+  revision, validation, rate-limit, Spotify, and partial-failure errors with
+  stable codes and sanitized details.
 
 ## 5. Preserve and then retire the legacy run
 
-Add the transitional resource:
-
-```text
-POST /api/v1/run
-```
-
-It may compose refresh, duplicate cleanup, client-submitted sync operations, and
-multiple playlist updates, but must use the same lower-level services and safety
-checks. No GUI workflow should depend on it. Duplicate cleanup remains separate
-from library refresh and playlist sync. Deprecate the all-at-once callback only
-after the GUI uses the narrow resources.
+Keep the transitional `POST /api/v1/run` only as an adapter over the completed
+lower-level services. It must be able to compose refresh, duplicate cleanup,
+client-submitted sync, and multiple playlist updates while retaining the same
+locks, idempotency, ownership, cache publication, and partial-failure rules.
+The current endpoint only refreshes the cache. Do not make a GUI depend on it;
+migrate the GUI to local editing and final-list submission before removing or
+fully deprecating the all-at-once callback workflow.
 
 ## 6. Verification and deployment gates
 
-Before enabling browser access beyond local development:
+Before enabling browser access beyond local development, add the missing
+verification and hardening below:
 
-- [ ] Add OpenAPI and route contract tests.
-- [ ] Test session ownership, allowlisting, PKCE/state replay, rotation,
-  refresh locking, CSRF, Origin checks, cookie attributes, and credential
-  absence from responses/logs.
-- [ ] Test operation isolation: refresh never mutates playlists, current view
-  never calls Spotify, song enrichment does not mutate playlists, and one sync
-  never touches another definition.
-- [ ] Test ID-only playlist responses, single and batch song enrichment,
-  requested order, client-side duplicate IDs, cache validators, and missing
-  songs.
-- [ ] Test idempotency, stale revisions, cursor staleness, live snapshot
-  conflicts, partial batch failure, and cache atomicity.
-- [ ] Test current Spotify item ordering, duplicate positions, inaccessible and
-  unknown item types, nullable fields, and multi-page offsets.
-- [ ] Add HTTPS callback/origin configuration, secure cookies, trusted-proxy
-  and Host checks, quotas, rate limits, timeouts, and monitoring.
-- [ ] Keep LAN binding opt-in and document that HTTP on a LAN does not provide
-  HTTPS-equivalent cookie confidentiality.
-- [ ] Add encrypted or OS-protected persistent token storage only if restart
+- OpenAPI validation and route/status/security contract tests, including
+  transport-level errors and request-ID propagation.
+- Integration tests for session expiry and refresh races, owner allowlisting,
+  owner isolation, OAuth failure sanitization, PKCE/state replay, CSRF,
+  required Origin checks, secure cookie attributes, Host/proxy policy, and
+  credential absence from responses and logs.
+- Tests for persistent definitions and normalized projections, fixture export
+  and scrubbing of all new tables, cache lifecycle states, revision atomicity,
+  restart behavior, and foreign-playlist adoption conflicts.
+- Tests for unavailable song reporting, HTTP cache validators, operation
+  pagination, atomic idempotency creation, concurrent syncs, required base
+  revisions, live snapshot conflicts, unmapped adoption, partial batch failure,
+  authoritative post-write reads, stale-cache recovery, and retry behavior.
+- Configure HTTPS callback/origin policy, secure cookies, trusted-proxy and
+  Host checks, quotas, rate limits, timeouts, and monitoring. Keep LAN binding
+  opt-in and document that HTTP on a LAN does not provide HTTPS-equivalent
+  cookie confidentiality.
+- Add encrypted or OS-protected persistent token storage only if restart
   survival is required; never store refresh tokens as plaintext SQLite data.
 
 ## Rollout sequence for the remaining work
 
-1. Extend the cache schema, atomic revision publication, item ordering, typed
-   song/artist projections, and managed mapping while retaining fixture
-   compatibility.
-2. Add the application facade, OpenAPI/DTO/error infrastructure, sessions,
-   PKCE, refresh handling, CSRF, and session endpoints.
-3. Add ID-only playlist/current resources, cacheable single and batch song
-   enrichment, and library refresh.
-4. Add operations and client-submitted playlist sync with snapshot checks,
-   idempotency, cache publication, and partial-failure recovery.
-5. Add the transitional `/api/v1/run`, migrate the GUI to local editing plus
-   final-list submission, and deprecate the all-at-once callback.
-6. Complete HTTPS/LAN deployment hardening, quotas, rate limits, and monitoring.
+1. Complete normalized cache/fixture persistence, definition ownership, cache
+   lifecycle state, and migrations.
+2. Lock down the HTTP/OAuth contract, error/request-ID behavior, configuration,
+   and session concurrency.
+3. Finish owner-scoped definitions, cacheable enrichment, library lifecycle,
+   and cursor semantics.
+4. Finish operation durability, locking, exact submitted-list synchronization,
+   post-write reconciliation, and partial-failure recovery.
+5. Expand the transitional `/run`, migrate the GUI, and deprecate the legacy
+   all-at-once workflow.
+6. Complete verification, HTTPS/LAN hardening, quotas, rate limits, and
+   monitoring.
 
 ## Appendix: completed work
 
@@ -256,3 +209,45 @@ baseline for the desired API implementation.
   playlist item endpoint names.
 - Mutation endpoint, batch-size, parser, and legacy-fixture compatibility tests
   pass.
+
+### Cache and parser foundation from the reviewed changes
+
+- Added cache metadata, playlist details, ordered playlist-item rows, typed song
+  and artist projections, and managed-playlist mapping tables while retaining
+  raw upstream JSON for compatibility.
+- Parsed playlist offsets into explicit positions and preserved duplicates,
+  inaccessible items, local items, unavailable tracks, episodes, and unknown
+  item types without converting them into false track IDs.
+- Added typed album, artist, availability, duration, explicitness, playlist
+  ownership, snapshot, and display URL fields to the cache models.
+- Fetches complete replacement data before the SQLite transaction and publishes
+  the completed cache revision atomically; a failed replacement leaves the
+  prior completed revision usable.
+
+### HTTP/API foundation from the reviewed changes
+
+- Added the OpenAPI 3.1 document, serializable wire DTOs, sanitized API error
+  envelope, application facade, readiness endpoint, bounded request bodies,
+  JSON 404s, and owner/session route plumbing.
+- Added opaque expiring in-memory sessions, server-side token retention, session
+  rotation, callback return-to validation, server-side PKCE, state replay
+  protection, refresh-token handling, CSRF checks, and configurable cookie
+  security flags.
+- Added ID-only playlist/current/item views, bounded single and batch song
+  enrichment, cache revisions in resource responses, cursor-stale handling,
+  library refresh, operation resources, and a non-mutating sync preview.
+- Added basic validation for submitted track IDs, duplicate-preserving Spotify
+  URI conversion, optimistic snapshot checks when supplied, and owner-scoped
+  idempotency behavior for refresh and sync operations.
+- Added `scripts/api-demo.sh` to demonstrate readiness, session, refresh,
+  current-item, song-enrichment, and sync-preview calls.
+
+### Verification added in the reviewed changes
+
+- Added parser tests for current playlist item shapes, response offsets,
+  duplicate positions, inaccessible items, and unsupported item types.
+- Added cache replacement atomicity coverage and API tests for ID-only current
+  views, ordered item pagination, song order/missing IDs, CSRF rejection,
+  duplicate-preserving sync submission, and idempotent replay.
+- Added security tests for session rotation, server-side credential retention,
+  idempotency conflicts, and PKCE/state single-use behavior.

@@ -9,6 +9,7 @@ data class Secrets(
     val clientSecret: String,
     val redirectUri: String,
     val accessToken: String?,
+    val allowedSpotifyUserId: String? = null,
 ) {
     companion object {
         private const val SECRETS_FILE_ENV = "SPOTIFY_BUTLER_SECRETS_FILE"
@@ -28,6 +29,7 @@ data class Secrets(
                 clientSecret = properties.required("spotify.clientSecret"),
                 redirectUri = properties.required("spotify.redirectUri"),
                 accessToken = properties.getProperty("spotify.accessToken")?.trim()?.ifEmpty { null },
+                allowedSpotifyUserId = properties.getProperty("spotify.allowedUserId")?.trim()?.ifEmpty { null },
             )
         }
 

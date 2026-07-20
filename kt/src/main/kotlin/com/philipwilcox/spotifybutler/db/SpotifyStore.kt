@@ -12,10 +12,12 @@ import com.philipwilcox.spotifybutler.spotify.SavedTrack
 import com.philipwilcox.spotifybutler.spotify.SpotifyArtist
 import com.philipwilcox.spotifybutler.spotify.SpotifyCacheSnapshot
 import com.philipwilcox.spotifybutler.spotify.SpotifyPlaylist
+import com.philipwilcox.spotifybutler.spotify.SpotifyPlaylistItem
 import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import com.philipwilcox.spotifybutler.spotify.decodeStoredTrack
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.UUID
 
 @Suppress("TooManyFunctions")
 class SpotifyStore private constructor(
@@ -41,6 +43,113 @@ class SpotifyStore private constructor(
     }
 
     fun exportTables(): SpotifyTableSnapshot = database.exportTables(queries)
+
+    fun cacheMetadata(): CacheMetadata? =
+        queries.selectCacheMetadata().executeAsOneOrNull()?.let {
+            CacheMetadata(
+                revision = it.cache_revision,
+                syncTimestampMillis = it.sync_timestamp_millis,
+                ownerSpotifyUserId = it.owner_spotify_user_id,
+                completionState = it.completion_state,
+            )
+        }
+
+    fun playlistItems(playlistId: String): List<StoredPlaylistItem> =
+        queries.selectPlaylistItemsById(playlistId).executeAsList().map { row ->
+            StoredPlaylistItem(
+                playlistId = requireNotNull(row.playlist_id),
+                position = row.position.toInt(),
+                addedAt = row.added_at,
+                addedById = row.added_by_id,
+                isLocal = row.is_local != 0L,
+                itemType = row.item_type,
+                isPlayable = row.is_playable != 0L,
+                itemId = row.item_id,
+                itemUri = row.item_uri,
+                status = row.status,
+            )
+        }
+
+    fun songs(): List<SpotifyTrack> =
+        queries.selectAllSongs().executeAsList().map { row ->
+            decodeStoredTrack(requireNotNull(row.track_json), "song ${row.id}")
+        }
+
+    fun song(id: String): SpotifyTrack? = songs().firstOrNull { it.id == id }
+
+    fun playlistDetails(playlistId: String): StoredPlaylistDetails? =
+        queries.selectPlaylistDetailsById(playlistId).executeAsOneOrNull()?.let { row ->
+            StoredPlaylistDetails(
+                playlistId = requireNotNull(row.playlist_id),
+                description = row.description,
+                public = row.is_public?.toBooleanFlag(),
+                collaborative = row.collaborative?.toBooleanFlag(),
+                ownerId = row.owner_id,
+                snapshotId = row.snapshot_id,
+                itemCount = row.item_count?.toInt(),
+                displayUrl = row.display_url,
+            )
+        }
+
+    fun playlistIdByName(name: String): String? = findPlaylistByName(name)?.id
+
+    fun playlistMatchesByName(name: String): List<ExistingPlaylistMetadata> =
+        queries.selectPlaylistByName(name).executeAsList().map {
+            ExistingPlaylistMetadata(
+                requireNotNull(it.id) { "Cached playlist $name has no id" },
+                it.snapshot_id,
+            )
+        }
+
+    fun managedPlaylist(
+        definitionId: String,
+        definitionRevision: String,
+        ownerSpotifyUserId: String,
+    ): ManagedPlaylist? =
+        queries.selectManagedPlaylist(definitionId, definitionRevision, ownerSpotifyUserId).executeAsOneOrNull()?.let {
+            ManagedPlaylist(
+                definitionId = requireNotNull(it.definition_id),
+                definitionRevision = requireNotNull(it.definition_revision),
+                spotifyPlaylistId = requireNotNull(it.spotify_playlist_id),
+                ownerSpotifyUserId = requireNotNull(it.owner_spotify_user_id),
+            )
+        }
+
+    fun saveManagedPlaylist(
+        definitionId: String,
+        definitionRevision: String,
+        spotifyPlaylistId: String,
+        ownerSpotifyUserId: String,
+    ) {
+        queries.insertManagedPlaylist(definitionId, definitionRevision, spotifyPlaylistId, ownerSpotifyUserId)
+    }
+
+    fun publishPlaylistTrackIds(
+        playlistId: String,
+        trackIds: List<String>,
+        snapshotId: String?,
+    ) {
+        database.transaction {
+            queries.clearPlaylistItemsById(playlistId)
+            trackIds.forEachIndexed { position, trackId ->
+                val track = song(trackId) ?: error("Cannot publish unknown track $trackId")
+                queries.insertPlaylistItem(
+                    playlist_id = playlistId,
+                    position = position.toLong(),
+                    added_at = null,
+                    added_by_id = null,
+                    is_local = 0L,
+                    item_type = "track",
+                    is_playable = 1L,
+                    item_id = track.id,
+                    item_uri = track.uri,
+                    status = "playable",
+                    complete_item_json = "{\"item\":${track.rawJson}}",
+                )
+            }
+            queries.updatePlaylistSnapshot(snapshotId, trackIds.size.toLong(), playlistId)
+        }
+    }
 
     fun execute(query: PlaylistQuery): List<SpotifyTrack> =
         storedRows(query).map { row ->
@@ -131,24 +240,26 @@ class SpotifyStore private constructor(
     fun replaceCache(
         snapshot: SpotifyCacheSnapshot,
         syncTimestampMillis: Long,
+        ownerSpotifyUserId: String? = null,
     ) {
-        replaceCacheContent(snapshot)
-        markSyncComplete(syncTimestampMillis)
+        database.transaction {
+            replaceCacheContentInTransaction(snapshot)
+            queries.clearSyncStatus()
+            queries.insertSyncStatus(syncTimestampMillis)
+            queries.clearCacheMetadata()
+            queries.insertCacheMetadata(
+                cache_revision = newCacheRevision(),
+                sync_timestamp_millis = syncTimestampMillis,
+                owner_spotify_user_id = ownerSpotifyUserId,
+                completion_state = CACHE_COMPLETE,
+            )
+        }
     }
 
     fun replaceCacheContent(snapshot: SpotifyCacheSnapshot) {
         database.transaction {
-            queries.clearTopArtists()
-            queries.clearTopTracks()
-            queries.clearSavedTracks()
-            queries.clearPlaylists()
-            queries.clearPlaylistTracks()
-            snapshot.savedTracks.forEach(::insertSavedTrack)
-            snapshot.topTracks.forEach(::insertTopTrack)
-            snapshot.topArtists.forEach(::insertTopArtist)
-            snapshot.playlists.forEach(::insertPlaylist)
-            snapshot.playlistTracks.forEach(::insertPlaylistTrack)
-            queries.clearSyncStatus()
+            replaceCacheContentInTransaction(snapshot)
+            queries.clearCacheMetadata()
         }
     }
 
@@ -156,6 +267,13 @@ class SpotifyStore private constructor(
         database.transaction {
             queries.clearSyncStatus()
             queries.insertSyncStatus(syncTimestampMillis)
+            queries.clearCacheMetadata()
+            queries.insertCacheMetadata(
+                cache_revision = newCacheRevision(),
+                sync_timestamp_millis = syncTimestampMillis,
+                owner_spotify_user_id = null,
+                completion_state = CACHE_COMPLETE,
+            )
         }
     }
 
@@ -196,6 +314,16 @@ class SpotifyStore private constructor(
             tracks_href = playlist.tracksHref,
             snapshot_id = playlist.snapshotId,
         )
+        queries.insertPlaylistDetails(
+            playlist_id = playlist.id,
+            description = playlist.description,
+            is_public = playlist.public?.toLongFlag(),
+            collaborative = playlist.collaborative?.toLongFlag(),
+            owner_id = playlist.ownerId,
+            snapshot_id = playlist.snapshotId,
+            item_count = playlist.itemCount?.toLong(),
+            display_url = playlist.displayUrl,
+        )
     }
 
     private fun insertPlaylistTrack(playlistTrack: PlaylistTrack) {
@@ -214,6 +342,107 @@ class SpotifyStore private constructor(
             )
         }
     }
+
+    private fun insertPlaylistItem(item: SpotifyPlaylistItem) {
+        queries.insertPlaylistItem(
+            playlist_id = item.playlistId,
+            position = item.position.toLong(),
+            added_at = item.addedAt,
+            added_by_id = item.addedById,
+            is_local = if (item.isLocal) 1L else 0L,
+            item_type = item.itemType,
+            is_playable = if (item.isPlayable) 1L else 0L,
+            item_id = item.itemId,
+            item_uri = item.itemUri,
+            status = item.status,
+            complete_item_json = item.rawJson,
+        )
+    }
+
+    private fun insertSong(track: SpotifyTrack) {
+        queries.insertSong(
+            id = track.id,
+            name = track.name,
+            href = track.href,
+            uri = track.uri,
+            album_id = track.albumId,
+            album_name = track.albumName,
+            album_href = track.albumHref,
+            album_uri = track.albumUri,
+            release_date = track.releaseDate,
+            duration_ms = track.durationMs,
+            explicit = track.explicit?.let { if (it) 1L else 0L },
+            available = if (track.available) 1L else 0L,
+            track_json = track.rawJson,
+        )
+        track.artists.forEachIndexed { position, artist ->
+            queries.insertSongArtist(
+                track_id = track.id,
+                position = position.toLong(),
+                artist_id = artist.id,
+                name = artist.name,
+                href = artist.href,
+                uri = artist.uri,
+            )
+        }
+    }
+
+    private fun replaceCacheContentInTransaction(snapshot: SpotifyCacheSnapshot) {
+        queries.clearTopArtists()
+        queries.clearTopTracks()
+        queries.clearSavedTracks()
+        queries.clearPlaylists()
+        queries.clearPlaylistTracks()
+        queries.clearPlaylistDetails()
+        queries.clearPlaylistItems()
+        queries.clearSongs()
+        queries.clearSongArtists()
+        snapshot.savedTracks.forEach(::insertSavedTrack)
+        snapshot.topTracks.forEach(::insertTopTrack)
+        snapshot.topArtists.forEach(::insertTopArtist)
+        snapshot.playlists.forEach(::insertPlaylist)
+        snapshot.playlistTracks.forEach(::insertPlaylistTrack)
+        val playlistItems =
+            if (snapshot.playlistItems.isNotEmpty()) {
+                snapshot.playlistItems
+            } else {
+                snapshot.playlistTracks.groupBy(PlaylistTrack::playlistName).flatMap { (playlistName, items) ->
+                    val playlistId =
+                        requireNotNull(snapshot.playlists.firstOrNull { it.name == playlistName }?.id) {
+                            "Playlist $playlistName is missing from cache snapshot"
+                        }
+                    items.mapIndexed { position, item ->
+                        SpotifyPlaylistItem(
+                            playlistId = playlistId,
+                            playlistName = item.playlistName,
+                            position = position,
+                            addedAt = item.addedAt,
+                            addedById = null,
+                            isLocal = false,
+                            itemType = "track",
+                            isPlayable = true,
+                            itemId = item.track.id,
+                            itemUri = item.track.uri,
+                            status = "playable",
+                            rawJson = "{\"track\":${item.track.rawJson}}",
+                            track = item.track,
+                        )
+                    }
+                }
+            }
+        playlistItems.forEach(::insertPlaylistItem)
+        val tracks =
+            (
+                snapshot.savedTracks.map(SavedTrack::track) +
+                    snapshot.topTracks +
+                    snapshot.playlistTracks.map(PlaylistTrack::track) +
+                    playlistItems.mapNotNull(SpotifyPlaylistItem::track)
+            ).distinctBy(SpotifyTrack::id)
+        tracks.forEach(::insertSong)
+        queries.clearSyncStatus()
+    }
+
+    private fun newCacheRevision(): String = "cache-${UUID.randomUUID()}"
 
     private fun storedRows(query: PlaylistQuery): List<StoredTrackRow> =
         when (query) {
@@ -278,7 +507,13 @@ class SpotifyStore private constructor(
 
     private fun String?.releaseYear(): Long? = this?.substringBefore('-')?.toLongOrNull()
 
+    private fun Long.toBooleanFlag(): Boolean = this != 0L
+
+    private fun Boolean.toLongFlag(): Long = if (this) 1L else 0L
+
     companion object {
+        private const val CACHE_COMPLETE = "complete"
+
         fun open(databasePath: Path): SpotifyStore {
             val absolutePath = databasePath.toAbsolutePath().normalize()
             val newDatabase = Files.notExists(absolutePath)
@@ -296,6 +531,44 @@ class SpotifyStore private constructor(
         }
     }
 }
+
+data class CacheMetadata(
+    val revision: String,
+    val syncTimestampMillis: Long,
+    val ownerSpotifyUserId: String?,
+    val completionState: String,
+)
+
+data class StoredPlaylistItem(
+    val playlistId: String,
+    val position: Int,
+    val addedAt: String?,
+    val addedById: String?,
+    val isLocal: Boolean,
+    val itemType: String?,
+    val isPlayable: Boolean,
+    val itemId: String?,
+    val itemUri: String?,
+    val status: String,
+)
+
+data class StoredPlaylistDetails(
+    val playlistId: String,
+    val description: String?,
+    val public: Boolean?,
+    val collaborative: Boolean?,
+    val ownerId: String?,
+    val snapshotId: String?,
+    val itemCount: Int?,
+    val displayUrl: String?,
+)
+
+data class ManagedPlaylist(
+    val definitionId: String,
+    val definitionRevision: String,
+    val spotifyPlaylistId: String,
+    val ownerSpotifyUserId: String,
+)
 
 data class ExistingPlaylistMetadata(
     val id: String,

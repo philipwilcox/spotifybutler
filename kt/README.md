@@ -5,16 +5,36 @@ This service performs Spotify Authorization Code login and caches Spotify librar
 1. Copy `secrets.properties.example` to the ignored `secrets.properties` and fill in the Spotify client ID and secret.
 2. Configure the Spotify application redirect URI exactly as `http://127.0.0.1:8888/callback`.
 3. From the repository root, run `./kt/gradlew -p kt run`.
-4. Visit `http://127.0.0.1:8888/start`. After approval, the callback fetches the Spotify collections into SQLite and
-   redirects to `/hello`, which returns `hello, <display name>`.
+4. Visit `http://127.0.0.1:8888/start`. After approval, the callback creates the opaque Butler session cookie and
+   redirects to the validated relative `returnTo` path (default `/`).
 
 The default database is `kt/spotify.db` when launched from the repository root (or `spotify.db` when launched from
-inside `kt/`). The database is loaded after OAuth only when it has no completed sync. Use
-`http://127.0.0.1:8888/start?refresh=true` to replace the cached data deliberately.
+inside `kt/`). The normal `/start` flow establishes a session without running a full refresh.
 
-The loader reads saved tracks, top tracks, top artists, playlists, and the tracks in each playlist. It does not yet run
-playlist queries or make any Spotify playlist/library modifications. SQLDelight owns the SQLite schema and its named
-cache-load statements.
+## Legacy one-shot run
+
+For the compatibility workflow that refetches everything and updates the built-in playlists in one request, visit
+`http://127.0.0.1:8888/start?refresh=true`. After Spotify approval, Butler replaces the SQLite cache, removes duplicate
+saved tracks, replans the built-in playlists, and applies their playlist updates. The browser receives a sanitized JSON
+completion summary; access and refresh tokens remain server-side. Use this all-at-once mutation workflow deliberately.
+
+If the server was configured with dry-run mode, or if `dryRun=true` is present on the callback request, playlist writes
+are reported without being applied. Duplicate saved-track cleanup is still a separate legacy operation and may mutate
+the Spotify library even during a dry run.
+
+The loader reads saved tracks, top tracks, top artists, playlists, and the tracks in each playlist. SQLDelight owns the
+SQLite schema and its named cache-load statements.
+
+## Browser API
+
+The browser-facing API is described by [`src/main/resources/openapi.yaml`](src/main/resources/openapi.yaml). It uses an
+opaque `butler_session` cookie and returns a CSRF token from `GET /api/v1/session`; Spotify access and refresh tokens
+remain server-side. The public readiness endpoint is `GET /health`. After OAuth, the narrow API resources support cache
+refresh, ID-only playlist/current views, bounded song enrichment, sync previews, and idempotent client-submitted syncs.
+
+The repository-level [`scripts/api-demo.sh`](../scripts/api-demo.sh) demonstrates the intended curl sequence. Set
+`BUTLER_SESSION` and `CSRF_TOKEN` from an authenticated browser session, or point `BUTLER_COOKIE_JAR` at a cookie jar.
+For a single-user deployment, set `spotify.allowedUserId` in the ignored secrets properties file.
 
 ## Capturing and building fixtures
 
@@ -30,8 +50,10 @@ outputs are ignored by Git and must be reviewed and sanitized before anything is
      -PdatabasePath=raw-captures/spotify-run.db
    ```
 
-   The task prints the resolved log and database paths, then runs the normal service. Visit `/start` (or
-   `/start?refresh=true`) and complete one intentional cache load. Stop the service after the callback finishes.
+   The task prints the resolved log and database paths, then runs the normal service. Visit `/start`, complete OAuth, and
+   use the cache-only `POST /api/v1/library/refresh` flow (for example, through `scripts/api-demo.sh`) for one intentional
+   cache load. Do not use `/start?refresh=true` for fixture capture: the legacy workflow also mutates playlists and may
+   remove duplicate saved tracks. Stop the service after the refresh finishes.
 
 2. Build an ignored draft from that log and database:
 

@@ -6,6 +6,7 @@ data class SpotifyCacheSnapshot(
     val topArtists: List<SpotifyArtist>,
     val playlists: List<SpotifyPlaylist>,
     val playlistTracks: List<PlaylistTrack>,
+    val playlistItems: List<SpotifyPlaylistItem> = emptyList(),
 )
 
 data class SpotifyCurrentUser(
@@ -36,6 +37,18 @@ data class SpotifyTrack(
     val durationMs: Long? = null,
     val explicit: Boolean? = null,
     val artistIds: List<String> = emptyList(),
+    val albumName: String? = null,
+    val albumHref: String? = null,
+    val albumUri: String? = null,
+    val available: Boolean = true,
+    val artists: List<SpotifyArtistReference> = emptyList(),
+)
+
+data class SpotifyArtistReference(
+    val id: String?,
+    val name: String?,
+    val href: String?,
+    val uri: String?,
 )
 
 data class SpotifyArtist(
@@ -52,4 +65,26 @@ data class SpotifyPlaylist(
     val uri: String,
     val tracksHref: String,
     val snapshotId: String?,
+    val description: String? = null,
+    val public: Boolean? = null,
+    val collaborative: Boolean? = null,
+    val ownerId: String? = null,
+    val itemCount: Int? = null,
+    val displayUrl: String? = null,
+)
+
+data class SpotifyPlaylistItem(
+    val playlistId: String,
+    val playlistName: String,
+    val position: Int,
+    val addedAt: String?,
+    val addedById: String?,
+    val isLocal: Boolean,
+    val itemType: String?,
+    val isPlayable: Boolean,
+    val itemId: String?,
+    val itemUri: String?,
+    val status: String,
+    val rawJson: String,
+    val track: SpotifyTrack? = null,
 )
