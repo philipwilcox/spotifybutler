@@ -37,6 +37,7 @@ data class PlaylistGenerationTestReport(
     val fixtureName: String,
     val definition: PlaylistDefinition,
     val executionPath: String,
+    val action: String = "select playlist tracks",
     val actualTracks: List<SpotifyTrack>,
     val expectedUris: List<String>? = null,
     val cacheRevision: String? = null,
@@ -55,6 +56,7 @@ data class PlaylistGenerationTestReport(
                 add("definitionId: ${definition.id.name}")
                 add("playlistName: ${definition.name}")
                 add("executionPath: $executionPath")
+                add("action: $action")
                 add("definition: ${definition.query}")
                 cacheRevision?.let { add("cacheRevision: $it") }
                 recipeRevision?.let { add("recipeRevision: $it") }
@@ -93,6 +95,17 @@ fun logPlaylistGenerationReport(report: PlaylistGenerationTestReport) {
     val rendered = report.render()
     playlistGenerationLogger.info { "\n$rendered" }
     writePlaylistGenerationReport(report, rendered)
+}
+
+fun logPlaylistSelectionResult(
+    action: String,
+    result: PlaylistGenerationResult,
+) {
+    playlistGenerationLogger.info {
+        "Playlist selection action=$action eligible=${result.candidates.size} " +
+            "distinct=${result.distinctCandidates.size} rejectedByQuota=${result.rejectedByQuota.size} " +
+            "selectedUris=${result.selected.joinToString(",") { it.track.uri }}"
+    }
 }
 
 private fun writePlaylistGenerationReport(

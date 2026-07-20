@@ -64,13 +64,17 @@ internal fun parseSpotifyArtist(item: JsonObject): SpotifyArtist =
     )
 
 internal fun parseSpotifyPlaylist(item: JsonObject): SpotifyPlaylist {
-    val tracks = item["tracks"] as? JsonObject ?: error("Spotify playlist response did not contain tracks metadata")
+    // Older sanitized captures can contain both metadata shapes while recording only the legacy page URL.
+    val items =
+        (item["tracks"] as? JsonObject)
+            ?: (item["items"] as? JsonObject)
+            ?: error("Spotify playlist response did not contain items metadata")
     return SpotifyPlaylist(
         name = item.requiredString("name", "playlist"),
         id = item.requiredString("id", "playlist"),
         href = item.requiredString("href", "playlist"),
         uri = item.requiredString("uri", "playlist"),
-        tracksHref = tracks.requiredString("href", "playlist tracks metadata"),
+        tracksHref = items.requiredString("href", "playlist items metadata"),
         snapshotId = item.optionalString("snapshot_id"),
     )
 }
@@ -79,7 +83,7 @@ internal fun parsePlaylistTrack(
     item: JsonObject,
     playlistName: String,
 ): PlaylistTrack? {
-    val track = item["track"] as? JsonObject ?: return null
+    val track = (item["item"] as? JsonObject) ?: (item["track"] as? JsonObject) ?: return null
     return PlaylistTrack(
         playlistName,
         item.optionalString("added_at"),

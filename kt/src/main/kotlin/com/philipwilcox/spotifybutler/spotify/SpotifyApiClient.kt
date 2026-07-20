@@ -111,7 +111,6 @@ class SpotifyApiClient(
         accessToken: String,
         name: String,
     ): String {
-        val user = getCurrentUser(accessToken)
         val body =
             buildJsonObject {
                 put("name", name)
@@ -119,7 +118,7 @@ class SpotifyApiClient(
                 put("collaborative", false)
                 put("description", "Automatically generated playlist from Spotify Butler app")
             }.toString()
-        val response = transport.post(apiUri("/v1/users/${user.id}/playlists"), accessToken, body)
+        val response = transport.post(apiUri("/v1/me/playlists"), accessToken, body)
         return parseMutationResponse(response, "create playlist").optionalString("id")
             ?: error("Spotify create playlist response did not contain id")
     }
@@ -132,7 +131,7 @@ class SpotifyApiClient(
         tracks.chunked(PLAYLIST_WRITE_BATCH_SIZE).forEach { batch ->
             val body = trackUrisBody(batch)
             requireMutationSuccess(
-                transport.post(apiUri("/v1/playlists/$playlistId/tracks"), accessToken, body),
+                transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, body),
                 "add tracks to playlist",
             )
         }
@@ -146,12 +145,12 @@ class SpotifyApiClient(
         val batches = tracks.chunked(PLAYLIST_WRITE_BATCH_SIZE)
         val firstBatch = batches.firstOrNull().orEmpty()
         requireMutationSuccess(
-            transport.put(apiUri("/v1/playlists/$playlistId/tracks"), accessToken, trackUrisBody(firstBatch)),
+            transport.put(apiUri("/v1/playlists/$playlistId/items"), accessToken, trackUrisBody(firstBatch)),
             "replace playlist tracks",
         )
         batches.drop(1).forEach { batch ->
             requireMutationSuccess(
-                transport.post(apiUri("/v1/playlists/$playlistId/tracks"), accessToken, trackUrisBody(batch)),
+                transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, trackUrisBody(batch)),
                 "append playlist tracks",
             )
         }
@@ -162,9 +161,12 @@ class SpotifyApiClient(
         trackIds: List<String>,
     ) {
         trackIds.distinct().chunked(SAVED_TRACK_WRITE_BATCH_SIZE).forEach { batch ->
-            val ids = batch.joinToString(",") { java.net.URLEncoder.encode(it, Charsets.UTF_8) }
+            val uris =
+                batch.joinToString(",") {
+                    java.net.URLEncoder.encode("spotify:track:$it", Charsets.UTF_8)
+                }
             requireMutationSuccess(
-                transport.delete(apiUri("/v1/me/tracks?ids=$ids"), accessToken),
+                transport.delete(apiUri("/v1/me/library?uris=$uris"), accessToken),
                 "remove saved tracks",
             )
         }
@@ -289,9 +291,11 @@ class SpotifyApiClient(
         }
     }
 
-    private fun trackUrisBody(tracks: List<SpotifyTrack>): String =
+    private fun trackUrisBody(tracks: List<SpotifyTrack>): String = uriBody(tracks.map(SpotifyTrack::uri))
+
+    private fun uriBody(uris: List<String>): String =
         buildJsonObject {
-            putJsonArray("uris") { tracks.forEach { add(JsonPrimitive(it.uri)) } }
+            putJsonArray("uris") { uris.forEach { add(JsonPrimitive(it)) } }
         }.toString()
 
     private fun apiUri(pathOrUri: String): URI {
@@ -315,6 +319,6 @@ class SpotifyApiClient(
         private const val PAGE_SIZE = 50
         private const val PLAYLIST_FETCH_CONCURRENCY = 2
         private const val PLAYLIST_WRITE_BATCH_SIZE = 100
-        private const val SAVED_TRACK_WRITE_BATCH_SIZE = 50
+        private const val SAVED_TRACK_WRITE_BATCH_SIZE = 40
     }
 }

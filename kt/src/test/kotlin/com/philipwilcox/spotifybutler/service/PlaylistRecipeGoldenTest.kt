@@ -55,6 +55,7 @@ class PlaylistRecipeGoldenTest {
                         golden.seedHex.toSeedBytes(),
                         store.recipeExecutionContext(),
                     )
+                logPlaylistSelectionResult("golden-${definition.id.name}", result)
                 val goldenResult = requireNotNull(expected[definition.id.name])
                 assertEquals(goldenResult.recipeRevision, PlaylistRecipeCodec.revision(recipe), definition.id.name)
                 assertEquals(goldenResult.orderedUris, result.selected.map { it.track.uri }, definition.id.name)

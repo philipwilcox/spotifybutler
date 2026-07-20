@@ -303,7 +303,7 @@ internal fun String.isPlaylistTracksEndpoint(): Boolean {
         segments[API_VERSION_INDEX] == "v1" &&
         segments[RESOURCE_INDEX] == "playlists" &&
         segments[RESOURCE_ID_INDEX].isNotBlank() &&
-        segments[ACTION_INDEX] == "tracks"
+        segments[ACTION_INDEX] in setOf("tracks", "items")
 }
 
 private fun String.isSavedTracksEndpoint(): Boolean = substringBefore('?') == "/v1/me/tracks"

@@ -32,6 +32,7 @@ class PlaylistRecipeTest {
         val recipe = quotaRecipe()
 
         val result = PlaylistRecipeEngine().generate(recipe, candidates, seed)
+        logPlaylistSelectionResult("predicate-target-and-simultaneous-quotas", result)
 
         assertEquals(listOf("first", "fourth"), result.selected.map { it.track.id })
         assertEquals(listOf("second", "third"), result.rejectedByQuota.map { it.track.id })
@@ -64,6 +65,8 @@ class PlaylistRecipeTest {
             )
         val first = PlaylistRecipeEngine().generate(recipe, candidates, seed)
         val second = PlaylistRecipeEngine().generate(recipe, candidates, ByteArray(32) { (it + 1).toByte() })
+        logPlaylistSelectionResult("seed-one-random-selection", first)
+        logPlaylistSelectionResult("seed-two-random-selection", second)
 
         assertEquals(2, first.selected.size)
         assertEquals(2, second.selected.size)

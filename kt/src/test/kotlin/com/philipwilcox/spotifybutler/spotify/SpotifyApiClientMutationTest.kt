@@ -1,13 +1,14 @@
 package com.philipwilcox.spotifybutler.spotify
 
 import java.net.URI
+import java.net.URLDecoder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class SpotifyApiClientMutationTest {
     @Test
-    fun `playlist writes use Spotify batch sizes and replace starts with PUT`() {
+    fun `playlist writes use current Spotify item resources and batch sizes`() {
         val transport = RecordingMutationTransport()
         val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
         val tracks = (1..205).map { track("track-$it") }
@@ -29,17 +30,23 @@ class SpotifyApiClientMutationTest {
         client.removeSavedTracks("token", ids)
 
         assertEquals(listOf("DELETE", "DELETE", "DELETE"), transport.methods)
-        assertEquals(listOf(50, 50, 1), transport.uriCounts)
-        assertEquals(true, transport.uris.all { it.contains("ids=") })
+        assertEquals(listOf(40, 40, 21), transport.uriCounts)
+        assertEquals(
+            listOf("/v1/me/library", "/v1/me/library", "/v1/me/library"),
+            transport.uris.map(URI::create).map {
+                it.path
+            },
+        )
+        assertEquals(true, transport.uris.all { it.contains("uris=") })
     }
 
     @Test
-    fun `create playlist reads the user ID and reports mutation failures`() {
+    fun `create playlist uses the current me resource and reports mutation failures`() {
         val transport = RecordingMutationTransport()
         val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
 
         assertEquals("created-playlist", client.createPlaylist("token", "Generated Playlist"))
-        assertEquals("https://api.example.test/v1/users/user-id/playlists", transport.uris[1].substringBefore('?'))
+        assertEquals("https://api.example.test/v1/me/playlists", transport.uris[0].substringBefore('?'))
 
         transport.failureStatus = 500
         assertFailsWith<IllegalArgumentException> {
@@ -55,6 +62,7 @@ private class RecordingMutationTransport : SpotifyHttpTransport {
     val methods = mutableListOf<String>()
     val uris = mutableListOf<String>()
     val uriCounts = mutableListOf<Int>()
+    val bodies = mutableListOf<String>()
     var failureStatus: Int? = null
 
     override fun get(
@@ -92,8 +100,8 @@ private class RecordingMutationTransport : SpotifyHttpTransport {
         methods += "DELETE"
         uris += uri.toString()
         uriCounts +=
-            uri.query
-                .substringAfter("ids=")
+            URLDecoder
+                .decode(uri.query.substringAfter("uris="), Charsets.UTF_8)
                 .split(',')
                 .size
         return SpotifyHttpResponse(failureStatus ?: 200, "")
@@ -106,6 +114,7 @@ private class RecordingMutationTransport : SpotifyHttpTransport {
     ) {
         methods += method
         uris += uri.toString()
+        bodies += body
         uriCounts += Regex("spotify:track:").findAll(body).count()
     }
 }

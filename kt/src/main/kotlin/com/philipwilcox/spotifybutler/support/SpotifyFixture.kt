@@ -129,7 +129,12 @@ private fun ValidatedCapture.itemIdsFor(
                 .jsonArray
                 .asSequence()
         }.mapNotNull { item ->
-            val objectWithId = if (nestedTrack) item.jsonObject["track"]?.jsonObject else item.jsonObject
+            val objectWithId =
+                if (nestedTrack) {
+                    (item.jsonObject["item"] ?: item.jsonObject["track"])?.jsonObject
+                } else {
+                    item.jsonObject
+                }
             objectWithId?.get("id")?.jsonPrimitive?.content
         }.toSet()
 
@@ -152,7 +157,7 @@ private fun ValidatedCapture.playlistTrackIds(): Map<String, Set<String>> {
             events
                 .flatMap { event ->
                     event.pageItems().mapNotNull { item ->
-                        item["track"]
+                        (item["item"] ?: item["track"])
                             ?.jsonObject
                             ?.get("id")
                             ?.jsonPrimitive
