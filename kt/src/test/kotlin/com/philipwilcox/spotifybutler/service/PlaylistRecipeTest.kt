@@ -110,6 +110,7 @@ class PlaylistRecipeTest {
             val recipe = definition.toPlaylistRecipe()
             assertEquals(1, recipe.schemaVersion, definition.id.name)
             assertTrue(PlaylistRecipeCodec.revision(recipe).isNotEmpty(), definition.id.name)
+            assertEquals(recipe, PlaylistRecipeCodec.decode(PlaylistRecipeCodec.encode(recipe)), definition.id.name)
         }
     }
 

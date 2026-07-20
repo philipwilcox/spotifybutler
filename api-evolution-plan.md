@@ -8,64 +8,6 @@ The API should expose small resources that compose cleanly: library snapshots,
 managed playlist definitions, immutable preview generations, and asynchronous
 operations. The legacy all-at-once run remains only as a migration path.
 
-## Testing readiness gate
-
-**Current verdict: partially covered, but not sufficient for the deterministic
-recipe migration.** Do not replace the existing query implementation until the
-fixture contract below is in place.
-
-The detailed fixture, diagnostics, migration, and acceptance plan is in
-`playlist-gen-thorough-testing-plan.md`.
-
-The repository already has a valuable high-level seam:
-
-- `PlaylistQueryFixtureTest` loads a sanitized fixture into a real SQLite
-  database, executes every one of the 15 production definitions, and exercises
-  `PlaylistPlanningService` against existing playlist contents.
-- `SpotifyCacheLoadContractTest` covers Spotify response parsing through cache
-  persistence using deterministic fake HTTP responses.
-- Focused planning and mutation tests cover URI membership, duplicate rows,
-  duplicate playlist names, create/replace behavior, and injected ordering.
-
-That does not yet prove “given this database and seed, this recipe selects
-these exact songs in this exact order”:
-
-- Random and per-artist fixture expectations assert only eligibility, counts,
-  and maximum-per-artist constraints. They do not assert the exact chosen URI.
-- The random-liked fixture has fewer candidates than its global limit, so it
-  never tests an actual random cutoff. The artist-quota fixture does cross its
-  limit (13 candidates for a maximum of 12), but does not assert which track is
-  omitted.
-- Most exact fixture expectations compare sets and intentionally discard order.
-- Mutation ordering is tested only with an injected unit-test shuffler; no test
-  carries a fixed seed from SQLite candidates through generation to the exact
-  ordered URIs sent to the mutation client.
-
-Establish this characterization and golden-test layer before implementation:
-
-1. Version the playlist-query fixture schema to include a recipe revision, a
-   fixed generation seed, and exact ordered desired URIs for every built-in
-   recipe under the new deterministic algorithm.
-2. During migration, run legacy and recipe execution over the same fixture.
-   Require exact eligibility and exact output for non-random definitions. The
-   old `RANDOM()` behavior cannot have an exact stable baseline, so preserve its
-   eligibility/quota semantics while making the fixed-seed recipe result the
-   new golden contract.
-3. Ensure fixtures force real cutoffs for global and per-dimension quotas and
-   cover null dimensions, duplicate URIs, unions/differences, year boundaries,
-   album and duration predicates, and multiple simultaneous quotas.
-4. Run the same golden fixture after changing row insertion order and after
-   closing/reopening SQLite. The ordered result must remain identical.
-5. Add one module-level generation contract test that loads SQLite, resolves a
-   recipe, generates with a fixed seed, stores the generation, and verifies the
-   exact ordered URI list handed to a fake mutation client.
-6. Round-trip every recipe variant through serialization and test capability,
-   complexity, unsupported-field, and invalid-combination validation.
-
-These tests are the compatibility boundary for future recipe fields and
-execution optimizations. An optimization may change SQL pushdown or memory use,
-but it must not change a recipe revision's golden ordered output.
-
 ## Final design decisions
 
 - Authenticate every `/api/v1` endpoint with a Butler session cookie unless an
@@ -94,35 +36,6 @@ but it must not change a recipe revision's golden ordered output.
   deployment is a separate configuration, not the default development mode.
 
 ## Verified upstream and cache prerequisites
-
-### Current Spotify playlist API
-
-The implementation predates Spotify's February 2026 playlist changes. Before
-building the GUI API, update the implementation plan and fixtures around the
-current Spotify contract:
-
-- Create a playlist with `POST /v1/me/playlists`, not the removed
-  `/v1/users/{userId}/playlists` endpoint.
-- Read, add, replace, and remove playlist contents through
-  `/v1/playlists/{playlistId}/items`, not the removed `/tracks` endpoints.
-- Read playlist paging metadata from `items` and each playlist entry from its
-  `item` field. Compatibility parsing may accept the old `tracks`/`track`
-  fixture shape during migration, but newly captured and synthetic fixtures
-  should use the current shape.
-- Use `DELETE /v1/me/library` for duplicate-library cleanup rather than the
-  removed saved-tracks deletion endpoint.
-- Do not model removed fields such as `available_markets`. Parse Spotify JSON
-  with unknown-field tolerance because fields may continue to evolve.
-
-Spotify's current references are the source of truth for the
-[playlist-item endpoints](https://developer.spotify.com/documentation/web-api/reference/get-playlists-items)
-and the
-[February 2026 migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
-
-Playlist items are available only for playlists owned by the current user or
-playlists on which the user is a collaborator. Cache metadata for other visible
-playlists without failing the whole refresh, record that their items were not
-accessible, and never present an inaccessible item list as an empty playlist.
 
 ### Cache schema and atomicity
 
@@ -942,3 +855,13 @@ than adding a boolean to unrelated endpoints.
    HTTPS callback/origin profile, secure cookies, trusted-proxy and Host checks,
    quotas/rate limits, encrypted persistent secrets if needed, and operational
    monitoring.
+
+## Appendix: Already Done Work
+
+The Kotlin test-readiness layer now characterizes all 15 legacy definitions in
+sanitized SQLite fixtures, exercises real global and per-dimension cutoffs,
+records exact fixed-seed recipe goldens, verifies predicate/composition and
+serialization behavior, proves deterministic results across insertion-order
+and SQLite reopen variants, and carries a generated ordered URI list through
+storage and a fake mutation client; these tests are now the compatibility
+boundary for the broader API and recipe changes.

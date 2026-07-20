@@ -93,13 +93,14 @@ class PlaylistRecipeFixtureTest {
             }
         loadPlaylistQueryFixtures(Path.of(resource.toURI())).forEach { fixture ->
             val definitions = PlaylistQueries.definitions(fixture.currentYear, fixture.minYearForDiscoverWeekly)
+            val golden = loadBuiltInGoldens()
             val variants =
                 listOf(
                     "canonical" to fixture.seedTables,
                     "reverse" to fixture.seedTables.reordered(reverse = true),
                     "shuffled" to fixture.seedTables.reordered(reverse = false),
                 )
-            val expectedByDefinition = variants.first().second.recipeResults(definitions)
+            val expectedByDefinition = golden.goldens.associate { it.definitionId to it.orderedUris }
             variants.forEach { (variantName, seedTables) ->
                 val databasePath = Files.createTempDirectory("playlist-recipe-stability-").resolve("cache.db")
                 SpotifyStore.open(databasePath).use { store ->
@@ -128,6 +129,16 @@ class PlaylistRecipeFixtureTest {
                 }
             }
         }
+    }
+
+    private fun loadBuiltInGoldens(): PlaylistRecipeGoldenFile {
+        val resource =
+            requireNotNull(
+                javaClass.classLoader.getResource("playlist-generation-fixtures/built-ins-recipe-goldens.json"),
+            )
+        return PlaylistRecipeCodec.json.decodeFromString<PlaylistRecipeGoldenFile>(
+            Files.readString(Path.of(resource.toURI())),
+        )
     }
 
     private fun QueryFixtureSeedTables.recipeResults(

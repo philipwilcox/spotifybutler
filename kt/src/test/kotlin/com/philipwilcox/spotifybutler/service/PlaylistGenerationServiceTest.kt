@@ -28,12 +28,12 @@ class PlaylistGenerationServiceTest {
                 from(CandidateSource.SavedTracks)
                 distinctBy(CandidateIdentity.SpotifyUri)
                 select {
-                    target(3)
-                    rankedBy(RankingStrategy.AddedAtAscending)
+                    target(2)
+                    rankedBy(RankingStrategy.SeededRandom)
                 }
-                orderBy(OrderingPolicy.AddedAtAscending)
+                orderBy(OrderingPolicy.SeededRandom)
             }
-        val tracks = listOf(track("one"), track("two"), track("three"))
+        val tracks = listOf(track("one"), track("two"), track("three"), track("four"))
         val store = InMemoryGenerationStore()
         val client = RecordingGenerationMutationClient()
 
@@ -83,7 +83,7 @@ class PlaylistGenerationServiceTest {
         }
 
         assertEquals(
-            listOf("replace Generated Playlist-id:one,two,three"),
+            listOf("replace Generated Playlist-id:three,two"),
             client.calls,
         )
     }

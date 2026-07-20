@@ -1,5 +1,7 @@
 # Future Evolution
 
+The notes here should be IGNORED for any current work, and only represent ideas for future directions to explore.
+
 ## API Updates
 
 Make changes to be up to date with the 2026 changes to the Spotify API.
