@@ -64,7 +64,6 @@ data class SpotifyPlaylist(
     val href: String,
     val uri: String,
     val tracksHref: String,
-    val snapshotId: String?,
     val description: String? = null,
     val public: Boolean? = null,
     val collaborative: Boolean? = null,

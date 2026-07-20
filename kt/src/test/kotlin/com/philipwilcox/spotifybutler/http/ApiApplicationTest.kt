@@ -22,20 +22,6 @@ import kotlin.test.assertTrue
 
 class ApiApplicationTest {
     @Test
-    fun `openapi documents only direct cache backed synchronization`() {
-        val openApi = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
-
-        assertTrue("/api/v1/playlists/{definitionId}/syncs:" in openApi)
-        assertTrue("'200':\n          description: Authoritative cache-backed playlist state" in openApi)
-        assertTrue("required: [trackIds, baseSnapshotId, baseCacheRevision]" in openApi)
-        assertFalse("/api/v1/operations" in openApi)
-        assertFalse("Idempotency-Key" in openApi)
-        assertFalse("current/items" in openApi)
-        assertFalse("cursor" in openApi)
-        assertFalse("syncs/preview" in openApi)
-    }
-
-    @Test
     fun `current view is cache backed, ordered, and preserves duplicate positions`() {
         withApplication { app, session, gateway, _ ->
             val current = app.handle(request("GET", "/api/v1/playlists/RECENT_LIKED_100/current", session))
@@ -43,6 +29,8 @@ class ApiApplicationTest {
             val currentWire = apiJson.decodeFromString<PlaylistCurrentEnvelopeWire>(current.body)
             assertEquals(listOf("track-one", "track-two", "track-one"), currentWire.current?.trackIds)
             assertFalse(current.body.contains("Track One"))
+            assertFalse(current.body.contains("snapshotId"))
+            assertFalse(current.body.contains("cacheRevision"))
             assertEquals(0, gateway.currentCalls)
 
             val removed = app.handle(request("GET", "/api/v1/playlists/RECENT_LIKED_100/current/items", session))
@@ -70,6 +58,76 @@ class ApiApplicationTest {
             assertEquals(listOf("track-two", "track-one"), songs.items.map(SongWire::id))
             assertEquals(listOf("missing"), songs.missingIds)
             assertFalse(response.body.contains("track_json"))
+            assertFalse(response.body.contains("cacheRevision"))
+        }
+    }
+
+    @Test
+    fun `song enrichment trims requests preserves found duplicates and deduplicates missing IDs`() {
+        withApplication { app, session, _, _ ->
+            val response =
+                app.handle(
+                    request(
+                        "GET",
+                        "/api/v1/songs",
+                        session,
+                        query = mapOf("ids" to " track-two, track-one, track-two, missing, missing, "),
+                    ),
+                )
+            val songs = apiJson.decodeFromString<SongsWire>(response.body)
+
+            assertEquals(200, response.status)
+            assertEquals(listOf("track-two", "track-one", "track-two"), songs.items.map(SongWire::id))
+            assertEquals(listOf("missing"), songs.missingIds)
+        }
+    }
+
+    @Test
+    fun `song enrichment rejects empty and more than fifty normalized IDs`() {
+        withApplication { app, session, _, _ ->
+            val empty = app.handle(request("GET", "/api/v1/songs", session, query = mapOf("ids" to " ,  ,")))
+            val tooMany =
+                app.handle(
+                    request(
+                        "GET",
+                        "/api/v1/songs",
+                        session,
+                        query = mapOf("ids" to (1..51).joinToString(",") { "missing-$it" }),
+                    ),
+                )
+
+            assertEquals(400, empty.status)
+            assertTrue(empty.body.contains("malformed_request"))
+            assertEquals(400, tooMany.status)
+            assertTrue(tooMany.body.contains("malformed_request"))
+        }
+    }
+
+    @Test
+    fun `cache-only current reads return null for missing mapping and reject another cache owner`() {
+        withApplication { app, session, _, _ ->
+            val missingMapping = app.handle(request("GET", "/api/v1/playlists/RANDOM_LIKED_100/current", session))
+            assertEquals(200, missingMapping.status)
+            assertEquals(null, apiJson.decodeFromString<PlaylistCurrentEnvelopeWire>(missingMapping.body).current)
+        }
+
+        withOwnerMismatchApplication { app, otherSession ->
+            val ownerMismatch = app.handle(request("GET", "/api/v1/library", otherSession))
+            assertEquals(403, ownerMismatch.status)
+            assertTrue(ownerMismatch.body.contains("owner_mismatch"))
+        }
+    }
+
+    @Test
+    fun `uninitialized cache reads stay empty without calling the Spotify gateway`() {
+        withUninitializedApplication { app, session ->
+            val current = app.handle(request("GET", "/api/v1/playlists/RECENT_LIKED_100/current", session))
+            val songs = app.handle(request("GET", "/api/v1/songs", session, query = mapOf("ids" to "track-one")))
+
+            assertEquals(200, current.status)
+            assertEquals(null, apiJson.decodeFromString<PlaylistCurrentEnvelopeWire>(current.body).current)
+            assertEquals(200, songs.status)
+            assertEquals(listOf("track-one"), apiJson.decodeFromString<SongsWire>(songs.body).missingIds)
         }
     }
 
@@ -80,16 +138,7 @@ class ApiApplicationTest {
             val missingCsrf = app.handle(missingCsrfRequest.copy(headers = missingCsrfRequest.headers - "X-CSRF-Token"))
             assertEquals(403, missingCsrf.status)
             assertTrue(missingCsrf.body.contains("csrf_failed"))
-            val cacheRevision =
-                apiJson
-                    .decodeFromString<PlaylistCurrentEnvelopeWire>(
-                        app.handle(request("GET", "/api/v1/playlists/RECENT_LIKED_100/current", session)).body,
-                    ).current
-                    ?.cacheRevision
-                    ?: error("Expected a cached playlist")
-
-            val syncRequest =
-                """{"trackIds":["track-two","track-two","track-one"],"baseSnapshotId":"snapshot-1","baseCacheRevision":"$cacheRevision"}"""
+            val syncRequest = """{"trackIds":["track-two","track-two","track-one"]}"""
             val first =
                 app.handle(
                     request(
@@ -103,20 +152,7 @@ class ApiApplicationTest {
             val current = apiJson.decodeFromString<PlaylistCurrentEnvelopeWire>(first.body).current
             assertEquals(listOf("track-two", "track-two", "track-one"), gateway.submittedTrackIds)
             assertEquals(listOf("track-two", "track-two", "track-one"), current?.trackIds)
-            assertEquals("snapshot-2", current?.snapshotId)
             assertEquals(1, gateway.replaceCalls)
-
-            val stale =
-                app.handle(
-                    request(
-                        "POST",
-                        "/api/v1/playlists/RECENT_LIKED_100/syncs",
-                        session,
-                        body = syncRequest,
-                    ),
-                )
-            assertEquals(409, stale.status)
-            assertTrue(stale.body.contains("cache_revision_stale"))
         }
     }
 
@@ -146,6 +182,7 @@ class ApiApplicationTest {
                     responses[1] =
                         app.handle(request("POST", "/api/v1/library/refresh", session))
                 }
+            waitForBlockedThread(second)
 
             releaseFetch.countDown()
             first.join(5_000)
@@ -181,7 +218,6 @@ class ApiApplicationTest {
             val library = apiJson.decodeFromString<LibraryWire>(libraryResponse.body)
             assertEquals(200, libraryResponse.status)
             assertEquals("stale", library.status)
-            assertEquals(priorMetadata.revision, library.cacheRevision)
             assertEquals(priorMetadata.revision, store.cacheMetadata()?.revision)
         }
     }
@@ -256,6 +292,44 @@ class ApiApplicationTest {
         }
     }
 
+    private fun withOwnerMismatchApplication(block: (ApiApplication, ButlerSession) -> Unit) {
+        val path = Files.createTempDirectory("api-owner-mismatch-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(snapshot(), 1_700_000_000_000L, OWNER_ID)
+            val sessions = SessionStore(fixedClock())
+            sessions.create(OWNER_ID, "server-access-token", "server-refresh-token")
+            val otherSession = sessions.create("owner-two", "other-access-token", "other-refresh-token")
+            val app =
+                ApiApplication(
+                    cacheService = SpotifyCacheService(StaticFetcher(), store, fixedClock()),
+                    store = store,
+                    sessionStore = sessions,
+                    syncGateway = ThrowingSyncGateway(),
+                    clock = fixedClock(),
+                    trustedOrigins = setOf("https://app.example.test"),
+                )
+            block(app, otherSession)
+        }
+    }
+
+    private fun withUninitializedApplication(block: (ApiApplication, ButlerSession) -> Unit) {
+        val path = Files.createTempDirectory("api-empty-cache-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            val sessions = SessionStore(fixedClock())
+            val session = sessions.create(OWNER_ID, "server-access-token", "server-refresh-token")
+            val app =
+                ApiApplication(
+                    cacheService = SpotifyCacheService(StaticFetcher(), store, fixedClock()),
+                    store = store,
+                    sessionStore = sessions,
+                    syncGateway = ThrowingSyncGateway(),
+                    clock = fixedClock(),
+                    trustedOrigins = setOf("https://app.example.test"),
+                )
+            block(app, session)
+        }
+    }
+
     private fun request(
         method: String,
         path: String,
@@ -287,7 +361,6 @@ class ApiApplicationTest {
                 href = "https://api.example.test/playlists/playlist-one",
                 uri = "spotify:playlist:playlist-one",
                 tracksHref = "https://api.example.test/playlists/playlist-one/items",
-                snapshotId = "snapshot-1",
                 ownerId = OWNER_ID,
                 itemCount = 5,
             )
@@ -324,6 +397,10 @@ class ApiApplicationTest {
                     status = "inaccessible",
                     rawJson = "{\"item\":null}",
                 ),
+                item(playlist, 5, one).copy(isLocal = true),
+                item(playlist, 6, one.copy(available = false)).copy(isPlayable = false, status = "unavailable"),
+                item(playlist, 7, one).copy(itemId = null, itemUri = null),
+                item(playlist, 8, one).copy(itemUri = "spotify:episode:track-one"),
             )
         return SpotifyCacheSnapshot(
             savedTracks = emptyList(),
@@ -378,6 +455,14 @@ class ApiApplicationTest {
 
     private fun fixedClock(): Clock = Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC)
 
+    private fun waitForBlockedThread(thread: Thread) {
+        val timeout = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (thread.state != Thread.State.BLOCKED && System.nanoTime() < timeout) {
+            Thread.sleep(1)
+        }
+        assertEquals(Thread.State.BLOCKED, thread.state)
+    }
+
     private class StaticFetcher : SpotifyCacheFetcher {
         override fun fetchCache(accessToken: String): SpotifyCacheSnapshot = error("refresh is not part of this test")
     }
@@ -413,9 +498,9 @@ class ApiApplicationTest {
         ): PlaylistRemoteState {
             currentCalls++
             return if (replaceCalls == 0) {
-                PlaylistRemoteState("snapshot-1", listOf("track-one", "track-two", "track-one"))
+                PlaylistRemoteState(listOf("track-one", "track-two", "track-one"))
             } else {
-                PlaylistRemoteState("snapshot-2", submittedTrackIds)
+                PlaylistRemoteState(submittedTrackIds)
             }
         }
 
@@ -423,11 +508,23 @@ class ApiApplicationTest {
             accessToken: String,
             playlistId: String,
             trackIds: List<String>,
-        ): String {
+        ) {
             replaceCalls++
             submittedTrackIds = trackIds
-            return "snapshot-2"
         }
+    }
+
+    private class ThrowingSyncGateway : PlaylistSyncGateway {
+        override fun current(
+            accessToken: String,
+            playlistId: String,
+        ): PlaylistRemoteState = error("current must not be called by cache-backed reads")
+
+        override fun replaceTracks(
+            accessToken: String,
+            playlistId: String,
+            trackIds: List<String>,
+        ) = error("replaceTracks must not be called by cache-backed reads")
     }
 
     private companion object {

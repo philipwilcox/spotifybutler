@@ -60,7 +60,6 @@ class SpotifyStore private constructor(
                 id = requireNotNull(row.id),
                 ownerSpotifyUserId = requireNotNull(row.owner_spotify_user_id),
                 name = requireNotNull(row.name),
-                revision = requireNotNull(row.definition_revision),
                 trackIds = userPlaylistTrackIds(requireNotNull(row.id)),
             )
         }
@@ -74,7 +73,6 @@ class SpotifyStore private constructor(
                 id = requireNotNull(row.id),
                 ownerSpotifyUserId = requireNotNull(row.owner_spotify_user_id),
                 name = requireNotNull(row.name),
-                revision = requireNotNull(row.definition_revision),
                 trackIds = userPlaylistTrackIds(id),
             )
         }
@@ -85,7 +83,6 @@ class SpotifyStore private constructor(
                 definition.id,
                 definition.ownerSpotifyUserId,
                 definition.name,
-                definition.revision,
             )
             queries.deleteUserPlaylistDefinitionItems(definition.id)
             definition.trackIds.forEachIndexed { position, trackId ->
@@ -117,15 +114,12 @@ class SpotifyStore private constructor(
 
     fun song(id: String): SpotifyTrack? = songs().firstOrNull { it.id == id }
 
-    fun songEnrichment(id: String): StoredSong? =
-        queries
-            .selectAllSongs()
-            .executeAsList()
-            .firstOrNull { it.id == id }
-            ?.toStoredSong()
+    fun songEnrichment(id: String): StoredSong? = songEnrichment(listOf(id)).singleOrNull()
 
     fun songEnrichment(ids: List<String>): List<StoredSong> {
-        val byId = queries.selectAllSongs().executeAsList().associateBy { requireNotNull(it.id) }
+        if (ids.isEmpty()) return emptyList()
+        val distinctIds = ids.distinct()
+        val byId = queries.selectSongsByIds(distinctIds).executeAsList().associateBy { requireNotNull(it.id) }
         return ids.mapNotNull { id -> byId[id]?.toStoredSong() }
     }
 
@@ -137,7 +131,6 @@ class SpotifyStore private constructor(
                 public = row.is_public?.toBooleanFlag(),
                 collaborative = row.collaborative?.toBooleanFlag(),
                 ownerId = row.owner_id,
-                snapshotId = row.snapshot_id,
                 itemCount = row.item_count?.toInt(),
                 displayUrl = row.display_url,
             )
@@ -150,21 +143,16 @@ class SpotifyStore private constructor(
 
     fun playlistMatchesByName(name: String): List<ExistingPlaylistMetadata> =
         queries.selectPlaylistByName(name).executeAsList().map {
-            ExistingPlaylistMetadata(
-                requireNotNull(it.id) { "Cached playlist $name has no id" },
-                it.snapshot_id,
-            )
+            ExistingPlaylistMetadata(requireNotNull(it.id) { "Cached playlist $name has no id" })
         }
 
     fun managedPlaylist(
         definitionId: String,
-        definitionRevision: String,
         ownerSpotifyUserId: String,
     ): ManagedPlaylist? =
-        queries.selectManagedPlaylist(definitionId, definitionRevision, ownerSpotifyUserId).executeAsOneOrNull()?.let {
+        queries.selectManagedPlaylist(definitionId, ownerSpotifyUserId).executeAsOneOrNull()?.let {
             ManagedPlaylist(
                 definitionId = requireNotNull(it.definition_id),
-                definitionRevision = requireNotNull(it.definition_revision),
                 spotifyPlaylistId = requireNotNull(it.spotify_playlist_id),
                 ownerSpotifyUserId = requireNotNull(it.owner_spotify_user_id),
             )
@@ -172,17 +160,15 @@ class SpotifyStore private constructor(
 
     fun saveManagedPlaylist(
         definitionId: String,
-        definitionRevision: String,
         spotifyPlaylistId: String,
         ownerSpotifyUserId: String,
     ) {
-        queries.insertManagedPlaylist(definitionId, definitionRevision, spotifyPlaylistId, ownerSpotifyUserId)
+        queries.insertManagedPlaylist(definitionId, spotifyPlaylistId, ownerSpotifyUserId)
     }
 
     fun publishPlaylistTrackIds(
         playlistId: String,
         trackIds: List<String>,
-        snapshotId: String?,
         syncTimestampMillis: Long,
     ) {
         database.transaction {
@@ -203,7 +189,7 @@ class SpotifyStore private constructor(
                     complete_item_json = "{\"item\":${track.rawJson}}",
                 )
             }
-            queries.updatePlaylistSnapshot(snapshotId, trackIds.size.toLong(), playlistId)
+            queries.updatePlaylistItemCount(trackIds.size.toLong(), playlistId)
             queries.updateCacheMetadata(newCacheRevision(), syncTimestampMillis, CACHE_READY)
         }
     }
@@ -279,10 +265,7 @@ class SpotifyStore private constructor(
         val matches = queries.selectPlaylistByNameAndOwner(name, ownerSpotifyUserId).executeAsList()
         require(matches.size <= 1) { "Multiple cached playlists have the generated name $name" }
         return matches.singleOrNull()?.let {
-            ExistingPlaylistMetadata(
-                requireNotNull(it.id) { "Cached playlist $name has no id" },
-                it.snapshot_id,
-            )
+            ExistingPlaylistMetadata(requireNotNull(it.id) { "Cached playlist $name has no id" })
         }
     }
 
@@ -401,7 +384,6 @@ class SpotifyStore private constructor(
             href = playlist.href,
             uri = playlist.uri,
             tracks_href = playlist.tracksHref,
-            snapshot_id = playlist.snapshotId,
         )
         queries.insertPlaylistDetails(
             playlist_id = playlist.id,
@@ -409,7 +391,6 @@ class SpotifyStore private constructor(
             is_public = playlist.public?.toLongFlag(),
             collaborative = playlist.collaborative?.toLongFlag(),
             owner_id = playlist.ownerId,
-            snapshot_id = playlist.snapshotId,
             item_count = playlist.itemCount?.toLong(),
             display_url = playlist.displayUrl,
         )
@@ -659,7 +640,6 @@ data class StoredUserPlaylistDefinition(
     val id: String,
     val ownerSpotifyUserId: String,
     val name: String,
-    val revision: String,
     val trackIds: List<String>,
 )
 
@@ -705,21 +685,18 @@ data class StoredPlaylistDetails(
     val public: Boolean?,
     val collaborative: Boolean?,
     val ownerId: String?,
-    val snapshotId: String?,
     val itemCount: Int?,
     val displayUrl: String?,
 )
 
 data class ManagedPlaylist(
     val definitionId: String,
-    val definitionRevision: String,
     val spotifyPlaylistId: String,
     val ownerSpotifyUserId: String,
 )
 
 data class ExistingPlaylistMetadata(
     val id: String,
-    val snapshotId: String?,
 )
 
 private data class StoredTrackRow(

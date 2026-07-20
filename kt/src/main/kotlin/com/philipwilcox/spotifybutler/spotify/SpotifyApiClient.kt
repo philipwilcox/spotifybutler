@@ -156,13 +156,6 @@ class SpotifyApiClient(
         }
     }
 
-    fun getPlaylistSnapshot(
-        accessToken: String,
-        playlistId: String,
-    ): String? =
-        getJsonObject(apiUri("/v1/playlists/$playlistId"), accessToken, pageSequence = 0)
-            .optionalString("snapshot_id")
-
     fun getPlaylistCurrent(
         accessToken: String,
         playlistId: String,
@@ -170,33 +163,30 @@ class SpotifyApiClient(
         val trackIds =
             pagedItems("/v1/playlists/$playlistId/items", accessToken)
                 .mapNotNull { item -> parsePlaylistTrack(item, playlistId)?.track?.takeIf { it.available }?.id }
-        return SpotifyPlaylistCurrent(getPlaylistSnapshot(accessToken, playlistId), trackIds)
+        return SpotifyPlaylistCurrent(trackIds)
     }
 
     fun replaceTrackIds(
         accessToken: String,
         playlistId: String,
         trackIds: List<String>,
-    ): String? {
+    ) {
         val batches = trackIds.chunked(PLAYLIST_WRITE_BATCH_SIZE)
         val firstBatch = batches.firstOrNull().orEmpty()
-        var snapshotId =
+        replaceTrackUris(
+            accessToken,
+            playlistId,
+            firstBatch.map(::trackUri),
+            append = false,
+        )
+        batches.drop(1).forEach { batch ->
             replaceTrackUris(
                 accessToken,
                 playlistId,
-                firstBatch.map(::trackUri),
-                append = false,
+                batch.map(::trackUri),
+                append = true,
             )
-        batches.drop(1).forEach { batch ->
-            snapshotId =
-                replaceTrackUris(
-                    accessToken,
-                    playlistId,
-                    batch.map(::trackUri),
-                    append = true,
-                ) ?: snapshotId
         }
-        return snapshotId
     }
 
     fun removeSavedTracks(
@@ -359,15 +349,14 @@ class SpotifyApiClient(
         playlistId: String,
         uris: List<String>,
         append: Boolean,
-    ): String? {
+    ) {
         val response =
             if (append) {
                 transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
             } else {
                 transport.put(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
             }
-        return parseMutationResponse(response, if (append) "append playlist tracks" else "replace playlist tracks")
-            .optionalString("snapshot_id")
+        requireMutationSuccess(response, if (append) "append playlist tracks" else "replace playlist tracks")
     }
 
     private fun trackUri(trackId: String): String = "spotify:track:$trackId"
@@ -403,6 +392,5 @@ class SpotifyApiClient(
 }
 
 data class SpotifyPlaylistCurrent(
-    val snapshotId: String?,
     val trackIds: List<String>,
 )

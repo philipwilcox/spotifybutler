@@ -56,7 +56,6 @@ class PlaylistPlanningServiceTest {
                     "href-one",
                     "uri-one",
                     "tracks-one",
-                    "snapshot-one",
                     ownerId = OWNER_ONE,
                 )
             val duplicate = playlist.copy(id = "two", href = "href-two", uri = "uri-two")
@@ -83,7 +82,6 @@ class PlaylistPlanningServiceTest {
                     href = "href-foreign",
                     uri = "uri-foreign",
                     tracksHref = "tracks-foreign",
-                    snapshotId = "snapshot-foreign",
                     ownerId = OWNER_TWO,
                 )
             store.replaceCache(

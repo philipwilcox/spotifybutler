@@ -37,8 +37,6 @@ data class PlaylistReferenceWire(
     val id: String,
     val name: String,
     val state: String,
-    val definitionRevision: String,
-    val cacheRevision: String?,
     val spotifyPlaylistId: String?,
     val trackIds: List<String> = emptyList(),
 )
@@ -46,14 +44,11 @@ data class PlaylistReferenceWire(
 @Serializable
 data class PlaylistListWire(
     val items: List<PlaylistReferenceWire>,
-    val cacheRevision: String?,
 )
 
 @Serializable
 data class PlaylistCurrentWire(
     val spotifyPlaylistId: String,
-    val snapshotId: String?,
-    val cacheRevision: String,
     val trackIds: List<String>,
 )
 
@@ -65,7 +60,6 @@ data class PlaylistCurrentEnvelopeWire(
 @Serializable
 data class LibraryWire(
     val status: String,
-    val cacheRevision: String?,
     val ownerId: String?,
     val completedAt: String?,
     val counts: Map<String, Int>,
@@ -99,14 +93,12 @@ data class SongWire(
     val durationMs: Long?,
     val explicit: Boolean?,
     val available: Boolean,
-    val cacheRevision: String?,
 )
 
 @Serializable
 data class SongsWire(
     val items: List<SongWire>,
     val missingIds: List<String>,
-    val cacheRevision: String?,
 )
 
 @Serializable
@@ -118,8 +110,6 @@ data class CreatePlaylistRequest(
 @Serializable
 data class SyncPlaylistRequest(
     val trackIds: List<String>,
-    val baseSnapshotId: String?,
-    val baseCacheRevision: String,
 )
 
 val apiJson =

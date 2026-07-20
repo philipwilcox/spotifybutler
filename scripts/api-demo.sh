@@ -42,6 +42,12 @@ set -euo pipefail
 # A curl cookie jar may be supplied with BUTLER_COOKIE_JAR, but it must contain
 # the `butler_session` cookie; the CSRF token is returned by the session API,
 # not stored in that jar.
+#
+# A cache refresh can be retried when the cache is unavailable. If the API
+# returns cache_not_ready (409) for --sync, refresh first and retry the
+# synchronization after the cache reports ready. A sanitized spotify_failure
+# (502) is also retryable after checking Spotify availability or authentication;
+# upstream credentials and failure details are never printed by this script.
 
 BASE_URL="${BUTLER_BASE_URL:-http://127.0.0.1:8888}"
 ORIGIN="${BUTLER_ORIGIN:-http://127.0.0.1:8888}"
@@ -138,6 +144,7 @@ echo
 echo '== current playlist =='
 current_json="$(api_get "/api/v1/playlists/$DEFINITION_ID/current")"
 printf '%s\n' "$current_json"
+echo 'The current response contains the complete ordered cached track-ID list; this demo enriches only its first two IDs.'
 
 if command -v jq >/dev/null 2>&1; then
   if [[ "$(printf '%s' "$current_json" | jq -r '.current != null')" == true ]]; then
@@ -147,7 +154,7 @@ if command -v jq >/dev/null 2>&1; then
       api_get "/api/v1/songs?ids=$track_ids"
       echo
 
-      sync_body="$(printf '%s' "$current_json" | jq -c '.current as $current | {trackIds: $current.trackIds[0:2], baseSnapshotId: $current.snapshotId, baseCacheRevision: $current.cacheRevision}')"
+      sync_body="$(printf '%s' "$current_json" | jq -c '{trackIds: .current.trackIds[0:2]}')"
       if [[ "$sync_requested" == true ]]; then
         echo '== synchronize managed playlist =='
         echo "Replacing the managed playlist with: $sync_body" >&2

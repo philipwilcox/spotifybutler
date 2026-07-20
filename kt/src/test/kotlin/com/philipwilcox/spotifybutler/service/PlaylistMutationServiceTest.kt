@@ -74,7 +74,7 @@ class PlaylistMutationServiceTest {
         existingId: String?,
     ): PlaylistPlan {
         val definition = PlaylistDefinition(PlaylistDefinitionId.RECENT_LIKED_100, name, PlaylistQuery.RecentLiked(100))
-        val existing = existingId?.let { ExistingPlaylist(it, "snapshot", emptyList()) }
+        val existing = existingId?.let { ExistingPlaylist(it, emptyList()) }
         return PlaylistPlan(definition, tracks, existing, emptyList(), tracks, emptyList())
     }
 

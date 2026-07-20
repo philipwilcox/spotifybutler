@@ -54,7 +54,6 @@ class PlaylistGenerationServiceTest {
                                 href = "https://example.invalid/playlist",
                                 uri = "spotify:playlist:generated",
                                 tracksHref = "https://example.invalid/playlist/items",
-                                snapshotId = "snapshot-1",
                                 ownerId = "owner-one",
                             ),
                         ),

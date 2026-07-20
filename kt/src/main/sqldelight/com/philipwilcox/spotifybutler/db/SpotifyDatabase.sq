@@ -30,8 +30,7 @@ CREATE TABLE playlists (
     id TEXT,
     href TEXT,
     uri TEXT,
-    tracks_href TEXT,
-    snapshot_id TEXT
+    tracks_href TEXT
 );
 
 CREATE TABLE playlist_tracks (
@@ -65,7 +64,6 @@ CREATE TABLE playlist_details (
     is_public INTEGER,
     collaborative INTEGER,
     owner_id TEXT,
-    snapshot_id TEXT,
     item_count INTEGER,
     display_url TEXT
 );
@@ -113,18 +111,16 @@ CREATE TABLE song_artists (
 
 CREATE TABLE managed_playlists (
     definition_id TEXT NOT NULL,
-    definition_revision TEXT NOT NULL,
     spotify_playlist_id TEXT NOT NULL,
     owner_spotify_user_id TEXT NOT NULL,
-    PRIMARY KEY (definition_id, definition_revision),
+    PRIMARY KEY (definition_id, owner_spotify_user_id),
     UNIQUE (spotify_playlist_id, owner_spotify_user_id)
 );
 
 CREATE TABLE user_playlist_definitions (
     id TEXT NOT NULL PRIMARY KEY,
     owner_spotify_user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    definition_revision TEXT NOT NULL
+    name TEXT NOT NULL
 );
 
 CREATE TABLE user_playlist_definition_items (
@@ -155,9 +151,9 @@ FROM saved_tracks
 ORDER BY name, id, primary_artist_id, release_date, release_year, href, uri, added_at, track_json;
 
 exportPlaylists:
-SELECT name, id, href, uri, tracks_href, snapshot_id
+SELECT name, id, href, uri, tracks_href
 FROM playlists
-ORDER BY name, id, href, uri, tracks_href, snapshot_id;
+ORDER BY name, id, href, uri, tracks_href;
 
 exportPlaylistTracks:
 SELECT playlist_name, added_at, release_date, release_year, name, primary_artist_id, id, href, uri, track_json
@@ -175,7 +171,7 @@ FROM cache_metadata
 ORDER BY singleton_id;
 
 exportPlaylistDetails:
-SELECT playlist_id, description, is_public, collaborative, owner_id, snapshot_id, item_count, display_url
+SELECT playlist_id, description, is_public, collaborative, owner_id, item_count, display_url
 FROM playlist_details
 ORDER BY playlist_id;
 
@@ -195,14 +191,14 @@ FROM song_artists
 ORDER BY track_id, position;
 
 exportManagedPlaylists:
-SELECT definition_id, definition_revision, spotify_playlist_id, owner_spotify_user_id
+SELECT definition_id, spotify_playlist_id, owner_spotify_user_id
 FROM managed_playlists
-ORDER BY definition_id, definition_revision, spotify_playlist_id, owner_spotify_user_id;
+ORDER BY definition_id, spotify_playlist_id, owner_spotify_user_id;
 
 exportUserPlaylistDefinitions:
-SELECT id, owner_spotify_user_id, name, definition_revision
+SELECT id, owner_spotify_user_id, name
 FROM user_playlist_definitions
-ORDER BY id, owner_spotify_user_id, name, definition_revision;
+ORDER BY id, owner_spotify_user_id, name;
 
 exportUserPlaylistDefinitionItems:
 SELECT definition_id, position, track_id
@@ -250,8 +246,8 @@ INSERT INTO top_artists (name, id, href, uri)
 VALUES (?, ?, ?, ?);
 
 insertPlaylist:
-INSERT INTO playlists (name, id, href, uri, tracks_href, snapshot_id)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO playlists (name, id, href, uri, tracks_href)
+VALUES (?, ?, ?, ?, ?);
 
 insertPlaylistTrack:
 INSERT INTO playlist_tracks (
@@ -407,12 +403,12 @@ FROM saved_tracks
 WHERE release_year >= ? AND release_year < ?;
 
 selectPlaylistByName:
-SELECT id, snapshot_id
+SELECT id
 FROM playlists
 WHERE name = ?;
 
 selectPlaylistByNameAndOwner:
-SELECT playlists.id, playlists.snapshot_id
+SELECT playlists.id
 FROM playlists
 JOIN playlist_details ON playlist_details.playlist_id = playlists.id
 WHERE playlists.name = ? AND playlist_details.owner_id = ?;
@@ -435,7 +431,7 @@ FROM cache_metadata
 WHERE singleton_id = 1;
 
 selectPlaylistDetailsById:
-SELECT playlist_id, description, is_public, collaborative, owner_id, snapshot_id, item_count, display_url
+SELECT playlist_id, description, is_public, collaborative, owner_id, item_count, display_url
 FROM playlist_details
 WHERE playlist_id = ?;
 
@@ -452,6 +448,13 @@ SELECT id, name, href, uri, album_id, album_name, album_href, album_uri, release
 FROM songs
 ORDER BY id;
 
+selectSongsByIds:
+SELECT id, name, href, uri, album_id, album_name, album_href, album_uri, release_date,
+       duration_ms, explicit, available, track_json
+FROM songs
+WHERE id IN ?
+ORDER BY id;
+
 selectSongArtists:
 SELECT track_id, position, artist_id, name, href, uri
 FROM song_artists
@@ -459,9 +462,9 @@ WHERE track_id = ?
 ORDER BY position;
 
 selectManagedPlaylist:
-SELECT definition_id, definition_revision, spotify_playlist_id, owner_spotify_user_id
+SELECT definition_id, spotify_playlist_id, owner_spotify_user_id
 FROM managed_playlists
-WHERE definition_id = ? AND definition_revision = ? AND owner_spotify_user_id = ?;
+WHERE definition_id = ? AND owner_spotify_user_id = ?;
 
 insertCacheMetadata:
 INSERT INTO cache_metadata (singleton_id, cache_revision, sync_timestamp_millis, owner_spotify_user_id, completion_state)
@@ -488,9 +491,9 @@ DELETE FROM song_artists;
 
 insertPlaylistDetails:
 INSERT INTO playlist_details (
-    playlist_id, description, is_public, collaborative, owner_id, snapshot_id, item_count, display_url
+    playlist_id, description, is_public, collaborative, owner_id, item_count, display_url
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
 insertPlaylistItem:
 INSERT INTO playlist_items (
@@ -512,16 +515,16 @@ VALUES (?, ?, ?, ?, ?, ?);
 
 insertManagedPlaylist:
 INSERT INTO managed_playlists (
-    definition_id, definition_revision, spotify_playlist_id, owner_spotify_user_id
+    definition_id, spotify_playlist_id, owner_spotify_user_id
 )
-VALUES (?, ?, ?, ?)
-ON CONFLICT(definition_id, definition_revision) DO UPDATE SET
+VALUES (?, ?, ?)
+ON CONFLICT(definition_id, owner_spotify_user_id) DO UPDATE SET
     spotify_playlist_id = excluded.spotify_playlist_id,
     owner_spotify_user_id = excluded.owner_spotify_user_id;
 
-updatePlaylistSnapshot:
+updatePlaylistItemCount:
 UPDATE playlist_details
-SET snapshot_id = ?, item_count = ?
+SET item_count = ?
 WHERE playlist_id = ?;
 
 updateCacheMetadata:
@@ -530,13 +533,13 @@ SET cache_revision = ?, sync_timestamp_millis = ?, completion_state = ?
 WHERE singleton_id = 1;
 
 selectUserPlaylistDefinitionsByOwner:
-SELECT id, owner_spotify_user_id, name, definition_revision
+SELECT id, owner_spotify_user_id, name
 FROM user_playlist_definitions
 WHERE owner_spotify_user_id = ?
 ORDER BY id;
 
 selectUserPlaylistDefinition:
-SELECT id, owner_spotify_user_id, name, definition_revision
+SELECT id, owner_spotify_user_id, name
 FROM user_playlist_definitions
 WHERE id = ? AND owner_spotify_user_id = ?;
 
@@ -547,16 +550,15 @@ WHERE definition_id = ?
 ORDER BY position;
 
 insertUserPlaylistDefinition:
-INSERT INTO user_playlist_definitions (id, owner_spotify_user_id, name, definition_revision)
-VALUES (?, ?, ?, ?);
+INSERT INTO user_playlist_definitions (id, owner_spotify_user_id, name)
+VALUES (?, ?, ?);
 
 upsertUserPlaylistDefinition:
-INSERT INTO user_playlist_definitions (id, owner_spotify_user_id, name, definition_revision)
-VALUES (?, ?, ?, ?)
+INSERT INTO user_playlist_definitions (id, owner_spotify_user_id, name)
+VALUES (?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     owner_spotify_user_id = excluded.owner_spotify_user_id,
-    name = excluded.name,
-    definition_revision = excluded.definition_revision;
+    name = excluded.name;
 
 deleteUserPlaylistDefinitionItems:
 DELETE FROM user_playlist_definition_items

@@ -31,9 +31,15 @@ The browser-facing API is described by [`src/main/resources/openapi.yaml`](src/m
 opaque `butler_session` cookie and returns a CSRF token from `GET /api/v1/session`; Spotify access and refresh tokens
 remain server-side. The public readiness endpoint is `GET /health`. After OAuth, the narrow API resources support cache
 refresh, full ID-only playlist/current views, bounded song enrichment, and direct client-submitted playlist
-synchronization. State-changing requests require both `X-CSRF-Token` and a trusted `Origin`; synchronization clients
-should reload after `cache_revision_stale` or `playlist_changed` conflicts. `/api/v1/run` remains only as a deprecated
-refresh compatibility endpoint.
+synchronization. State-changing requests require both `X-CSRF-Token` and a trusted `Origin`; synchronization is
+last-write-wins for this single-user deployment. `/api/v1/run` remains only as a deprecated refresh compatibility
+endpoint.
+
+The current endpoint returns the complete ordered, ID-only cached playlist, including repeated track occurrences.
+Song enrichment accepts comma-separated IDs in request order, preserves found duplicates, reports each missing ID once,
+and is limited to 50 normalized IDs. If synchronization reports `cache_not_ready` (HTTP 409), refresh the library and
+retry after the cache becomes ready. A failed refresh or playlist write returns a generic, retryable
+`spotify_failure` response (HTTP 502); credentials and upstream failure details are never sent to the browser.
 
 The repository-level [`scripts/api-demo.sh`](../scripts/api-demo.sh) demonstrates the intended curl sequence. Set
 `BUTLER_SESSION` and `CSRF_TOKEN` from an authenticated browser session, or point `BUTLER_COOKIE_JAR` at a cookie jar.

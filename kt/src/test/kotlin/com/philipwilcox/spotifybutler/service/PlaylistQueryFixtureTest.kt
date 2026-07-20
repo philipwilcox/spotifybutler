@@ -96,7 +96,6 @@ class PlaylistQueryFixtureTest {
             val expectation = requireNotNull(expectations[plan.definition.id.name])
             expectation.existingPlaylist?.let { existing ->
                 assertEquals(existing.id, plan.existingPlaylist?.id)
-                assertEquals(existing.snapshotId, plan.existingPlaylist?.snapshotId)
             }
             expectation.exactAlreadyPresentUris?.let {
                 assertEquals(

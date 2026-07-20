@@ -12,6 +12,7 @@
 package com.philipwilcox.spotifybutler.http
 
 import com.philipwilcox.spotifybutler.db.SpotifyStore
+import com.philipwilcox.spotifybutler.db.StoredPlaylistItem
 import com.philipwilcox.spotifybutler.service.PlaylistDefinition
 import com.philipwilcox.spotifybutler.service.PlaylistQueries
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
@@ -27,7 +28,6 @@ import java.time.Year
 import java.util.Base64
 
 data class PlaylistRemoteState(
-    val snapshotId: String?,
     val trackIds: List<String>,
 )
 
@@ -41,7 +41,7 @@ interface PlaylistSyncGateway {
         accessToken: String,
         playlistId: String,
         trackIds: List<String>,
-    ): String?
+    )
 }
 
 class SpotifyPlaylistSyncGateway(
@@ -51,13 +51,13 @@ class SpotifyPlaylistSyncGateway(
         accessToken: String,
         playlistId: String,
     ): PlaylistRemoteState =
-        apiClient.getPlaylistCurrent(accessToken, playlistId).let { PlaylistRemoteState(it.snapshotId, it.trackIds) }
+        apiClient.getPlaylistCurrent(accessToken, playlistId).let { PlaylistRemoteState(it.trackIds) }
 
     override fun replaceTracks(
         accessToken: String,
         playlistId: String,
         trackIds: List<String>,
-    ): String? = apiClient.replaceTrackIds(accessToken, playlistId, trackIds)
+    ) = apiClient.replaceTrackIds(accessToken, playlistId, trackIds)
 }
 
 class ApiApplication(
@@ -73,7 +73,6 @@ class ApiApplication(
 ) {
     private val logger = KotlinLogging.logger {}
     private val refreshLocks = KeyedLock()
-    private val syncLocks = KeyedLock()
 
     constructor(
         cacheService: SpotifyCacheService,
@@ -233,13 +232,8 @@ class ApiApplication(
 
     private fun playlists(session: ButlerSession): ApiResponse {
         requireCacheOwner(session)
-        val metadata = store.cacheMetadata()
         val definitions = builtInDefinitions() + userDefinitions(session.ownerSpotifyUserId)
-        val response =
-            PlaylistListWire(
-                items = definitions.map { definition -> playlistReference(definition, session, metadata?.revision) },
-                cacheRevision = metadata?.revision,
-            )
+        val response = PlaylistListWire(definitions.map { definition -> playlistReference(definition, session) })
         return json(HttpURLConnection.HTTP_OK, response)
     }
 
@@ -264,12 +258,11 @@ class ApiApplication(
                 session.ownerSpotifyUserId,
                 input.name,
                 input.trackIds.toList(),
-                revision(input.name, input.trackIds),
             )
         store.saveUserPlaylistDefinition(definition.toStored())
         return json(
             HttpURLConnection.HTTP_CREATED,
-            playlistReference(definition.asView(), session, store.cacheMetadata()?.revision),
+            playlistReference(definition.asView(), session),
         )
     }
 
@@ -278,7 +271,7 @@ class ApiApplication(
         session: ButlerSession,
     ): ApiResponse {
         val definition = definition(definitionId, session.ownerSpotifyUserId)
-        return json(HttpURLConnection.HTTP_OK, playlistReference(definition, session, store.cacheMetadata()?.revision))
+        return json(HttpURLConnection.HTTP_OK, playlistReference(definition, session))
     }
 
     private fun updatePlaylist(
@@ -297,13 +290,12 @@ class ApiApplication(
         val updated =
             existing.copy(
                 name = input.name,
-                revision = revision(input.name, input.trackIds),
                 trackIds = input.trackIds.toList(),
             )
         store.saveUserPlaylistDefinition(updated)
         return json(
             HttpURLConnection.HTTP_OK,
-            playlistReference(updated.toView(), session, store.cacheMetadata()?.revision),
+            playlistReference(updated.toView(), session),
         )
     }
 
@@ -313,17 +305,20 @@ class ApiApplication(
     ): ApiResponse {
         requireCacheOwner(session)
         val definition = definition(definitionId, session.ownerSpotifyUserId)
-        val metadata =
-            store.cacheMetadata() ?: return json(HttpURLConnection.HTTP_OK, PlaylistCurrentEnvelopeWire(null))
+        store.cacheMetadata() ?: return json(HttpURLConnection.HTTP_OK, PlaylistCurrentEnvelopeWire(null))
         val playlistId =
             resolvePlaylistId(definition, session)
                 ?: return json(HttpURLConnection.HTTP_OK, PlaylistCurrentEnvelopeWire(null))
-        val details = store.playlistDetails(playlistId)
-        val trackIds = store.playlistItems(playlistId).filter { it.isPlayable }.mapNotNull { it.itemId }
+        val trackIds =
+            store
+                .playlistItems(
+                    playlistId,
+                ).filter(StoredPlaylistItem::isPlayableCurrentTrack)
+                .map { it.itemId!! }
         return json(
             HttpURLConnection.HTTP_OK,
             PlaylistCurrentEnvelopeWire(
-                PlaylistCurrentWire(playlistId, details?.snapshotId, metadata.revision, trackIds),
+                PlaylistCurrentWire(playlistId, trackIds),
             ),
         )
     }
@@ -336,7 +331,6 @@ class ApiApplication(
             HttpURLConnection.HTTP_OK,
             LibraryWire(
                 status = status,
-                cacheRevision = metadata?.revision,
                 ownerId = metadata?.ownerSpotifyUserId,
                 completedAt =
                     metadata?.syncTimestampMillis?.let {
@@ -357,6 +351,7 @@ class ApiApplication(
         val ids =
             request.query["ids"]
                 ?.split(',')
+                ?.map(String::trim)
                 ?.filter(String::isNotBlank)
                 .orEmpty()
         require(ids.isNotEmpty()) { "ids must contain at least one track ID" }
@@ -366,9 +361,8 @@ class ApiApplication(
         return json(
             HttpURLConnection.HTTP_OK,
             SongsWire(
-                items = tracks.map { it.toSongWire(store.cacheMetadata()?.revision) },
+                items = tracks.map { it.toSongWire() },
                 missingIds = ids.distinct().filterNot(tracksById::containsKey),
-                cacheRevision = store.cacheMetadata()?.revision,
             ),
         )
     }
@@ -381,7 +375,7 @@ class ApiApplication(
         val track =
             store.songEnrichment(trackId)
                 ?: throw ApiFailure(HttpURLConnection.HTTP_NOT_FOUND, "song_not_found", "Song not found")
-        return json(HttpURLConnection.HTTP_OK, track.toSongWire(store.cacheMetadata()?.revision))
+        return json(HttpURLConnection.HTTP_OK, track.toSongWire())
     }
 
     private fun refresh(
@@ -426,77 +420,23 @@ class ApiApplication(
         requireStateChange(request, session)
         requireCacheOwner(session)
         val input = body<SyncPlaylistRequest>(request)
-        val initialDefinition = definition(definitionId, session.ownerSpotifyUserId)
-        val initialPlaylistId =
-            resolvePlaylistId(initialDefinition, session)
-                ?: throw ApiFailure(HttpURLConnection.HTTP_CONFLICT, "mapping_missing", "The playlist is not mapped")
-        return syncLocks.withLock(initialPlaylistId) {
-            synchronizePlaylist(initialPlaylistId, definitionId, input, session)
-        }
-    }
-
-    private fun synchronizePlaylist(
-        lockedPlaylistId: String,
-        definitionId: String,
-        input: SyncPlaylistRequest,
-        session: ButlerSession,
-    ): ApiResponse {
-        val metadata =
-            store.cacheMetadata()
-                ?: throw ApiFailure(
-                    HttpURLConnection.HTTP_CONFLICT,
-                    "cache_not_ready",
-                    "The library cache is not ready",
-                )
-        if (input.baseCacheRevision != metadata.revision) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_CONFLICT,
-                "cache_revision_stale",
-                "The edited cache revision is no longer current",
-            )
-        }
+        store.cacheMetadata()
+            ?: throw ApiFailure(HttpURLConnection.HTTP_CONFLICT, "cache_not_ready", "The library cache is not ready")
         val definition = definition(definitionId, session.ownerSpotifyUserId)
         val playlistId =
             resolvePlaylistId(definition, session)
                 ?: throw ApiFailure(HttpURLConnection.HTTP_CONFLICT, "mapping_missing", "The playlist is not mapped")
-        if (playlistId != lockedPlaylistId) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_CONFLICT,
-                "playlist_changed",
-                "The managed playlist mapping changed",
-            )
-        }
         validateTrackIds(input.trackIds)
-        val cachedSnapshot = store.playlistDetails(playlistId)?.snapshotId
-        if (input.baseSnapshotId != cachedSnapshot) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_CONFLICT,
-                "playlist_changed",
-                "The Spotify playlist changed since it was edited",
-            )
-        }
-        val live = spotifyCall { syncGateway.current(session.accessToken, playlistId) }
-        if (input.baseSnapshotId != live.snapshotId) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_CONFLICT,
-                "playlist_changed",
-                "The Spotify playlist changed since it was edited",
-            )
-        }
         spotifyCall { syncGateway.replaceTracks(session.accessToken, playlistId, input.trackIds) }
         val authoritative = spotifyCall { syncGateway.current(session.accessToken, playlistId) }
         store.publishPlaylistTrackIds(
             playlistId,
             authoritative.trackIds,
-            authoritative.snapshotId,
             clock.millis(),
         )
-        val published = requireNotNull(store.cacheMetadata()) { "Sync publication did not retain cache metadata" }
         return json(
             HttpURLConnection.HTTP_OK,
-            PlaylistCurrentEnvelopeWire(
-                PlaylistCurrentWire(playlistId, authoritative.snapshotId, published.revision, authoritative.trackIds),
-            ),
+            PlaylistCurrentEnvelopeWire(PlaylistCurrentWire(playlistId, authoritative.trackIds)),
         )
     }
 
@@ -512,25 +452,22 @@ class ApiApplication(
         store.userPlaylistDefinitions(ownerSpotifyUserId).map { it.toView() }
 
     private fun com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition.toView(): DefinitionView =
-        DefinitionView(id, name, null, trackIds, revision)
+        DefinitionView(id, name, null, trackIds)
 
     private fun builtInDefinitions(): List<DefinitionView> =
         PlaylistQueries.definitions(Year.now(clock).value, MIN_DISCOVER_WEEKLY_YEAR).map { definition ->
-            DefinitionView(definition.id.name, definition.name, definition, emptyList(), null)
+            DefinitionView(definition.id.name, definition.name, definition, emptyList())
         }
 
     private fun playlistReference(
         definition: DefinitionView,
         session: ButlerSession,
-        cacheRevision: String?,
     ): PlaylistReferenceWire {
         val mapping = resolvePlaylistId(definition, session)
         return PlaylistReferenceWire(
             id = definition.id,
             name = definition.name,
             state = if (mapping == null) "unmapped" else "mapped",
-            definitionRevision = definitionRevision(definition),
-            cacheRevision = cacheRevision,
             spotifyPlaylistId = mapping,
             trackIds = definition.trackIds,
         )
@@ -540,8 +477,7 @@ class ApiApplication(
         definition: DefinitionView,
         session: ButlerSession,
     ): String? {
-        val revision = definitionRevision(definition)
-        store.managedPlaylist(definition.id, revision, session.ownerSpotifyUserId)?.let { return it.spotifyPlaylistId }
+        store.managedPlaylist(definition.id, session.ownerSpotifyUserId)?.let { return it.spotifyPlaylistId }
         val matches =
             store.playlistMatchesByName(definition.name).filter { match ->
                 store.playlistDetails(match.id)?.ownerId == session.ownerSpotifyUserId
@@ -558,7 +494,7 @@ class ApiApplication(
         val cachedId = matches.singleOrNull()?.id ?: return null
         val owner = store.playlistDetails(cachedId)?.ownerId
         if (owner != null && owner != session.ownerSpotifyUserId) return null
-        store.saveManagedPlaylist(definition.id, revision, cachedId, session.ownerSpotifyUserId)
+        store.saveManagedPlaylist(definition.id, cachedId, session.ownerSpotifyUserId)
         return cachedId
     }
 
@@ -658,14 +594,6 @@ class ApiApplication(
             "%02x".format(it)
         }
 
-    private fun revision(
-        name: String,
-        trackIds: List<String>,
-    ): String = fingerprint("$name\u0000${trackIds.joinToString("\u0000")}")
-
-    private fun definitionRevision(definition: DefinitionView): String =
-        definition.revision ?: fingerprint(definition.id + definition.name)
-
     private inline fun <reified T> json(
         status: Int,
         value: T,
@@ -712,7 +640,6 @@ class ApiApplication(
         val name: String,
         val builtin: PlaylistDefinition?,
         val trackIds: List<String>,
-        val revision: String?,
     )
 
     private data class UserPlaylistDefinition(
@@ -720,16 +647,14 @@ class ApiApplication(
         val ownerSpotifyUserId: String,
         val name: String,
         val trackIds: List<String>,
-        val revision: String,
     ) {
-        fun asView(): DefinitionView = DefinitionView(id, name, null, trackIds, revision)
+        fun asView(): DefinitionView = DefinitionView(id, name, null, trackIds)
 
         fun toStored() =
             com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition(
                 id,
                 ownerSpotifyUserId,
                 name,
-                revision,
                 trackIds,
             )
     }
@@ -750,7 +675,15 @@ class ApiApplication(
     }
 }
 
-private fun SpotifyTrack.toSongWire(cacheRevision: String?): SongWire =
+private fun StoredPlaylistItem.isPlayableCurrentTrack(): Boolean =
+    isPlayable &&
+        !isLocal &&
+        itemType == "track" &&
+        status == "playable" &&
+        !itemId.isNullOrBlank() &&
+        itemUri?.startsWith("spotify:track:") == true
+
+private fun SpotifyTrack.toSongWire(): SongWire =
     SongWire(
         id = id,
         name = name,
@@ -761,10 +694,9 @@ private fun SpotifyTrack.toSongWire(cacheRevision: String?): SongWire =
         durationMs = durationMs,
         explicit = explicit,
         available = available,
-        cacheRevision = cacheRevision,
     )
 
-private fun com.philipwilcox.spotifybutler.db.StoredSong.toSongWire(cacheRevision: String?): SongWire =
+private fun com.philipwilcox.spotifybutler.db.StoredSong.toSongWire(): SongWire =
     SongWire(
         id = id,
         name = name,
@@ -775,7 +707,6 @@ private fun com.philipwilcox.spotifybutler.db.StoredSong.toSongWire(cacheRevisio
         durationMs = durationMs,
         explicit = explicit,
         available = available,
-        cacheRevision = cacheRevision,
     )
 
 private fun ApiResponse.withRequestId(requestId: String): ApiResponse =

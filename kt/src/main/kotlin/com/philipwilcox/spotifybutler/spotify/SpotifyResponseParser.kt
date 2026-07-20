@@ -46,7 +46,7 @@ internal fun parseSpotifyTrack(
         albumName = album?.optionalString("name"),
         albumHref = album?.optionalString("href"),
         albumUri = album?.optionalString("uri"),
-        available = item.optionalBoolean("is_playable") ?: item.optionalString("id") != null,
+        available = item.explicitPlayable() ?: item.optionalString("id") != null,
         artists =
             artists
                 .map { artist ->
@@ -90,7 +90,6 @@ internal fun parseSpotifyPlaylist(item: JsonObject): SpotifyPlaylist {
         href = item.requiredString("href", "playlist"),
         uri = item.requiredString("uri", "playlist"),
         tracksHref = items.requiredString("href", "playlist items metadata"),
-        snapshotId = item.optionalString("snapshot_id"),
         description = item.optionalString("description"),
         public = item.optionalBoolean("public"),
         collaborative = item.optionalBoolean("collaborative"),
@@ -127,13 +126,14 @@ internal fun parsePlaylistItem(
         }
     val itemId = nested?.optionalString("id")
     val itemUri = nested?.optionalString("uri")
-    val isPlayable = track != null && !isLocal && itemType != "episode"
+    val unavailable = nested?.explicitPlayable() == false
+    val isPlayable = track != null && !unavailable && !isLocal && itemType != "episode"
     val status =
         when {
             nested == null -> "inaccessible"
             itemType != null && itemType != "track" -> "unsupported_type"
             isLocal -> "local"
-            track == null -> "unavailable"
+            track == null || unavailable -> "unavailable"
             else -> "playable"
         }
     return SpotifyPlaylistItem(
@@ -167,6 +167,15 @@ internal fun JsonObject.optionalString(key: String): String? = get(key)?.jsonPri
 internal fun JsonObject.optionalLong(key: String): Long? = get(key)?.jsonPrimitive?.longOrNull
 
 internal fun JsonObject.optionalBoolean(key: String): Boolean? = get(key)?.jsonPrimitive?.booleanOrNull
+
+private fun JsonObject.explicitPlayable(): Boolean? =
+    get("is_playable")?.toString()?.trim('"')?.lowercase()?.let { value ->
+        when (value) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
+    }
 
 private fun JsonObject.requiredString(
     key: String,

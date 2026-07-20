@@ -18,6 +18,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Health'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/session:
     get:
       responses:
@@ -27,12 +29,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Session'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
     delete:
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
       responses:
         '204':
           description: Session deleted.
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/session/refresh:
     post:
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
       responses:
         '200':
           description: Rotated session.
@@ -40,6 +50,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Session'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/playlists:
     get:
       responses:
@@ -49,6 +61,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistList'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
     post:
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
@@ -65,6 +79,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistReference'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/playlists/{definitionId}:
     parameters:
       - $ref: '#/components/parameters/DefinitionId'
@@ -76,6 +92,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistReference'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
     put:
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
@@ -92,6 +110,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistReference'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/playlists/{definitionId}/current:
     get:
       parameters:
@@ -103,6 +123,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CurrentEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/playlists/{definitionId}/syncs:
     post:
       parameters:
@@ -116,11 +138,13 @@ paths:
               $ref: '#/components/schemas/SyncRequest'
       responses:
         '200':
-          description: Authoritative cache-backed playlist state after replacement.
+          description: Authoritative playlist state after last-write-wins replacement.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CurrentEnvelope'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/library:
     get:
       responses:
@@ -130,6 +154,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Library'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/library/refresh:
     post:
       parameters:
@@ -141,6 +167,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Library'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/run:
     post:
       deprecated: true
@@ -153,6 +181,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Library'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/songs:
     get:
       parameters:
@@ -161,6 +191,7 @@ paths:
           required: true
           schema:
             type: string
+          x-maxIds: 50
           description: One or more comma-separated Spotify track IDs, maximum 50.
       responses:
         '200':
@@ -169,6 +200,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Songs'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
   /api/v1/songs/{trackId}:
     get:
       parameters:
@@ -184,6 +217,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Song'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
 components:
   securitySchemes:
     ButlerSession:
@@ -203,6 +238,13 @@ components:
       required: true
       schema:
         type: string
+  responses:
+    ErrorResponse:
+      description: Sanitized error response.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     Error:
       type: object
@@ -226,13 +268,11 @@ components:
         expiresAt: {type: string, format: date-time}
     PlaylistReference:
       type: object
-      required: [id, name, state, definitionRevision, trackIds]
+      required: [id, name, state, spotifyPlaylistId, trackIds]
       properties:
         id: {type: string}
         name: {type: string}
         state: {type: string, enum: [mapped, unmapped]}
-        definitionRevision: {type: string}
-        cacheRevision: {type: [string, 'null']}
         spotifyPlaylistId: {type: [string, 'null']}
         trackIds: {type: array, items: {type: string}}
     PlaylistList:
@@ -240,7 +280,6 @@ components:
       required: [items]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/PlaylistReference'}}
-        cacheRevision: {type: [string, 'null']}
     CurrentEnvelope:
       type: object
       required: [current]
@@ -251,23 +290,21 @@ components:
             - {type: 'null'}
     Current:
       type: object
-      required: [spotifyPlaylistId, cacheRevision, trackIds]
+      required: [spotifyPlaylistId, trackIds]
       properties:
         spotifyPlaylistId: {type: string}
-        snapshotId: {type: [string, 'null']}
-        cacheRevision: {type: string}
         trackIds: {type: array, items: {type: string}}
     Library:
       type: object
-      required: [status, counts]
+      required: [status, ownerId, completedAt, counts]
       properties:
         status: {type: string, enum: [empty, ready, refreshing, stale]}
-        cacheRevision: {type: [string, 'null']}
         ownerId: {type: [string, 'null']}
         completedAt: {type: [string, 'null'], format: date-time}
         counts: {type: object, additionalProperties: {type: integer}}
     Album:
       type: object
+      required: [id, name, href, uri, releaseDate]
       properties:
         id: {type: [string, 'null']}
         name: {type: [string, 'null']}
@@ -276,6 +313,7 @@ components:
         releaseDate: {type: [string, 'null']}
     Artist:
       type: object
+      required: [id, name, href, uri]
       properties:
         id: {type: [string, 'null']}
         name: {type: [string, 'null']}
@@ -283,7 +321,7 @@ components:
         uri: {type: [string, 'null']}
     Song:
       type: object
-      required: [id, name, href, uri, album, artists, available]
+      required: [id, name, href, uri, album, artists, durationMs, explicit, available]
       properties:
         id: {type: string}
         name: {type: string}
@@ -294,24 +332,20 @@ components:
         durationMs: {type: [integer, 'null']}
         explicit: {type: [boolean, 'null']}
         available: {type: boolean}
-        cacheRevision: {type: [string, 'null']}
     Songs:
       type: object
       required: [items, missingIds]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Song'}}
         missingIds: {type: array, items: {type: string}}
-        cacheRevision: {type: [string, 'null']}
     SyncRequest:
       type: object
-      required: [trackIds, baseSnapshotId, baseCacheRevision]
+      required: [trackIds]
       properties:
         trackIds: {type: array, maxItems: 5000, items: {type: string}}
-        baseSnapshotId: {type: [string, 'null']}
-        baseCacheRevision: {type: string}
     CreatePlaylistRequest:
       type: object
       required: [name]
       properties:
         name: {type: string, maxLength: 200}
-        trackIds: {type: array, maxItems: 5000, items: {type: string}}
+        trackIds: {type: array, default: [], maxItems: 5000, items: {type: string}}

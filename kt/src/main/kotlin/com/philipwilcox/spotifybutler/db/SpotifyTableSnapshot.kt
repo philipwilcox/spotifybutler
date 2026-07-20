@@ -103,7 +103,6 @@ private fun SpotifyDatabaseQueries.exportPlaylistRows() =
             "href" to row.href,
             "uri" to row.uri,
             "tracks_href" to row.tracks_href,
-            "snapshot_id" to row.snapshot_id,
         )
     }
 
@@ -147,7 +146,6 @@ private fun SpotifyDatabaseQueries.exportPlaylistDetailsRows() =
             "is_public" to row.is_public,
             "collaborative" to row.collaborative,
             "owner_id" to row.owner_id,
-            "snapshot_id" to row.snapshot_id,
             "item_count" to row.item_count,
             "display_url" to row.display_url,
         )
@@ -205,7 +203,6 @@ private fun SpotifyDatabaseQueries.exportManagedPlaylistRows() =
     exportManagedPlaylists().executeAsList().map { row ->
         row.jsonObject(
             "definition_id" to row.definition_id,
-            "definition_revision" to row.definition_revision,
             "spotify_playlist_id" to row.spotify_playlist_id,
             "owner_spotify_user_id" to row.owner_spotify_user_id,
         )
@@ -217,7 +214,6 @@ private fun SpotifyDatabaseQueries.exportUserPlaylistDefinitionRows() =
             "id" to row.id,
             "owner_spotify_user_id" to row.owner_spotify_user_id,
             "name" to row.name,
-            "definition_revision" to row.definition_revision,
         )
     }
 

@@ -30,6 +30,7 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.12.1")
+    testImplementation("org.snakeyaml:snakeyaml-engine:2.10")
 }
 
 kotlin {

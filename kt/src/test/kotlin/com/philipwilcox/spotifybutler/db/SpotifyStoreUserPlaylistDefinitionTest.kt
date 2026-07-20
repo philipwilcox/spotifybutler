@@ -16,19 +16,18 @@ class SpotifyStoreUserPlaylistDefinitionTest {
                     "definition-1",
                     "owner-one",
                     "First",
-                    "revision-one",
                     listOf("track-1", "track-2"),
                 ),
             )
+            store.saveManagedPlaylist("definition-1", "playlist-one", "owner-one")
             store.saveUserPlaylistDefinition(
-                StoredUserPlaylistDefinition("definition-2", "owner-two", "Second", "revision-two", listOf("track-3")),
+                StoredUserPlaylistDefinition("definition-2", "owner-two", "Second", listOf("track-3")),
             )
             store.saveUserPlaylistDefinition(
                 StoredUserPlaylistDefinition(
                     "definition-1",
                     "owner-one",
                     "Renamed",
-                    "revision-three",
                     listOf("track-2", "track-1", "track-2"),
                 ),
             )
@@ -38,13 +37,13 @@ class SpotifyStoreUserPlaylistDefinitionTest {
                     "definition-1",
                     "owner-one",
                     "Renamed",
-                    "revision-three",
                     listOf("track-2", "track-1", "track-2"),
                 ),
                 store.userPlaylistDefinition("definition-1", "owner-one"),
             )
             assertNull(store.userPlaylistDefinition("definition-1", "owner-two"))
             assertEquals(listOf("definition-2"), store.userPlaylistDefinitions("owner-two").map { it.id })
+            assertEquals("playlist-one", store.managedPlaylist("definition-1", "owner-one")?.spotifyPlaylistId)
 
             val snapshot = store.exportTables()
             assertEquals(2, snapshot.userPlaylistDefinitions.size)

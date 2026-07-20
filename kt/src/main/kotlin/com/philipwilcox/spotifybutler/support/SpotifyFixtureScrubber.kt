@@ -135,7 +135,7 @@ private val stableRowColumns =
             ),
         "top_tracks" to listOf("name", "id", "href", "uri", "track_json"),
         "top_artists" to listOf("name", "id", "href", "uri"),
-        "playlists" to listOf("name", "id", "href", "uri", "tracks_href", "snapshot_id"),
+        "playlists" to listOf("name", "id", "href", "uri", "tracks_href"),
         "playlist_tracks" to
             listOf(
                 "playlist_name",
@@ -165,7 +165,6 @@ private val stableRowColumns =
                 "is_public",
                 "collaborative",
                 "owner_id",
-                "snapshot_id",
                 "item_count",
                 "display_url",
             ),
@@ -200,10 +199,8 @@ private val stableRowColumns =
                 "track_json",
             ),
         "song_artists" to listOf("track_id", "position", "artist_id", "name", "href", "uri"),
-        "managed_playlists" to
-            listOf("definition_id", "definition_revision", "spotify_playlist_id", "owner_spotify_user_id"),
-        "user_playlist_definitions" to
-            listOf("id", "owner_spotify_user_id", "name", "definition_revision"),
+        "managed_playlists" to listOf("definition_id", "spotify_playlist_id", "owner_spotify_user_id"),
+        "user_playlist_definitions" to listOf("id", "owner_spotify_user_id", "name"),
         "user_playlist_definition_items" to listOf("definition_id", "position", "track_id"),
     )
 
@@ -337,7 +334,6 @@ private fun String?.sensitiveFieldName(parentKey: String?): String? =
         this == "preview_url" || this == "audio_preview_url" -> this
         this == "isrc" || this == "ean" || this == "upc" -> this
         this == "description" || this == "html_description" -> this
-        this == "definition_revision" -> this
         this == "genres" -> this
         this == "added_at" -> this
         else -> null

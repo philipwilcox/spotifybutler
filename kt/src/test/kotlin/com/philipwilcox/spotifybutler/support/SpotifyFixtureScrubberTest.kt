@@ -245,7 +245,6 @@ class SpotifyFixtureScrubberTest {
                                     put("id", "definition-original")
                                     put("owner_spotify_user_id", "owner-original")
                                     put("name", "Original Playlist")
-                                    put("definition_revision", "revision-original")
                                 },
                             ),
                         userPlaylistDefinitionItems =
@@ -262,7 +261,7 @@ class SpotifyFixtureScrubberTest {
         val scrubbed = scrubFixture(fixture)
         val scrubbedText = canonicalFixtureLine(scrubbed)
 
-        listOf("definition-original", "owner-original", "Original Playlist", "revision-original", "track-original")
+        listOf("definition-original", "owner-original", "Original Playlist", "track-original")
             .forEach { original -> assertFalse(original in scrubbedText) }
         assertEquals(
             scrubbed.expectedTables.userPlaylistDefinitions.single()["id"],

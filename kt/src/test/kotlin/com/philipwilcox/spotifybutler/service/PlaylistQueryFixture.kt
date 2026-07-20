@@ -66,7 +66,6 @@ data class QueryFixturePlaylist(
     val href: String,
     val uri: String,
     val tracksHref: String,
-    val snapshotId: String? = null,
 )
 
 @Serializable
@@ -99,12 +98,11 @@ data class QuerySelectionConstraints(
 @Serializable
 data class QueryFixtureExistingPlaylist(
     val id: String,
-    val snapshotId: String? = null,
 )
 
 val playlistQueryFixtureJson =
     Json {
-        ignoreUnknownKeys = false
+        ignoreUnknownKeys = true
         explicitNulls = true
     }
 
@@ -153,9 +151,7 @@ fun QueryFixtureSeedTables.toSnapshot(): SpotifyCacheSnapshot =
         topTracks = topTracks.map(QueryFixtureTrack::toSpotifyTrack),
         topArtists = topArtists.map { SpotifyArtist(it.name, it.id, it.href, it.uri) },
         playlists =
-            playlists.map {
-                SpotifyPlaylist(it.name, it.id, it.href, it.uri, it.tracksHref, it.snapshotId)
-            },
+            playlists.map { SpotifyPlaylist(it.name, it.id, it.href, it.uri, it.tracksHref) },
         playlistTracks =
             playlistTracks.map {
                 PlaylistTrack(it.playlistName, it.addedAt, it.track.toSpotifyTrack())

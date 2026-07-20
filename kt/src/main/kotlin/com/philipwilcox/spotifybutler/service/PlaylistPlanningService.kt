@@ -5,7 +5,6 @@ import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 
 data class ExistingPlaylist(
     val id: String,
-    val snapshotId: String?,
     val tracks: List<SpotifyTrack>,
 )
 
@@ -36,7 +35,7 @@ class PlaylistPlanningService(
                             it,
                         )
                     }.orEmpty()
-            val existing = metadata?.let { ExistingPlaylist(it.id, it.snapshotId, existingTracks) }
+            val existing = metadata?.let { ExistingPlaylist(it.id, existingTracks) }
             classify(definition, desired, existing)
         }
 
@@ -47,7 +46,7 @@ class PlaylistPlanningService(
     ): PlaylistPlan {
         val metadata = ownerSpotifyUserId?.let { store.findPlaylistByName(definition.name, it) }
         val existingTracks = ownerSpotifyUserId?.let { store.findPlaylistTracksByName(definition.name, it) }.orEmpty()
-        val existing = metadata?.let { ExistingPlaylist(it.id, it.snapshotId, existingTracks) }
+        val existing = metadata?.let { ExistingPlaylist(it.id, existingTracks) }
         return classify(definition, desiredTracks, existing)
     }
 

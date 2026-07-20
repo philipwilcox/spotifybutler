@@ -46,7 +46,6 @@ class SpotifyCacheFoundationTest {
                         href = "https://api.example.test/playlists/playlist-one",
                         uri = "spotify:playlist:playlist-one",
                         tracksHref = "https://api.example.test/playlists/playlist-one/items",
-                        snapshotId = "snapshot-one",
                     ),
                 ),
             playlistTracks = emptyList(),

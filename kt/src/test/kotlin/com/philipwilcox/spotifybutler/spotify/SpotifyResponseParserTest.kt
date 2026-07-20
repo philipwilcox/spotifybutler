@@ -18,8 +18,7 @@ class SpotifyResponseParserTest {
                         "id":"playlist-id",
                         "href":"https://api.example.test/playlists/playlist-id",
                         "uri":"spotify:playlist:playlist-id",
-                        "items":{"href":"https://api.example.test/playlists/playlist-id/items"},
-                        "snapshot_id":"snapshot-1"
+                        "items":{"href":"https://api.example.test/playlists/playlist-id/items"}
                     }""",
                 ),
             )
@@ -55,7 +54,6 @@ class SpotifyResponseParserTest {
                 href = "https://api.example.test/playlists/playlist-id",
                 uri = "spotify:playlist:playlist-id",
                 tracksHref = "https://api.example.test/playlists/playlist-id/items",
-                snapshotId = "snapshot-1",
             )
         val playable =
             parsePlaylistItem(
@@ -86,6 +84,18 @@ class SpotifyResponseParserTest {
                 playlist,
                 position = 19,
             )
+        val unavailable =
+            parsePlaylistItem(
+                parseSpotifyResponse(
+                    """
+                    {"item":{"type":"track","id":"unavailable-id","name":"Unavailable",
+                    "href":"https://api.example.test/tracks/unavailable-id",
+                    "uri":"spotify:track:unavailable-id","is_playable":false,"artists":[]}}
+                    """.trimIndent(),
+                ),
+                playlist,
+                position = 20,
+            )
 
         assertEquals(17, playable.position)
         assertTrue(playable.isPlayable)
@@ -97,6 +107,9 @@ class SpotifyResponseParserTest {
         assertFalse(inaccessible.isPlayable)
         assertEquals("inaccessible", inaccessible.status)
         assertNull(inaccessible.itemId)
+        assertFalse(unavailable.isPlayable)
+        assertEquals("unavailable", unavailable.status)
+        assertNull(unavailable.track)
     }
 
     @Test
