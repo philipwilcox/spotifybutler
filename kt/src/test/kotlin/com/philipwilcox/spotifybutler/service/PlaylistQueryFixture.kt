@@ -169,5 +169,10 @@ fun QueryFixtureTrack.toSpotifyTrack(): SpotifyTrack {
 }
 
 fun PlaylistQueryFixture.loadInto(store: SpotifyStore) {
-    store.replaceCache(seedTables.toSnapshot(), syncTimestampMillis = 1L)
+    val snapshot = seedTables.toSnapshot()
+    store.replaceCache(
+        snapshot.copy(playlists = snapshot.playlists.map { it.copy(ownerId = "fixture-owner") }),
+        syncTimestampMillis = 1L,
+        ownerSpotifyUserId = "fixture-owner",
+    )
 }

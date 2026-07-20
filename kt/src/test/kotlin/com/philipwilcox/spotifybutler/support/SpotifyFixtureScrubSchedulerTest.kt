@@ -31,7 +31,7 @@ class SpotifyFixtureScrubSchedulerTest {
         val workerCount = 6
         val fixture =
             SpotifyFixture(
-                schemaVersion = 1,
+                schemaVersion = 2,
                 name = "scheduler-test",
                 responses = paths.mapIndexed(::fixtureResponse),
                 expectedTables = emptyExpectedTables(),

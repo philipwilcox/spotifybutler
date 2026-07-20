@@ -2,6 +2,10 @@
 
 The notes here should be IGNORED for any current work, and only represent ideas for future directions to explore.
 
+## Cleanup
+
+We won't need migrations, we'll just delete all the legacy schemas and datas and start fresh.
+
 ## API Updates
 
 Make changes to be up to date with the 2026 changes to the Spotify API.

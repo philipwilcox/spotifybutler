@@ -2,7 +2,6 @@ package com.philipwilcox.spotifybutler.http
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 data class ApiRequest(
     val method: String,
@@ -64,32 +63,10 @@ data class PlaylistCurrentEnvelopeWire(
 )
 
 @Serializable
-data class PlaylistItemWire(
-    val playlistId: String,
-    val position: Int,
-    val type: String?,
-    val status: String,
-    val trackId: String?,
-    val uri: String?,
-    val addedAt: String?,
-    val addedById: String?,
-    val local: Boolean,
-    val playable: Boolean,
-)
-
-@Serializable
-data class PlaylistItemsWire(
-    val items: List<PlaylistItemWire>,
-    val nextCursor: String?,
-    val cacheRevision: String,
-)
-
-@Serializable
 data class LibraryWire(
     val status: String,
     val cacheRevision: String?,
     val ownerId: String?,
-    val refreshOperationId: String?,
     val completedAt: String?,
     val counts: Map<String, Int>,
 )
@@ -133,23 +110,6 @@ data class SongsWire(
 )
 
 @Serializable
-data class OperationWire(
-    val id: String,
-    val type: String,
-    val status: String,
-    val createdAt: String,
-    val finishedAt: String?,
-    val result: JsonElement? = null,
-    val error: ErrorEnvelope? = null,
-)
-
-@Serializable
-data class OperationsWire(
-    val items: List<OperationWire>,
-    val nextCursor: String? = null,
-)
-
-@Serializable
 data class CreatePlaylistRequest(
     val name: String,
     val trackIds: List<String> = emptyList(),
@@ -158,18 +118,8 @@ data class CreatePlaylistRequest(
 @Serializable
 data class SyncPlaylistRequest(
     val trackIds: List<String>,
-    val baseSnapshotId: String? = null,
-    val baseCacheRevision: String? = null,
-)
-
-@Serializable
-data class PreviewWire(
-    val cacheRevision: String?,
     val baseSnapshotId: String?,
-    val currentTrackIds: List<String>,
-    val submittedTrackIds: List<String>,
-    val toAdd: List<String>,
-    val toRemove: List<String>,
+    val baseCacheRevision: String,
 )
 
 val apiJson =

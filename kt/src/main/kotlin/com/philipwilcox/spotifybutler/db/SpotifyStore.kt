@@ -54,6 +54,46 @@ class SpotifyStore private constructor(
             )
         }
 
+    fun userPlaylistDefinitions(ownerSpotifyUserId: String): List<StoredUserPlaylistDefinition> =
+        queries.selectUserPlaylistDefinitionsByOwner(ownerSpotifyUserId).executeAsList().map { row ->
+            StoredUserPlaylistDefinition(
+                id = requireNotNull(row.id),
+                ownerSpotifyUserId = requireNotNull(row.owner_spotify_user_id),
+                name = requireNotNull(row.name),
+                revision = requireNotNull(row.definition_revision),
+                trackIds = userPlaylistTrackIds(requireNotNull(row.id)),
+            )
+        }
+
+    fun userPlaylistDefinition(
+        id: String,
+        ownerSpotifyUserId: String,
+    ): StoredUserPlaylistDefinition? =
+        queries.selectUserPlaylistDefinition(id, ownerSpotifyUserId).executeAsOneOrNull()?.let { row ->
+            StoredUserPlaylistDefinition(
+                id = requireNotNull(row.id),
+                ownerSpotifyUserId = requireNotNull(row.owner_spotify_user_id),
+                name = requireNotNull(row.name),
+                revision = requireNotNull(row.definition_revision),
+                trackIds = userPlaylistTrackIds(id),
+            )
+        }
+
+    fun saveUserPlaylistDefinition(definition: StoredUserPlaylistDefinition) {
+        database.transaction {
+            queries.upsertUserPlaylistDefinition(
+                definition.id,
+                definition.ownerSpotifyUserId,
+                definition.name,
+                definition.revision,
+            )
+            queries.deleteUserPlaylistDefinitionItems(definition.id)
+            definition.trackIds.forEachIndexed { position, trackId ->
+                queries.insertUserPlaylistDefinitionItem(definition.id, position.toLong(), trackId)
+            }
+        }
+    }
+
     fun playlistItems(playlistId: String): List<StoredPlaylistItem> =
         queries.selectPlaylistItemsById(playlistId).executeAsList().map { row ->
             StoredPlaylistItem(
@@ -77,6 +117,18 @@ class SpotifyStore private constructor(
 
     fun song(id: String): SpotifyTrack? = songs().firstOrNull { it.id == id }
 
+    fun songEnrichment(id: String): StoredSong? =
+        queries
+            .selectAllSongs()
+            .executeAsList()
+            .firstOrNull { it.id == id }
+            ?.toStoredSong()
+
+    fun songEnrichment(ids: List<String>): List<StoredSong> {
+        val byId = queries.selectAllSongs().executeAsList().associateBy { requireNotNull(it.id) }
+        return ids.mapNotNull { id -> byId[id]?.toStoredSong() }
+    }
+
     fun playlistDetails(playlistId: String): StoredPlaylistDetails? =
         queries.selectPlaylistDetailsById(playlistId).executeAsOneOrNull()?.let { row ->
             StoredPlaylistDetails(
@@ -91,7 +143,10 @@ class SpotifyStore private constructor(
             )
         }
 
-    fun playlistIdByName(name: String): String? = findPlaylistByName(name)?.id
+    fun playlistIdByName(
+        name: String,
+        ownerSpotifyUserId: String,
+    ): String? = findPlaylistByName(name, ownerSpotifyUserId)?.id
 
     fun playlistMatchesByName(name: String): List<ExistingPlaylistMetadata> =
         queries.selectPlaylistByName(name).executeAsList().map {
@@ -128,6 +183,7 @@ class SpotifyStore private constructor(
         playlistId: String,
         trackIds: List<String>,
         snapshotId: String?,
+        syncTimestampMillis: Long,
     ) {
         database.transaction {
             queries.clearPlaylistItemsById(playlistId)
@@ -148,6 +204,7 @@ class SpotifyStore private constructor(
                 )
             }
             queries.updatePlaylistSnapshot(snapshotId, trackIds.size.toLong(), playlistId)
+            queries.updateCacheMetadata(newCacheRevision(), syncTimestampMillis, CACHE_READY)
         }
     }
 
@@ -215,8 +272,11 @@ class SpotifyStore private constructor(
                     .toSet(),
         )
 
-    fun findPlaylistByName(name: String): ExistingPlaylistMetadata? {
-        val matches = queries.selectPlaylistByName(name).executeAsList()
+    fun findPlaylistByName(
+        name: String,
+        ownerSpotifyUserId: String,
+    ): ExistingPlaylistMetadata? {
+        val matches = queries.selectPlaylistByNameAndOwner(name, ownerSpotifyUserId).executeAsList()
         require(matches.size <= 1) { "Multiple cached playlists have the generated name $name" }
         return matches.singleOrNull()?.let {
             ExistingPlaylistMetadata(
@@ -226,8 +286,11 @@ class SpotifyStore private constructor(
         }
     }
 
-    fun findPlaylistTracksByName(name: String): List<SpotifyTrack> =
-        queries.selectPlaylistTracksByName(name).executeAsList().mapIndexed { index, row ->
+    fun findPlaylistTracksByName(
+        name: String,
+        ownerSpotifyUserId: String,
+    ): List<SpotifyTrack> =
+        queries.selectPlaylistTracksByNameAndOwner(name, ownerSpotifyUserId).executeAsList().mapIndexed { index, row ->
             decodeStoredTrack(
                 requireNotNull(row.track_json) { "Cached playlist $name row $index has no track_json" },
                 "playlist $name row $index",
@@ -251,7 +314,7 @@ class SpotifyStore private constructor(
                 cache_revision = newCacheRevision(),
                 sync_timestamp_millis = syncTimestampMillis,
                 owner_spotify_user_id = ownerSpotifyUserId,
-                completion_state = CACHE_COMPLETE,
+                completion_state = CACHE_READY,
             )
         }
     }
@@ -272,7 +335,33 @@ class SpotifyStore private constructor(
                 cache_revision = newCacheRevision(),
                 sync_timestamp_millis = syncTimestampMillis,
                 owner_spotify_user_id = null,
-                completion_state = CACHE_COMPLETE,
+                completion_state = CACHE_READY,
+            )
+        }
+    }
+
+    fun markCacheRefreshing(ownerSpotifyUserId: String) {
+        database.transaction {
+            val current = cacheMetadata()
+            queries.clearCacheMetadata()
+            queries.insertCacheMetadata(
+                cache_revision = current?.revision ?: newCacheRevision(),
+                sync_timestamp_millis = current?.syncTimestampMillis ?: 0L,
+                owner_spotify_user_id = current?.ownerSpotifyUserId ?: ownerSpotifyUserId,
+                completion_state = CACHE_REFRESHING,
+            )
+        }
+    }
+
+    fun markCacheStale() {
+        database.transaction {
+            val current = cacheMetadata() ?: return@transaction
+            queries.clearCacheMetadata()
+            queries.insertCacheMetadata(
+                current.revision,
+                current.syncTimestampMillis,
+                current.ownerSpotifyUserId,
+                CACHE_STALE,
             )
         }
     }
@@ -444,6 +533,29 @@ class SpotifyStore private constructor(
 
     private fun newCacheRevision(): String = "cache-${UUID.randomUUID()}"
 
+    private fun userPlaylistTrackIds(definitionId: String): List<String> =
+        queries.selectUserPlaylistDefinitionItems(definitionId).executeAsList().map { requireNotNull(it.track_id) }
+
+    private fun Songs.toStoredSong(): StoredSong =
+        StoredSong(
+            id = requireNotNull(id),
+            name = requireNotNull(name),
+            href = requireNotNull(href),
+            uri = requireNotNull(uri),
+            albumId = album_id,
+            albumName = album_name,
+            albumHref = album_href,
+            albumUri = album_uri,
+            releaseDate = release_date,
+            durationMs = duration_ms,
+            explicit = explicit?.toBooleanFlag(),
+            available = available != 0L,
+            artists =
+                queries.selectSongArtists(requireNotNull(id)).executeAsList().map { artist ->
+                    StoredArtist(artist.artist_id, artist.name, artist.href, artist.uri)
+                },
+        )
+
     private fun storedRows(query: PlaylistQuery): List<StoredTrackRow> =
         when (query) {
             is PlaylistQuery.RecentLiked ->
@@ -512,14 +624,18 @@ class SpotifyStore private constructor(
     private fun Boolean.toLongFlag(): Long = if (this) 1L else 0L
 
     companion object {
-        private const val CACHE_COMPLETE = "complete"
+        private const val CACHE_READY = "ready"
+        private const val CACHE_REFRESHING = "refreshing"
+        private const val CACHE_STALE = "stale"
 
         fun open(databasePath: Path): SpotifyStore {
             val absolutePath = databasePath.toAbsolutePath().normalize()
             val newDatabase = Files.notExists(absolutePath)
             absolutePath.parent?.let(Files::createDirectories)
             val driver = JdbcSqliteDriver("jdbc:sqlite:$absolutePath")
-            if (newDatabase) SpotifyDatabase.Schema.create(driver)
+            if (newDatabase) {
+                SpotifyDatabase.Schema.create(driver)
+            }
             return SpotifyStore(driver, SpotifyDatabase(driver))
         }
 
@@ -537,6 +653,37 @@ data class CacheMetadata(
     val syncTimestampMillis: Long,
     val ownerSpotifyUserId: String?,
     val completionState: String,
+)
+
+data class StoredUserPlaylistDefinition(
+    val id: String,
+    val ownerSpotifyUserId: String,
+    val name: String,
+    val revision: String,
+    val trackIds: List<String>,
+)
+
+data class StoredSong(
+    val id: String,
+    val name: String,
+    val href: String,
+    val uri: String,
+    val albumId: String?,
+    val albumName: String?,
+    val albumHref: String?,
+    val albumUri: String?,
+    val releaseDate: String?,
+    val durationMs: Long?,
+    val explicit: Boolean?,
+    val available: Boolean,
+    val artists: List<StoredArtist>,
+)
+
+data class StoredArtist(
+    val id: String?,
+    val name: String?,
+    val href: String?,
+    val uri: String?,
 )
 
 data class StoredPlaylistItem(

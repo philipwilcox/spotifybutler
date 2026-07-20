@@ -55,6 +55,7 @@ class PlaylistGenerationServiceTest {
                                 uri = "spotify:playlist:generated",
                                 tracksHref = "https://example.invalid/playlist/items",
                                 snapshotId = "snapshot-1",
+                                ownerId = "owner-one",
                             ),
                         ),
                     playlistTracks =
@@ -78,7 +79,10 @@ class PlaylistGenerationServiceTest {
             val stored = assertNotNull(store.get("generation-1"))
             assertEquals(record.desiredTracks.map { it.uri }, stored.desiredTracks.map { it.uri })
 
-            val plan = database.let { PlaylistPlanningService(it).planGenerated(definition, stored.desiredTracks) }
+            val plan =
+                database.let {
+                    PlaylistPlanningService(it).planGenerated(definition, stored.desiredTracks, "owner-one")
+                }
             PlaylistMutationService(client).apply(listOf(plan), dryRun = false)
         }
 

@@ -113,7 +113,7 @@ class SpotifyAuthClient(
                 .build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         require(response.statusCode() in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
-            "Spotify token exchange failed with HTTP ${response.statusCode()}: ${response.body()}"
+            "Spotify token exchange failed with HTTP ${response.statusCode()}"
         }
         return TokenResponse(
             accessToken = requiredJsonString(response.body(), "access_token"),

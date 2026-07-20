@@ -90,7 +90,7 @@ class PlaylistQueryFixtureTest {
         definitions: List<PlaylistDefinition>,
         expectations: Map<String, QueryFixtureExpectation>,
     ) {
-        val plans = PlaylistPlanningService(store).plan(definitions)
+        val plans = PlaylistPlanningService(store).plan(definitions, "fixture-owner")
         assertEquals(definitions.map { it.id }, plans.map { it.definition.id })
         plans.forEach { plan ->
             val expectation = requireNotNull(expectations[plan.definition.id.name])

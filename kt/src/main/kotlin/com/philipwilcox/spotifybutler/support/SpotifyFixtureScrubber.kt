@@ -115,46 +115,103 @@ private fun stableRowSortKey(
     table: String,
     row: JsonObject,
 ): String {
-    val columns =
-        when (table) {
-            "saved_tracks" ->
-                listOf(
-                    "name",
-                    "id",
-                    "primary_artist_id",
-                    "release_date",
-                    "release_year",
-                    "href",
-                    "uri",
-                    "added_at",
-                    "track_json",
-                )
-            "top_tracks" -> listOf("name", "id", "href", "uri", "track_json")
-            "top_artists" -> listOf("name", "id", "href", "uri")
-            "playlists" -> listOf("name", "id", "href", "uri", "tracks_href", "snapshot_id")
-            "playlist_tracks" ->
-                listOf(
-                    "playlist_name",
-                    "name",
-                    "id",
-                    "primary_artist_id",
-                    "release_date",
-                    "release_year",
-                    "href",
-                    "uri",
-                    "added_at",
-                    "track_json",
-                )
-            "sync_status" -> listOf("sync_timestamp_millis")
-            else -> error("Unknown expected table: $table")
-        }
+    val columns = stableRowColumns[table] ?: error("Unknown expected table: $table")
     return columns.joinToString("\u0000") { column -> row[column]?.toString() ?: "" }
 }
+
+private val stableRowColumns =
+    mapOf(
+        "saved_tracks" to
+            listOf(
+                "name",
+                "id",
+                "primary_artist_id",
+                "release_date",
+                "release_year",
+                "href",
+                "uri",
+                "added_at",
+                "track_json",
+            ),
+        "top_tracks" to listOf("name", "id", "href", "uri", "track_json"),
+        "top_artists" to listOf("name", "id", "href", "uri"),
+        "playlists" to listOf("name", "id", "href", "uri", "tracks_href", "snapshot_id"),
+        "playlist_tracks" to
+            listOf(
+                "playlist_name",
+                "name",
+                "id",
+                "primary_artist_id",
+                "release_date",
+                "release_year",
+                "href",
+                "uri",
+                "added_at",
+                "track_json",
+            ),
+        "sync_status" to listOf("sync_timestamp_millis"),
+        "cache_metadata" to
+            listOf(
+                "singleton_id",
+                "cache_revision",
+                "sync_timestamp_millis",
+                "owner_spotify_user_id",
+                "completion_state",
+            ),
+        "playlist_details" to
+            listOf(
+                "playlist_id",
+                "description",
+                "is_public",
+                "collaborative",
+                "owner_id",
+                "snapshot_id",
+                "item_count",
+                "display_url",
+            ),
+        "playlist_items" to
+            listOf(
+                "playlist_id",
+                "position",
+                "added_at",
+                "added_by_id",
+                "is_local",
+                "item_type",
+                "is_playable",
+                "item_id",
+                "item_uri",
+                "status",
+                "complete_item_json",
+            ),
+        "songs" to
+            listOf(
+                "id",
+                "name",
+                "href",
+                "uri",
+                "album_id",
+                "album_name",
+                "album_href",
+                "album_uri",
+                "release_date",
+                "duration_ms",
+                "explicit",
+                "available",
+                "track_json",
+            ),
+        "song_artists" to listOf("track_id", "position", "artist_id", "name", "href", "uri"),
+        "managed_playlists" to
+            listOf("definition_id", "definition_revision", "spotify_playlist_id", "owner_spotify_user_id"),
+        "user_playlist_definitions" to
+            listOf("id", "owner_spotify_user_id", "name", "definition_revision"),
+        "user_playlist_definition_items" to listOf("definition_id", "position", "track_id"),
+    )
 
 internal fun prepareFixture(
     runId: String,
     fixture: SpotifyFixture,
 ): PreparedFixture {
+    fixture.validate()
     val root = fixtureElement(fixture).jsonObject
     val maps = ReplacementMaps()
     collectReplacements(root, maps, fixtureRoot = true)
@@ -280,6 +337,7 @@ private fun String?.sensitiveFieldName(parentKey: String?): String? =
         this == "preview_url" || this == "audio_preview_url" -> this
         this == "isrc" || this == "ean" || this == "upc" -> this
         this == "description" || this == "html_description" -> this
+        this == "definition_revision" -> this
         this == "genres" -> this
         this == "added_at" -> this
         else -> null

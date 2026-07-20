@@ -19,7 +19,7 @@ class PlaylistPlanningServiceTest {
             val existing = listOf(track("existing", "spotify:track:shared"), track("stale", "spotify:track:stale"))
             store.replaceCache(snapshot(desired, existing), 1L)
 
-            val plan = PlaylistPlanningService(store).plan(listOf(definition("playlist"))).single()
+            val plan = PlaylistPlanningService(store).plan(listOf(definition("playlist")), OWNER_ONE).single()
 
             assertEquals(2, plan.desiredTracks.size)
             assertEquals(
@@ -39,7 +39,7 @@ class PlaylistPlanningServiceTest {
 
             val failure =
                 assertFailsWith<IllegalArgumentException> {
-                    PlaylistPlanningService(store).plan(listOf(definition("playlist")))
+                    PlaylistPlanningService(store).plan(listOf(definition("playlist")), OWNER_ONE)
                 }
 
             assertEquals(true, failure.message?.contains("playlist playlist row 0"))
@@ -49,7 +49,16 @@ class PlaylistPlanningServiceTest {
     @Test
     fun `duplicate playlist names fail instead of choosing a cache row`() {
         withStore { store ->
-            val playlist = SpotifyPlaylist("playlist", "one", "href-one", "uri-one", "tracks-one", "snapshot-one")
+            val playlist =
+                SpotifyPlaylist(
+                    "playlist",
+                    "one",
+                    "href-one",
+                    "uri-one",
+                    "tracks-one",
+                    "snapshot-one",
+                    ownerId = OWNER_ONE,
+                )
             val duplicate = playlist.copy(id = "two", href = "href-two", uri = "uri-two")
             store.replaceCache(
                 SpotifyCacheSnapshot(emptyList(), emptyList(), emptyList(), listOf(playlist, duplicate), emptyList()),
@@ -59,8 +68,41 @@ class PlaylistPlanningServiceTest {
             assertFailsWith<IllegalArgumentException> {
                 PlaylistPlanningService(
                     store,
-                ).plan(listOf(definition("playlist")))
+                ).plan(listOf(definition("playlist")), OWNER_ONE)
             }
+        }
+    }
+
+    @Test
+    fun `planning does not adopt a same-named playlist owned by another user`() {
+        withStore { store ->
+            val foreignPlaylist =
+                SpotifyPlaylist(
+                    name = "playlist",
+                    id = "foreign-playlist",
+                    href = "href-foreign",
+                    uri = "uri-foreign",
+                    tracksHref = "tracks-foreign",
+                    snapshotId = "snapshot-foreign",
+                    ownerId = OWNER_TWO,
+                )
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    savedTracks = listOf(SavedTrack("2026-01-01T00:00:00Z", track("desired"))),
+                    topTracks = emptyList(),
+                    topArtists = emptyList(),
+                    playlists = listOf(foreignPlaylist),
+                    playlistTracks = listOf(PlaylistTrack("playlist", "2026-01-01T00:00:00Z", track("stale"))),
+                ),
+                1L,
+                OWNER_ONE,
+            )
+
+            val plan = PlaylistPlanningService(store).plan(listOf(definition("playlist")), OWNER_ONE).single()
+
+            assertEquals(null, plan.existingPlaylist)
+            assertEquals(listOf("spotify:track:desired"), plan.tracksToAdd.map { it.uri })
+            assertEquals(emptyList(), plan.tracksToRemove)
         }
     }
 
@@ -76,9 +118,25 @@ class PlaylistPlanningServiceTest {
         savedTracks = desired.map { SavedTrack("2026-01-01T00:00:00Z", it) },
         topTracks = emptyList(),
         topArtists = emptyList(),
-        playlists = listOf(SpotifyPlaylist("playlist", "playlist-id", "href", "uri", "tracks", "snapshot")),
+        playlists =
+            listOf(
+                SpotifyPlaylist(
+                    "playlist",
+                    "playlist-id",
+                    "href",
+                    "uri",
+                    "tracks",
+                    "snapshot",
+                    ownerId = OWNER_ONE,
+                ),
+            ),
         playlistTracks = existing.map { PlaylistTrack("playlist", "2026-01-02T00:00:00Z", it) },
     )
+
+    private companion object {
+        const val OWNER_ONE = "owner-one"
+        const val OWNER_TWO = "owner-two"
+    }
 
     private fun definition(name: String) =
         PlaylistDefinition(PlaylistDefinitionId.RECENT_LIKED_100, name, PlaylistQuery.RecentLiked(100))

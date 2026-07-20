@@ -11,17 +11,36 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SpotifyFixtureScrubberTest {
+    @Test
+    fun `rejects unsupported fixture schema versions`() {
+        val failure =
+            assertFailsWith<IllegalArgumentException> {
+                SpotifyFixture(
+                    schemaVersion = 1,
+                    name = "unsupported",
+                    responses = emptyList(),
+                    expectedTables = ExpectedTables(),
+                ).validate()
+            }
+
+        assertEquals(
+            "Unsupported Spotify fixture schema version 1; expected 2",
+            failure.message,
+        )
+    }
+
     @Test
     fun `limits available markets in responses and expected track json`() {
         val markets = buildJsonArray { listOf("AR", "AU", "AT").forEach { add(JsonPrimitive(it)) } }
         val track = buildJsonObject { put("available_markets", markets) }
         val fixture =
             SpotifyFixture(
-                schemaVersion = 1,
+                schemaVersion = 2,
                 name = "available-markets",
                 responses = listOf(SpotifyFixtureResponse("GET", "/v1/me/top/tracks", 200, track)),
                 expectedTables =
@@ -80,20 +99,29 @@ class SpotifyFixtureScrubberTest {
 
         val responseTrack =
             scrubbed.responses
-                .first { it.path == "/v1/me/tracks?limit=50&offset=0" }
+                .first { it.body.jsonObject["items"] != null }
                 .body
                 .jsonObject["items"]!!
                 .jsonArray
                 .first()
                 .jsonObject["track"]!!
                 .jsonObject
+        val storedRow =
+            scrubbed.expectedTables.savedTracks.firstOrNull { row ->
+                spotifyFixtureJson
+                    .parseToJsonElement(requireNotNull(row["track_json"]).jsonPrimitive.content)
+                    .jsonObject["id"]
+                    ?.jsonPrimitive
+                    ?.content == responseTrack["id"]?.jsonPrimitive?.content
+            } ?: error(
+                "no matching track; response=" + responseTrack["id"] +
+                    " saved=" + scrubbed.expectedTables.savedTracks.map { it["id"] },
+            )
         val storedTrack =
             spotifyFixtureJson
-                .parseToJsonElement(
-                    scrubbed.expectedTables.savedTracks
-                        .first { it["name"] == responseTrack["name"] }["track_json"]!!
-                        .jsonPrimitive.content,
-                ).jsonObject
+                .parseToJsonElement(requireNotNull(storedRow["track_json"]).jsonPrimitive.content)
+                .jsonObject
+        assertEquals(responseTrack["name"], storedRow["name"])
         assertEquals(responseTrack["id"]!!.jsonPrimitive.content, storedTrack["id"]!!.jsonPrimitive.content)
         assertTrue(Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").containsMatchIn(scrubbedText))
     }
@@ -113,7 +141,7 @@ class SpotifyFixtureScrubberTest {
             )
         val fixture =
             SpotifyFixture(
-                schemaVersion = 1,
+                schemaVersion = 2,
                 name = "privacy",
                 responses =
                     listOf(
@@ -199,6 +227,46 @@ class SpotifyFixtureScrubberTest {
                 .single()
                 .getValue("sync_timestamp_millis")
                 .jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun `scrubs persisted user playlist definitions and items`() {
+        val fixture =
+            SpotifyFixture(
+                schemaVersion = 2,
+                name = "user-definitions",
+                responses = emptyList(),
+                expectedTables =
+                    ExpectedTables(
+                        userPlaylistDefinitions =
+                            listOf(
+                                buildJsonObject {
+                                    put("id", "definition-original")
+                                    put("owner_spotify_user_id", "owner-original")
+                                    put("name", "Original Playlist")
+                                    put("definition_revision", "revision-original")
+                                },
+                            ),
+                        userPlaylistDefinitionItems =
+                            listOf(
+                                buildJsonObject {
+                                    put("definition_id", "definition-original")
+                                    put("position", 0)
+                                    put("track_id", "track-original")
+                                },
+                            ),
+                    ),
+            )
+
+        val scrubbed = scrubFixture(fixture)
+        val scrubbedText = canonicalFixtureLine(scrubbed)
+
+        listOf("definition-original", "owner-original", "Original Playlist", "revision-original", "track-original")
+            .forEach { original -> assertFalse(original in scrubbedText) }
+        assertEquals(
+            scrubbed.expectedTables.userPlaylistDefinitions.single()["id"],
+            scrubbed.expectedTables.userPlaylistDefinitionItems.single()["definition_id"],
         )
     }
 

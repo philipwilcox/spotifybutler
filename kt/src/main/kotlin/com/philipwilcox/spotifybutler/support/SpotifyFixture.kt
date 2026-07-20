@@ -23,6 +23,14 @@ data class SpotifyFixture(
     val expectedTables: ExpectedTables,
 )
 
+const val SPOTIFY_FIXTURE_SCHEMA_VERSION = 2
+
+fun SpotifyFixture.validate() {
+    require(schemaVersion == SPOTIFY_FIXTURE_SCHEMA_VERSION) {
+        "Unsupported Spotify fixture schema version $schemaVersion; expected $SPOTIFY_FIXTURE_SCHEMA_VERSION"
+    }
+}
+
 @Serializable
 data class SpotifyFixtureResponse(
     val method: String,
@@ -33,12 +41,20 @@ data class SpotifyFixtureResponse(
 
 @Serializable
 data class ExpectedTables(
-    @SerialName("saved_tracks") val savedTracks: List<JsonObject>,
-    @SerialName("top_tracks") val topTracks: List<JsonObject>,
-    @SerialName("top_artists") val topArtists: List<JsonObject>,
-    val playlists: List<JsonObject>,
-    @SerialName("playlist_tracks") val playlistTracks: List<JsonObject>,
-    @SerialName("sync_status") val syncStatus: List<JsonObject>,
+    @SerialName("saved_tracks") val savedTracks: List<JsonObject> = emptyList(),
+    @SerialName("top_tracks") val topTracks: List<JsonObject> = emptyList(),
+    @SerialName("top_artists") val topArtists: List<JsonObject> = emptyList(),
+    val playlists: List<JsonObject> = emptyList(),
+    @SerialName("playlist_tracks") val playlistTracks: List<JsonObject> = emptyList(),
+    @SerialName("sync_status") val syncStatus: List<JsonObject> = emptyList(),
+    @SerialName("cache_metadata") val cacheMetadata: List<JsonObject> = emptyList(),
+    @SerialName("playlist_details") val playlistDetails: List<JsonObject> = emptyList(),
+    @SerialName("playlist_items") val playlistItems: List<JsonObject> = emptyList(),
+    val songs: List<JsonObject> = emptyList(),
+    @SerialName("song_artists") val songArtists: List<JsonObject> = emptyList(),
+    @SerialName("managed_playlists") val managedPlaylists: List<JsonObject> = emptyList(),
+    @SerialName("user_playlist_definitions") val userPlaylistDefinitions: List<JsonObject> = emptyList(),
+    @SerialName("user_playlist_definition_items") val userPlaylistDefinitionItems: List<JsonObject> = emptyList(),
 )
 
 val spotifyFixtureJson =
@@ -48,7 +64,7 @@ val spotifyFixtureJson =
         prettyPrint = false
     }
 
-fun SpotifyTableSnapshot.toExpectedTables(): ExpectedTables =
+fun SpotifyTableSnapshot.toExpectedTables(includeNormalizedProjections: Boolean = true): ExpectedTables =
     ExpectedTables(
         savedTracks = savedTracks.map(::canonicalizeRow),
         topTracks = topTracks.map(::canonicalizeRow),
@@ -56,6 +72,16 @@ fun SpotifyTableSnapshot.toExpectedTables(): ExpectedTables =
         playlists = playlists.map(::canonicalizeRow),
         playlistTracks = playlistTracks.map(::canonicalizeRow),
         syncStatus = syncStatus.map(::canonicalizeRow),
+        cacheMetadata.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeCacheMetadataRow),
+        playlistDetails = playlistDetails.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        playlistItems = playlistItems.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        songs = songs.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        songArtists = songArtists.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        managedPlaylists = managedPlaylists.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        userPlaylistDefinitions =
+            userPlaylistDefinitions.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        userPlaylistDefinitionItems =
+            userPlaylistDefinitionItems.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
     )
 
 fun ExpectedTables.limitToCapturedItems(capture: ValidatedCapture): ExpectedTables {
@@ -68,6 +94,8 @@ fun ExpectedTables.limitToCapturedItems(capture: ValidatedCapture): ExpectedTabl
         topTracks = topTracks.filter { it.idIsIn(topTrackIds) },
         topArtists = topArtists.filter { it.idIsIn(topArtistIds) },
         playlistTracks = playlistTracks.filter { it.belongsToCapturedPlaylistTrack(playlistTrackIds) },
+        playlistItems = playlistItems.filter { it.belongsToCapturedPlaylist(playlistTrackIds.keys) },
+        playlistDetails = playlistDetails.filter { it.idIsIn(playlistTrackIds.keys) },
     )
 }
 
@@ -173,6 +201,9 @@ private fun JsonObject.belongsToCapturedPlaylistTrack(playlistTrackIds: Map<Stri
     return trackId in playlistTrackIds[playlistName].orEmpty()
 }
 
+private fun JsonObject.belongsToCapturedPlaylist(playlistIds: Set<String>): Boolean =
+    get("playlist_id")?.jsonPrimitive?.content in playlistIds
+
 private fun String.playlistId(): String = substringBefore('?').substringAfter("/v1/playlists/").substringBefore('/')
 
 fun canonicalFixtureLine(fixture: SpotifyFixture): String =
@@ -200,6 +231,15 @@ private fun canonicalizeRow(row: JsonObject): JsonObject =
         buildJsonObject {
             row.forEach { (key, value) ->
                 put(key, if (key == "track_json") canonicalTrackJson(value) else value)
+            }
+        },
+    ).jsonObject
+
+private fun canonicalizeCacheMetadataRow(row: JsonObject): JsonObject =
+    canonicalize(
+        buildJsonObject {
+            row.forEach { (key, value) ->
+                put(key, if (key == "cache_revision") JsonPrimitive("cache-revision") else value)
             }
         },
     ).jsonObject

@@ -30,11 +30,17 @@ SQLite schema and its named cache-load statements.
 The browser-facing API is described by [`src/main/resources/openapi.yaml`](src/main/resources/openapi.yaml). It uses an
 opaque `butler_session` cookie and returns a CSRF token from `GET /api/v1/session`; Spotify access and refresh tokens
 remain server-side. The public readiness endpoint is `GET /health`. After OAuth, the narrow API resources support cache
-refresh, ID-only playlist/current views, bounded song enrichment, sync previews, and idempotent client-submitted syncs.
+refresh, full ID-only playlist/current views, bounded song enrichment, and direct client-submitted playlist
+synchronization. State-changing requests require both `X-CSRF-Token` and a trusted `Origin`; synchronization clients
+should reload after `cache_revision_stale` or `playlist_changed` conflicts. `/api/v1/run` remains only as a deprecated
+refresh compatibility endpoint.
 
 The repository-level [`scripts/api-demo.sh`](../scripts/api-demo.sh) demonstrates the intended curl sequence. Set
 `BUTLER_SESSION` and `CSRF_TOKEN` from an authenticated browser session, or point `BUTLER_COOKIE_JAR` at a cookie jar.
-For a single-user deployment, set `spotify.allowedUserId` in the ignored secrets properties file.
+The script defaults to the local trusted origin `http://127.0.0.1:8888`; set `BUTLER_ORIGIN` when using another
+configured origin. Normal runs refresh the cache and demonstrate read/enrichment requests without changing a Spotify
+playlist. Pass `--sync` explicitly to submit the displayed replacement request. For a single-user deployment, set
+`spotify.allowedUserId` in the ignored secrets properties file.
 
 ## Capturing and building fixtures
 

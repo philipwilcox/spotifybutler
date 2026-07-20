@@ -9,6 +9,7 @@ import com.philipwilcox.spotifybutler.support.SpotifyFixture
 import com.philipwilcox.spotifybutler.support.SpotifyFixtureResponse
 import com.philipwilcox.spotifybutler.support.spotifyFixtureJson
 import com.philipwilcox.spotifybutler.support.toExpectedTables
+import com.philipwilcox.spotifybutler.support.validate
 import org.junit.jupiter.api.Named
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
@@ -35,10 +36,18 @@ class SpotifyCacheLoadContractTest {
         SpotifyStore.open(databasePath).use { store ->
             val service = fixedCacheService(transport, store)
             service.loadIfNeeded("fixture-token", refresh = false)
-            assertEquals(fixture.expectedTables, store.exportTables().toExpectedTables(), source)
+            assertEquals(
+                fixture.expectedTables,
+                store.exportTables().toExpectedTables(),
+                source,
+            )
         }
         SpotifyStore.openReadOnly(databasePath).use { store ->
-            assertEquals(fixture.expectedTables, store.exportTables().toExpectedTables(), source)
+            assertEquals(
+                fixture.expectedTables,
+                store.exportTables().toExpectedTables(),
+                source,
+            )
         }
         transport.assertAllConsumed()
     }
@@ -66,7 +75,11 @@ class SpotifyCacheLoadContractTest {
             )
             assertEquals(CacheLoadResult.SkippedExistingCache, service.loadIfNeeded("fixture-token", refresh = false))
             service.loadIfNeeded("fixture-token", refresh = true)
-            assertEquals(fixture.expectedTables, store.exportTables().toExpectedTables(), source)
+            assertEquals(
+                fixture.expectedTables,
+                store.exportTables().toExpectedTables(),
+                source,
+            )
         }
         transport.assertAllConsumed()
     }
@@ -95,6 +108,7 @@ class SpotifyCacheLoadContractTest {
                     Files.readAllLines(path).forEachIndexed { lineNumber, line ->
                         if (line.isNotBlank()) {
                             val fixture = spotifyFixtureJson.decodeFromString<SpotifyFixture>(line)
+                            fixture.validate()
                             cases +=
                                 Arguments.of(
                                     Named.of("$path:${lineNumber + 1}", "$path:${lineNumber + 1}"),

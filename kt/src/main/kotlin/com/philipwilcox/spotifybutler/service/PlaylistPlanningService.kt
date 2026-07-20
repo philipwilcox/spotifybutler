@@ -21,11 +21,21 @@ data class PlaylistPlan(
 class PlaylistPlanningService(
     private val store: SpotifyStore,
 ) {
-    fun plan(definitions: List<PlaylistDefinition>): List<PlaylistPlan> =
+    fun plan(
+        definitions: List<PlaylistDefinition>,
+        ownerSpotifyUserId: String? = null,
+    ): List<PlaylistPlan> =
         definitions.map { definition ->
             val desired = store.execute(definition.query)
-            val metadata = store.findPlaylistByName(definition.name)
-            val existingTracks = store.findPlaylistTracksByName(definition.name)
+            val metadata = ownerSpotifyUserId?.let { store.findPlaylistByName(definition.name, it) }
+            val existingTracks =
+                ownerSpotifyUserId
+                    ?.let {
+                        store.findPlaylistTracksByName(
+                            definition.name,
+                            it,
+                        )
+                    }.orEmpty()
             val existing = metadata?.let { ExistingPlaylist(it.id, it.snapshotId, existingTracks) }
             classify(definition, desired, existing)
         }
@@ -33,9 +43,10 @@ class PlaylistPlanningService(
     fun planGenerated(
         definition: PlaylistDefinition,
         desiredTracks: List<SpotifyTrack>,
+        ownerSpotifyUserId: String? = null,
     ): PlaylistPlan {
-        val metadata = store.findPlaylistByName(definition.name)
-        val existingTracks = store.findPlaylistTracksByName(definition.name)
+        val metadata = ownerSpotifyUserId?.let { store.findPlaylistByName(definition.name, it) }
+        val existingTracks = ownerSpotifyUserId?.let { store.findPlaylistTracksByName(definition.name, it) }.orEmpty()
         val existing = metadata?.let { ExistingPlaylist(it.id, it.snapshotId, existingTracks) }
         return classify(definition, desiredTracks, existing)
     }

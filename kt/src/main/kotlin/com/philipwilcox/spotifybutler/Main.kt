@@ -26,5 +26,10 @@ fun main() {
         cacheService = SpotifyCacheService(apiClient, store),
         store = store,
         allowedSpotifyUserId = secrets.allowedSpotifyUserId,
+        trustedOrigins = config.trustedOrigins,
+        secureCookies = config.secureCookies,
+        callbackHttpsRequired = config.callbackHttpsRequired,
+        trustedHosts = config.trustedHosts,
+        trustedProxyAddresses = config.trustedProxyAddresses,
     ).start()
 }

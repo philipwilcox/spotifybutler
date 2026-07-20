@@ -87,7 +87,7 @@ private fun prepareFixtureBuild(
     progress("capture run ${run.runId} validation complete")
     val rawFixture =
         SpotifyFixture(
-            schemaVersion = 1,
+            schemaVersion = SPOTIFY_FIXTURE_SCHEMA_VERSION,
             name =
                 output.fileName
                     .toString()
@@ -194,4 +194,12 @@ private fun reportText(
         appendLine("  playlists=${fixture.expectedTables.playlists.size}")
         appendLine("  playlist_tracks=${fixture.expectedTables.playlistTracks.size}")
         appendLine("  sync_status=${fixture.expectedTables.syncStatus.size}")
+        appendLine("  cache_metadata=${fixture.expectedTables.cacheMetadata.size}")
+        appendLine("  playlist_details=${fixture.expectedTables.playlistDetails.size}")
+        appendLine("  playlist_items=${fixture.expectedTables.playlistItems.size}")
+        appendLine("  songs=${fixture.expectedTables.songs.size}")
+        appendLine("  song_artists=${fixture.expectedTables.songArtists.size}")
+        appendLine("  managed_playlists=${fixture.expectedTables.managedPlaylists.size}")
+        appendLine("  user_playlist_definitions=${fixture.expectedTables.userPlaylistDefinitions.size}")
+        appendLine("  user_playlist_definition_items=${fixture.expectedTables.userPlaylistDefinitionItems.size}")
     }

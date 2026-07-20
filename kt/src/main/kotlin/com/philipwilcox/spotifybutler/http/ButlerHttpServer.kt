@@ -24,6 +24,7 @@ import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 import java.util.concurrent.Executors
 
 class ButlerHttpServer(
@@ -35,8 +36,11 @@ class ButlerHttpServer(
     private val host: String = "127.0.0.1",
     private val port: Int = 8888,
     private val allowedSpotifyUserId: String? = null,
-    private val trustedOrigins: Set<String> = setOf("http://127.0.0.1:8888", "http://localhost:8888"),
+    private val trustedOrigins: Set<String> = emptySet(),
     private val secureCookies: Boolean = false,
+    private val callbackHttpsRequired: Boolean = false,
+    private val trustedHosts: Set<String> = setOf("127.0.0.1:8888", "localhost:8888"),
+    private val trustedProxyAddresses: Set<String> = emptySet(),
 ) {
     private val logger = KotlinLogging.logger {}
     private val sessionStore = SessionStore()
@@ -48,6 +52,8 @@ class ButlerHttpServer(
             apiClient = apiClient,
             trustedOrigins = trustedOrigins,
             authClient = authClient,
+            allowedSpotifyUserId = allowedSpotifyUserId,
+            secureCookies = secureCookies,
         )
 
     fun start() {
@@ -61,24 +67,39 @@ class ButlerHttpServer(
     @Suppress("TooGenericExceptionCaught")
     private fun handle(exchange: HttpExchange) {
         val path = exchange.requestURI.path
+        val requestId = exchange.requestHeaders.getFirst("X-Request-Id")?.takeIf(::validRequestId) ?: newRequestId()
+        exchange.responseHeaders.set("X-Request-Id", requestId)
         val startedAt = System.nanoTime()
         var status = HttpURLConnection.HTTP_INTERNAL_ERROR
         try {
+            validateHost(exchange)
+            if (path == "/callback" && callbackHttpsRequired && effectiveScheme(exchange) != "https") {
+                throw RequestFailure(HttpURLConnection.HTTP_BAD_REQUEST, "HTTPS is required for the OAuth callback")
+            }
             status =
                 when {
                     path == "/health" -> health(exchange)
                     path == "/start" -> start(exchange)
                     path == "/callback" -> callback(exchange)
                     path.startsWith("/api/v1/") -> api(exchange)
-                    else -> json(exchange, HttpURLConnection.HTTP_NOT_FOUND, errorJson("not_found", "Route not found"))
+                    else ->
+                        json(
+                            exchange,
+                            HttpURLConnection.HTTP_NOT_FOUND,
+                            errorJson("not_found", "Route not found", requestId),
+                        )
                 }
         } catch (failure: RequestFailure) {
-            status = json(exchange, failure.status, errorJson("request_rejected", failure.message))
+            status = json(exchange, failure.status, errorJson("request_rejected", failure.message, requestId))
         } catch (exception: Exception) {
             logger.error(exception) { "Request failed: method=${exchange.requestMethod} path=$path" }
             if (!exchange.responseHeaders.containsKey("Content-Type")) {
                 status =
-                    json(exchange, HttpURLConnection.HTTP_INTERNAL_ERROR, errorJson("internal_error", "Request failed"))
+                    json(
+                        exchange,
+                        HttpURLConnection.HTTP_INTERNAL_ERROR,
+                        errorJson("internal_error", "Request failed", requestId),
+                    )
             }
         } finally {
             val durationMs = (System.nanoTime() - startedAt) / 1_000_000
@@ -121,14 +142,18 @@ class ButlerHttpServer(
                 ?: return json(
                     exchange,
                     HttpURLConnection.HTTP_BAD_REQUEST,
-                    errorJson("invalid_state", "Invalid or expired authorization state"),
+                    errorJson("invalid_state", "Invalid or expired authorization state", requestId(exchange)),
                 )
         val code =
             parameters["code"]
                 ?: return json(
                     exchange,
                     HttpURLConnection.HTTP_BAD_REQUEST,
-                    errorJson("missing_code", "Spotify callback did not include an authorization code"),
+                    errorJson(
+                        "missing_code",
+                        "Spotify callback did not include an authorization code",
+                        requestId(exchange),
+                    ),
                 )
         val token = authClient.exchangeAuthorizationCode(code, authorization.codeVerifier)
         val user = apiClient.getCurrentUser(token.accessToken)
@@ -136,7 +161,7 @@ class ButlerHttpServer(
             return json(
                 exchange,
                 HttpURLConnection.HTTP_FORBIDDEN,
-                errorJson("user_not_allowed", "This Spotify account is not allowed"),
+                errorJson("user_not_allowed", "This Spotify account is not allowed", requestId(exchange)),
             )
         }
         val session = sessionStore.create(user.id, token.accessToken, token.refreshToken)
@@ -219,11 +244,13 @@ class ButlerHttpServer(
     private fun errorJson(
         code: String,
         message: String,
+        requestId: String,
     ): String =
         buildJsonObject {
             put("code", JsonPrimitive(code))
             put("message", JsonPrimitive(message))
-            put("requestId", JsonPrimitive("server-generated"))
+            put("requestId", JsonPrimitive(requestId))
+            put("details", buildJsonObject {})
         }.toString()
 
     private fun ButlerRunResult.legacySummary(effectiveDryRun: Boolean): String =
@@ -308,4 +335,65 @@ class ButlerHttpServer(
     companion object {
         private const val MAX_REQUEST_BYTES = 1_048_576
     }
+
+    private fun newRequestId(): String = "req-${UUID.randomUUID()}"
+
+    private fun validRequestId(value: String): Boolean =
+        value.length in 1..100 && value.all { it.isLetterOrDigit() || it in "-_" }
+
+    private fun requestId(exchange: HttpExchange): String =
+        exchange.responseHeaders.getFirst("X-Request-Id") ?: newRequestId()
+
+    private fun validateHost(exchange: HttpExchange) {
+        val host = effectiveHost(exchange)
+        if (host == null || host !in trustedHosts.map(String::lowercase).toSet()) {
+            throw RequestFailure(HttpURLConnection.HTTP_BAD_REQUEST, "The request Host is not trusted")
+        }
+    }
+
+    private fun effectiveHost(exchange: HttpExchange): String? {
+        val directHost =
+            exchange.requestHeaders
+                .getFirst("Host")
+                ?.trim()
+                ?.lowercase()
+        if (!isTrustedProxy(exchange)) return directHost
+        return exchange.requestHeaders
+            .getFirst("X-Forwarded-Host")
+            ?.split(',')
+            ?.firstOrNull()
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf(String::isNotEmpty)
+            ?: directHost
+    }
+
+    private fun effectiveScheme(exchange: HttpExchange): String {
+        if (!isTrustedProxy(exchange)) return "http"
+        return exchange.requestHeaders
+            .getFirst("X-Forwarded-Proto")
+            ?.split(',')
+            ?.firstOrNull()
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it == "http" || it == "https" }
+            ?: forwardedScheme(exchange)
+            ?: "http"
+    }
+
+    private fun forwardedScheme(exchange: HttpExchange): String? =
+        exchange.requestHeaders
+            .getFirst("Forwarded")
+            ?.split(',')
+            ?.firstOrNull()
+            ?.split(';')
+            ?.firstOrNull { it.trim().startsWith("proto=", ignoreCase = true) }
+            ?.substringAfter('=')
+            ?.trim()
+            ?.trim('"')
+            ?.lowercase()
+            ?.takeIf { it == "http" || it == "https" }
+
+    private fun isTrustedProxy(exchange: HttpExchange): Boolean =
+        exchange.remoteAddress.address.hostAddress in trustedProxyAddresses
 }

@@ -5,11 +5,9 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 private const val OPAQUE_TOKEN_BYTES = 32
-private const val OPERATION_ID_RANDOM_BOUND = 1000
 private const val SESSION_LIFETIME_HOURS = 12
 
 data class ButlerSession(
@@ -26,6 +24,7 @@ class SessionStore(
     private val lifetime: Duration = Duration.ofHours(SESSION_LIFETIME_HOURS.toLong()),
 ) {
     private val sessions = ConcurrentHashMap<String, ButlerSession>()
+    private val refreshLocks = ConcurrentHashMap<String, RefreshLock>()
     private val random = SecureRandom()
 
     fun create(
@@ -57,6 +56,25 @@ class SessionStore(
         return create(session.ownerSpotifyUserId, accessToken, refreshToken)
     }
 
+    fun refresh(
+        session: ButlerSession,
+        exchange: (String) -> Pair<String, String?>,
+    ): ButlerSession {
+        val lock = acquireRefreshLock(session.id)
+        return synchronized(lock.monitor) {
+            try {
+                val current =
+                    sessions[session.id]
+                        ?: throw IllegalStateException("The session was already rotated or invalidated")
+                val refreshToken = current.refreshToken ?: throw IllegalStateException("No refresh token is available")
+                val (accessToken, rotatedRefreshToken) = exchange(refreshToken)
+                rotate(current, accessToken, rotatedRefreshToken ?: refreshToken)
+            } finally {
+                releaseRefreshLock(session.id, lock)
+            }
+        }
+    }
+
     fun remove(sessionId: String?) {
         if (!sessionId.isNullOrBlank()) sessions.remove(sessionId)
     }
@@ -79,135 +97,74 @@ class SessionStore(
         ByteArray(
             OPAQUE_TOKEN_BYTES,
         ).also(random::nextBytes).let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
-}
 
-enum class OperationStatus {
-    QUEUED,
-    RUNNING,
-    SUCCEEDED,
-    FAILED,
-}
+    private fun acquireRefreshLock(sessionId: String): RefreshLock =
+        refreshLocks.compute(sessionId) { _, existing ->
+            val lock = existing ?: RefreshLock()
+            lock.users++
+            lock
+        }!!
 
-data class OperationRecord(
-    val id: String,
-    val ownerSpotifyUserId: String,
-    val type: String,
-    val idempotencyKey: String,
-    val requestFingerprint: String,
-    val status: OperationStatus,
-    val createdAt: Instant,
-    val finishedAt: Instant?,
-    val result: String?,
-    val errorCode: String?,
-    val errorMessage: String?,
-)
-
-sealed interface IdempotencyLookup {
-    data object New : IdempotencyLookup
-
-    data class Existing(
-        val operation: OperationRecord,
-    ) : IdempotencyLookup
-
-    data object Conflict : IdempotencyLookup
-}
-
-class OperationStore(
-    private val clock: Clock = Clock.systemUTC(),
-) {
-    private val operations = ConcurrentHashMap<String, OperationRecord>()
-    private val random = SecureRandom()
-
-    fun findById(id: String): OperationRecord? = operations[id]
-
-    fun lookup(
-        ownerSpotifyUserId: String,
-        type: String,
-        idempotencyKey: String,
-        requestFingerprint: String,
-    ): IdempotencyLookup {
-        val existing =
-            operations.values.firstOrNull {
-                it.ownerSpotifyUserId == ownerSpotifyUserId &&
-                    it.type == type &&
-                    it.idempotencyKey == idempotencyKey
-            } ?: return IdempotencyLookup.New
-        return if (existing.requestFingerprint == requestFingerprint) {
-            IdempotencyLookup.Existing(existing)
-        } else {
-            IdempotencyLookup.Conflict
+    private fun releaseRefreshLock(
+        sessionId: String,
+        lock: RefreshLock,
+    ) {
+        refreshLocks.compute(sessionId) { _, existing ->
+            if (existing !== lock) {
+                existing
+            } else {
+                existing.users--
+                if (existing.users == 0) null else existing
+            }
         }
     }
 
-    fun create(
-        ownerSpotifyUserId: String,
-        type: String,
-        idempotencyKey: String,
-        requestFingerprint: String,
-    ): OperationRecord {
-        val operation =
-            OperationRecord(
-                id = "op-${UUID.randomUUID()}-${random.nextInt(OPERATION_ID_RANDOM_BOUND)}",
-                ownerSpotifyUserId = ownerSpotifyUserId,
-                type = type,
-                idempotencyKey = idempotencyKey,
-                requestFingerprint = requestFingerprint,
-                status = OperationStatus.QUEUED,
-                createdAt = clock.instant(),
-                finishedAt = null,
-                result = null,
-                errorCode = null,
-                errorMessage = null,
-            )
-        operations[operation.id] = operation
-        return operation
+    private class RefreshLock {
+        val monitor = Any()
+        var users = 0
+    }
+}
+
+class KeyedLock {
+    private val locks = ConcurrentHashMap<String, LockReference>()
+
+    fun <T> withLock(
+        key: String,
+        action: () -> T,
+    ): T {
+        val lock = acquire(key)
+        return synchronized(lock.monitor) {
+            try {
+                action()
+            } finally {
+                release(key, lock)
+            }
+        }
     }
 
-    fun running(operation: OperationRecord): OperationRecord = update(operation.copy(status = OperationStatus.RUNNING))
+    private fun acquire(key: String): LockReference =
+        locks.compute(key) { _, existing ->
+            val lock = existing ?: LockReference()
+            lock.users++
+            lock
+        }!!
 
-    fun succeeded(
-        operation: OperationRecord,
-        result: String,
-    ): OperationRecord =
-        update(
-            operation.copy(
-                status = OperationStatus.SUCCEEDED,
-                finishedAt = clock.instant(),
-                result = result,
-            ),
-        )
+    private fun release(
+        key: String,
+        lock: LockReference,
+    ) {
+        locks.compute(key) { _, existing ->
+            if (existing !== lock) {
+                existing
+            } else {
+                lock.users--
+                if (lock.users == 0) null else lock
+            }
+        }
+    }
 
-    fun failed(
-        operation: OperationRecord,
-        code: String,
-        message: String,
-    ): OperationRecord =
-        update(
-            operation.copy(
-                status = OperationStatus.FAILED,
-                finishedAt = clock.instant(),
-                errorCode = code,
-                errorMessage = message,
-            ),
-        )
-
-    fun list(
-        ownerSpotifyUserId: String,
-        status: OperationStatus?,
-        type: String?,
-        limit: Int,
-    ): List<OperationRecord> =
-        operations.values
-            .asSequence()
-            .filter { it.ownerSpotifyUserId == ownerSpotifyUserId }
-            .filter { status == null || it.status == status }
-            .filter { type == null || it.type == type }
-            .sortedByDescending(OperationRecord::createdAt)
-            .take(limit)
-            .toList()
-
-    private fun update(operation: OperationRecord): OperationRecord {
-        operations[operation.id] = operation
-        return operation
+    private class LockReference {
+        val monitor = Any()
+        var users = 0
     }
 }

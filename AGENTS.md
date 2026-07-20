@@ -3,6 +3,12 @@
 These instructions apply to the Kotlin service under `kt/`. It is an independent Gradle application and should remain
 buildable without relying on the Node service.
 
+## Planning
+
+Plan docs should include api-level/struct-or-class+function level specifications to ensure implementation will be
+properly guided, but not raw actual code. This should apply either to "real" plan mode or just files I ask you to
+make.
+
 ## General modifications
 
 - DO NOT run lint and unit tests on every step and modification. I like to sequence smaller changes then just run those

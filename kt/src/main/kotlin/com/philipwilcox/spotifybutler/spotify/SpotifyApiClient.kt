@@ -163,6 +163,16 @@ class SpotifyApiClient(
         getJsonObject(apiUri("/v1/playlists/$playlistId"), accessToken, pageSequence = 0)
             .optionalString("snapshot_id")
 
+    fun getPlaylistCurrent(
+        accessToken: String,
+        playlistId: String,
+    ): SpotifyPlaylistCurrent {
+        val trackIds =
+            pagedItems("/v1/playlists/$playlistId/items", accessToken)
+                .mapNotNull { item -> parsePlaylistTrack(item, playlistId)?.track?.takeIf { it.available }?.id }
+        return SpotifyPlaylistCurrent(getPlaylistSnapshot(accessToken, playlistId), trackIds)
+    }
+
     fun replaceTrackIds(
         accessToken: String,
         playlistId: String,
@@ -391,3 +401,8 @@ class SpotifyApiClient(
         private const val SAVED_TRACK_WRITE_BATCH_SIZE = 40
     }
 }
+
+data class SpotifyPlaylistCurrent(
+    val snapshotId: String?,
+    val trackIds: List<String>,
+)
