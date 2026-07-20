@@ -1,5 +1,9 @@
 # Future Evolution
 
+## API Updates
+
+Make changes to be up to date with the 2026 changes to the Spotify API.
+
 ## Editable Playlists
 
 Instead of deterministic playlist preview and generation, we want *fully client-editable* playlists, which suggests
