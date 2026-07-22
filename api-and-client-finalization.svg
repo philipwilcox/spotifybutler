@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="920" viewBox="0 0 1440 920" role="img" aria-labelledby="title desc">
+  <title id="title">Spotify Butler annotated playlist generator client</title>
+  <desc id="desc">A dark Spotify-inspired web client with available playlists on the left and an editable selected playlist on the right. Lettered markers map UI controls to the API footnotes in the accompanying Markdown document.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A2949"/>
+      <stop offset="1" stop-color="#03182E"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1D3E5D"/>
+      <stop offset="1" stop-color="#0D2A47"/>
+    </linearGradient>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#DEBD88"/>
+      <stop offset="0.5" stop-color="#B39051"/>
+      <stop offset="1" stop-color="#604C2A"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#001326" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .ui { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .muted { fill: #a7a7a7; }
+      .faint { fill: #777777; }
+      .white { fill: #f5f5f5; }
+      .gold { fill: #8F713D; }
+      .small { font-size: 16px; }
+      .body { font-size: 19px; }
+      .title { font-size: 31px; font-weight: 700; }
+      .label { font-size: 14px; font-weight: 700; letter-spacing: 1.4px; }
+      .marker { fill: #8F713D; stroke: #061A2F; stroke-width: 5; }
+      .marker-text { fill: #F9F6E5; font-size: 17px; font-weight: 800; text-anchor: middle; dominant-baseline: central; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="920" fill="#051E39"/>
+  <rect x="30" y="30" width="1380" height="860" rx="24" fill="url(#background)" stroke="#193A55" filter="url(#shadow)"/>
+
+  <!-- top navigation -->
+  <rect x="30" y="30" width="1380" height="76" rx="24" fill="#0E2D4D"/>
+  <rect x="30" y="83" width="1380" height="23" fill="#0E2D4D"/>
+  <circle cx="73" cy="68" r="18" fill="#8F713D"/>
+  <path d="M64 68c7-8 15-8 21 0M64 76c7-8 15-8 21 0" fill="none" stroke="#051E39" stroke-width="3" stroke-linecap="round"/>
+  <text x="106" y="75" class="ui white" font-size="25" font-weight="800">BUTLER</text>
+  <text x="260" y="73" class="ui muted body">playlist studio</text>
+  <rect x="1015" y="48" width="152" height="39" rx="20" fill="#183A58" stroke="#34546C"/>
+  <circle cx="1041" cy="67" r="10" fill="#8F713D"/>
+  <text x="1061" y="73" class="ui white small">library ready</text>
+  <circle cx="1196" cy="68" r="18" fill="#244963"/>
+  <path d="M1188 69c0-6 3-10 8-10s8 4 8 10v6h-16z" fill="none" stroke="#d6d6d6" stroke-width="2"/>
+  <circle cx="1196" cy="55" r="4" fill="#d6d6d6"/>
+  <text x="1225" y="74" class="ui white small">philip</text>
+  <text x="1344" y="74" class="ui faint" font-size="24">•••</text>
+  <circle cx="1324" cy="49" r="15" class="marker"/>
+  <text x="1324" y="49" class="marker-text">f</text>
+
+  <!-- left list -->
+  <rect x="55" y="131" width="400" height="718" rx="18" fill="#071F38" stroke="#12324D"/>
+  <text x="88" y="179" class="ui white title">Available playlists</text>
+  <circle cx="410" cy="168" r="18" class="marker"/>
+  <text x="410" y="168" class="marker-text">a</text>
+  <text x="88" y="208" class="ui muted small">Choose a recipe to preview or edit</text>
+  <rect x="82" y="232" width="346" height="45" rx="10" fill="#143650"/>
+  <text x="103" y="261" class="ui muted small">⌕  Search playlists</text>
+
+  <rect x="76" y="300" width="358" height="79" rx="12" fill="#3D3220" stroke="#8F713D" stroke-width="2"/>
+  <rect x="92" y="316" width="47" height="47" rx="6" fill="url(#cover)"/>
+  <path d="M102 350c9-17 20-11 28-23M102 358c9-17 20-11 28-23" fill="none" stroke="#281F12" stroke-width="3"/>
+  <text x="158" y="334" class="ui white body" font-weight="700">Deep Focus</text>
+  <text x="158" y="360" class="ui muted small">45 tracks · built-in</text>
+  <path d="M403 332l8 8-8 8" fill="none" stroke="#8F713D" stroke-width="3" stroke-linecap="round"/>
+
+  <rect x="76" y="391" width="358" height="79" rx="12" fill="#0E2C4A"/>
+  <rect x="92" y="407" width="47" height="47" rx="6" fill="#40332d"/>
+  <path d="M100 446l14-27 17 27zM111 438l9-15 9 15z" fill="#e68d57"/>
+  <text x="158" y="425" class="ui white body" font-weight="700">Weekend Energy</text>
+  <text x="158" y="451" class="ui muted small">60 tracks · built-in</text>
+
+  <rect x="76" y="482" width="358" height="79" rx="12" fill="#0E2C4A"/>
+  <rect x="92" y="498" width="47" height="47" rx="6" fill="#31394d"/>
+  <circle cx="116" cy="521" r="16" fill="none" stroke="#81a9dd" stroke-width="3"/>
+  <path d="M116 505v16l10 8" fill="none" stroke="#81a9dd" stroke-width="3"/>
+  <text x="158" y="516" class="ui white body" font-weight="700">Recently Played</text>
+  <text x="158" y="542" class="ui muted small">100 tracks · built-in</text>
+
+  <rect x="76" y="573" width="358" height="79" rx="12" fill="#0E2C4A"/>
+  <rect x="92" y="589" width="47" height="47" rx="6" fill="#60414b"/>
+  <path d="M101 625h30M106 617h20M112 609h8" stroke="#e69bb1" stroke-width="4" stroke-linecap="round"/>
+  <text x="158" y="607" class="ui white body" font-weight="700">New Discoveries</text>
+  <text x="158" y="633" class="ui muted small">32 tracks · built-in</text>
+
+  <rect x="76" y="684" width="358" height="46" rx="10" fill="#0D2B48" stroke="#234861"/>
+  <text x="101" y="714" class="ui gold body" font-weight="700">＋  New playlist recipe</text>
+  <text x="88" y="788" class="ui faint small">Last cache refresh · just now</text>
+
+  <!-- right content -->
+  <rect x="479" y="131" width="926" height="718" rx="18" fill="#0A2949" stroke="#12324D"/>
+  <rect x="479" y="131" width="926" height="232" rx="18" fill="url(#hero)"/>
+  <rect x="479" y="337" width="926" height="26" fill="url(#hero)"/>
+  <rect x="534" y="174" width="154" height="154" rx="8" fill="url(#cover)"/>
+  <path d="M558 278c27-54 51-35 85-86M558 298c27-54 51-35 85-86" fill="none" stroke="#2A2113" stroke-width="10" stroke-linecap="round"/>
+  <text x="731" y="190" class="ui muted label">PLAYLIST TO GENERATE</text>
+  <text x="731" y="238" class="ui white" font-size="43" font-weight="800">Deep Focus</text>
+  <text x="731" y="273" class="ui muted body">Concentration without the clutter · 45 tracks</text>
+  <text x="731" y="310" class="ui faint small">Built-in recipe · synced to Spotify playlist</text>
+  <circle cx="1347" cy="169" r="18" class="marker"/>
+  <text x="1347" y="169" class="marker-text">b</text>
+
+  <text x="534" y="414" class="ui white title">Current selection</text>
+  <text x="534" y="445" class="ui muted small">Drag to reorder · remove tracks · the next submit replaces the playlist</text>
+  <circle cx="1347" cy="409" r="18" class="marker"/>
+  <text x="1347" y="409" class="marker-text">c</text>
+
+  <!-- track rows -->
+  <g class="ui">
+    <text x="535" y="486" class="faint small">#</text>
+    <text x="590" y="486" class="faint small">TITLE</text>
+    <text x="1045" y="486" class="faint small">ALBUM</text>
+    <text x="1294" y="486" class="faint small">⋮</text>
+    <line x1="534" y1="501" x2="1350" y2="501" stroke="#234861"/>
+
+    <text x="536" y="546" class="muted body">1</text>
+    <rect x="575" y="516" width="42" height="42" rx="4" fill="#66563A"/>
+    <path d="M583 548l12-23 14 23z" fill="#DEBD88"/>
+    <text x="635" y="538" class="white body" font-weight="700">Liminal Space</text>
+    <text x="635" y="561" class="muted small">Hollow Coves</text>
+    <text x="1045" y="547" class="muted small">Driftwood</text>
+    <text x="1294" y="547" class="muted body">×</text>
+    <line x1="534" y1="579" x2="1350" y2="579" stroke="#1B3B57"/>
+
+    <text x="536" y="624" class="muted body">2</text>
+    <rect x="575" y="594" width="42" height="42" rx="4" fill="#544d71"/>
+    <circle cx="596" cy="615" r="13" fill="none" stroke="#dbccff" stroke-width="3"/>
+    <text x="635" y="616" class="white body" font-weight="700">Weightless</text>
+    <text x="635" y="639" class="muted small">Marconi Union</text>
+    <text x="1045" y="625" class="muted small">Ambient Works</text>
+    <text x="1294" y="625" class="muted body">×</text>
+    <line x1="534" y1="657" x2="1350" y2="657" stroke="#1B3B57"/>
+
+    <text x="536" y="702" class="muted body">3</text>
+    <rect x="575" y="672" width="42" height="42" rx="4" fill="#3c5b6a"/>
+    <path d="M583 700h26M588 692h16M594 684h4" stroke="#a9e3ed" stroke-width="4" stroke-linecap="round"/>
+    <text x="635" y="694" class="white body" font-weight="700">A Walk</text>
+    <text x="635" y="717" class="muted small">Tycho</text>
+    <text x="1045" y="703" class="muted small">Awake</text>
+    <text x="1294" y="703" class="muted body">×</text>
+    <line x1="534" y1="735" x2="1350" y2="735" stroke="#1B3B57"/>
+
+    <text x="536" y="780" class="muted body">4</text>
+    <rect x="575" y="750" width="42" height="42" rx="4" fill="#734c43"/>
+    <path d="M584 778l12-24 12 24z" fill="#ffc49d"/>
+    <text x="635" y="772" class="white body" font-weight="700">Open Eye Signal</text>
+    <text x="635" y="795" class="muted small">Jon Hopkins</text>
+    <text x="1045" y="781" class="muted small">Immunity</text>
+    <text x="1294" y="781" class="muted body">×</text>
+  </g>
+
+  <!-- footer actions -->
+  <line x1="534" y1="814" x2="1350" y2="814" stroke="#234861"/>
+  <text x="534" y="838" class="ui faint small">4 of 45 shown in preview</text>
+  <rect x="1048" y="822" width="120" height="46" rx="23" fill="#12344F" stroke="#416076" stroke-width="2"/>
+  <text x="1080" y="852" class="ui white body" font-weight="700">↻  Re-roll</text>
+  <circle cx="1179" cy="819" r="18" class="marker"/>
+  <text x="1179" y="819" class="marker-text">d</text>
+  <rect x="1185" y="822" width="165" height="46" rx="23" fill="#8F713D"/>
+  <text x="1225" y="852" class="ui" fill="#F9F6E5" font-size="19" font-weight="800">Submit playlist</text>
+  <circle cx="1363" cy="819" r="18" class="marker"/>
+  <text x="1363" y="819" class="marker-text">e</text>
+</svg>

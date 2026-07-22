@@ -29,6 +29,10 @@ hs_err_pid*
 
 node_modules/
 
+# Keep Codex authentication and state scoped to this project without tracking credentials.
+.codex-home/**
+!.codex-home/auth.json.example
+
 src/secrets.ts
 src/secrets.json
 src/secrets.js
