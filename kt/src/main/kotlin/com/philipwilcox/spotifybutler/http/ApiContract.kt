@@ -86,6 +86,27 @@ data class ApiResponse(
     val status: String,
     val sources: List<SourceSnapshotWire>,
     val definitions: List<DefinitionWire>,
+    val playlists: List<LibraryPlaylistWire>,
+)
+
+@Serializable data class LibraryPlaylistWire(
+    val spotifyPlaylistId: String,
+    val name: String,
+    val description: String?,
+    val href: String,
+    val uri: String,
+    val displayUrl: String?,
+    val declaredItemCount: Int?,
+    val cachedPlayableTrackCount: Int,
+    val contentSourceKey: String,
+    val contentStatus: String,
+    val sourceRevision: String?,
+    val lastSyncedAt: String?,
+)
+
+@Serializable data class LibraryPlaylistDetailWire(
+    val summary: LibraryPlaylistWire,
+    val trackIds: List<String>,
 )
 
 @Serializable data class PreviewWire(

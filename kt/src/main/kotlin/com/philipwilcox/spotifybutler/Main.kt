@@ -18,13 +18,14 @@ fun main() {
     val databasePath = config.databasePath.toAbsolutePath().normalize()
     logger.info { "Spotify startup paths: database=$databasePath captureLog=$captureLog captureRunId=$captureRunId" }
     val apiClient = SpotifyApiClient()
-    val store = SpotifyStore.open(config.databasePath)
+    val store = SpotifyStore.open(config.databasePath, refreshTokenProtectionKey = secrets.clientSecret)
     Runtime.getRuntime().addShutdownHook(Thread(store::close))
     ButlerHttpServer(
         authClient = SpotifyAuthClient(secrets),
         apiClient = apiClient,
         cacheService = SpotifyCacheService(apiClient, store),
         store = store,
+        frontendDirectory = config.frontendDirectory,
         allowedSpotifyUserId = secrets.allowedSpotifyUserId,
         trustedOrigins = config.trustedOrigins,
         secureCookies = config.secureCookies,

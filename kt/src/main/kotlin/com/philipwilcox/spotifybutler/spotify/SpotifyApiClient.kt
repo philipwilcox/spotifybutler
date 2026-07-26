@@ -1,6 +1,7 @@
 package com.philipwilcox.spotifybutler.spotify
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -315,6 +316,12 @@ class SpotifyApiClient(
                 item.track?.let { track -> PlaylistTrack(item.playlistName, item.addedAt, track) }
             }
 
+        logger.info {
+            "Spotify collections fetched: savedTracks=${savedTracks.size} topTracks=${topTracks.size} " +
+                "topArtists=${topArtists.size} playlists=${playlists.size} playlistItems=${playlistItems.size} " +
+                "playlistTracks=${playlistTracks.size}"
+        }
+
         return SpotifyCacheSnapshot(savedTracks, topTracks, topArtists, playlists, playlistTracks, playlistItems)
     }
 
@@ -399,7 +406,22 @@ class SpotifyApiClient(
                 body = response.body,
             )}"
         }
-        return parseSpotifyResponse(response.body)
+        val parsed = parseSpotifyResponse(response.body)
+        logger.info {
+            "Spotify response summary: method=GET path=${uri.rawPath} status=${response.statusCode} " +
+                "pageSequence=$pageSequence ${responseSummary(parsed)}"
+        }
+        return parsed
+    }
+
+    private fun responseSummary(response: JsonObject): String {
+        val itemCount = (response["items"] as? JsonArray)?.size
+        val trackItems = ((response["tracks"] as? JsonObject)?.get("items") as? JsonArray)?.size
+        val total = response.optionalLong("total") ?: (response["tracks"] as? JsonObject)?.optionalLong("total")
+        val nextPresent = !response.optionalString("next").isNullOrBlank()
+        val id = response.optionalString("id")
+        return "itemCount=${itemCount ?: trackItems ?: 0} total=${total ?: "unknown"} " +
+            "nextPresent=$nextPresent${id?.let { " id=$it" }.orEmpty()}"
     }
 
     private fun parseMutationResponse(

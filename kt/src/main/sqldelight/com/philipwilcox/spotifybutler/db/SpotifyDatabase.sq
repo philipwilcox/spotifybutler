@@ -3,6 +3,23 @@ CREATE TABLE schema_version (
     version INTEGER NOT NULL
 );
 
+CREATE TABLE spotify_auth_grants (
+    spotify_user_id TEXT NOT NULL PRIMARY KEY,
+    protected_refresh_token TEXT NOT NULL,
+    authorized_at_millis INTEGER NOT NULL,
+    last_refreshed_at_millis INTEGER
+);
+
+CREATE TABLE browser_sessions (
+    session_id TEXT NOT NULL PRIMARY KEY,
+    spotify_user_id TEXT NOT NULL,
+    created_at_millis INTEGER NOT NULL,
+    last_used_at_millis INTEGER NOT NULL,
+    expires_at_millis INTEGER NOT NULL
+);
+
+CREATE INDEX browser_sessions_user_id ON browser_sessions (spotify_user_id);
+
 CREATE TABLE cache_source_sync (
     owner_spotify_user_id TEXT NOT NULL,
     source_key TEXT NOT NULL,

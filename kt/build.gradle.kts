@@ -41,6 +41,50 @@ application {
     mainClass = "com.philipwilcox.spotifybutler.MainKt"
 }
 
+tasks.register<Exec>("buildVueFrontend") {
+    group = "application"
+    description = "Build the same-origin Vue frontend before starting Spotify Butler."
+    workingDir(rootDir.parentFile)
+    commandLine(resolveNpmExecutable(rootDir.parentFile), "--prefix", "vue", "run", "build")
+}
+
+tasks.named<JavaExec>("run") {
+    dependsOn("buildVueFrontend")
+}
+
+fun resolveNpmExecutable(repositoryRoot: File): String {
+    val configured = System.getenv("SPOTIFY_BUTLER_NPM_EXECUTABLE")?.trim()?.takeIf(String::isNotEmpty)
+    if (configured != null) return configured
+
+    val pathExecutable =
+        System
+            .getenv("PATH")
+            .orEmpty()
+            .split(File.pathSeparator)
+            .map { File(it, if (System.getProperty("os.name").lowercase().contains("windows")) "npm.cmd" else "npm") }
+            .firstOrNull(File::isFile)
+    if (pathExecutable != null) return pathExecutable.absolutePath
+
+    val nodeVersion =
+        repositoryRoot
+            .resolve(".nvmrc")
+            .takeIf(File::isFile)
+            ?.readText()
+            ?.trim()
+    val home = File(System.getProperty("user.home"))
+    val versionedCandidates =
+        nodeVersion
+            ?.let { version ->
+                listOf(
+                    home.resolve(".local/share/nvm/v$version/bin/npm"),
+                    home.resolve(".local/share/nvm/$version/bin/npm"),
+                    home.resolve(".nvm/versions/node/v$version/bin/npm"),
+                    home.resolve(".nvm/versions/node/$version/bin/npm"),
+                )
+            }.orEmpty()
+    return (versionedCandidates + File("npm")).firstOrNull(File::isFile)?.absolutePath ?: "npm"
+}
+
 ktlint {
     version.set("1.5.0")
 }

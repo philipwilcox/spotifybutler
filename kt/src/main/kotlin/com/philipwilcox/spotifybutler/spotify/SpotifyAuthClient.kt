@@ -21,6 +21,12 @@ class SpotifyAuthClient(
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    class SpotifyAuthException(
+        val statusCode: Int,
+        val spotifyError: String?,
+        message: String,
+    ) : RuntimeException(message)
+
     data class AuthorizationRequest(
         val location: URI,
         val state: String,
@@ -107,9 +113,7 @@ class SpotifyAuthClient(
                 .POST(HttpRequest.BodyPublishers.ofString(form))
                 .build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        require(response.statusCode() in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
-            "Spotify token exchange failed with HTTP ${response.statusCode()}"
-        }
+        requireTokenSuccess(response, "exchange")
         return TokenResponse(
             accessToken = requiredJsonString(response.body(), "access_token"),
             expiresInSeconds = requiredJsonNumber(response.body(), "expires_in"),
@@ -132,14 +136,25 @@ class SpotifyAuthClient(
                 .POST(HttpRequest.BodyPublishers.ofString(form))
                 .build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        require(response.statusCode() in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
-            "Spotify token refresh failed with HTTP ${response.statusCode()}"
-        }
+        requireTokenSuccess(response, "refresh")
         return TokenResponse(
             accessToken = requiredJsonString(response.body(), "access_token"),
             expiresInSeconds = requiredJsonNumber(response.body(), "expires_in"),
-            refreshToken = optionalJsonString(response.body(), "refresh_token") ?: refreshToken,
+            refreshToken = optionalJsonString(response.body(), "refresh_token"),
         )
+    }
+
+    private fun requireTokenSuccess(
+        response: HttpResponse<String>,
+        operation: String,
+    ) {
+        if (response.statusCode() !in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
+            throw SpotifyAuthException(
+                response.statusCode(),
+                optionalJsonString(response.body(), "error"),
+                "Spotify token $operation failed with HTTP ${response.statusCode()}",
+            )
+        }
     }
 
     private fun newState(): String =

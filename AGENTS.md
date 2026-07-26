@@ -74,6 +74,10 @@ make.
   `http://127.0.0.1:8888/callback`; keep it consistent with Spotify application settings.
 - Use the documented Gradle entrypoint from the repository root:
   `./kt/gradlew -p kt run`.
+- The Vue app requires Node 24.12.0. From the repository root, run `nvm use` (the version is recorded in `.nvmrc`)
+  before using npm; verify with `node --version` and `npm --version` if needed.
+- Install and verify the Vue app with `npm --prefix vue install`, `npm --prefix vue run test`, and
+  `npm --prefix vue run build`. Do not use the system Node installation for these commands.
 - Keep generated build output, IDE files, and real secret properties untracked. The committed
   `secrets.properties.example` is the safe template.
 

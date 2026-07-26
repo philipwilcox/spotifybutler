@@ -69,7 +69,12 @@ class SpotifyCacheService(
             val timestamp = clock.millis()
             val snapshot = fetchSource(ownerSpotifyUserId, accessToken, sourceKey)
             store.replaceSource(ownerSpotifyUserId, sourceKey, snapshot, timestamp)
-            store.sourceSnapshot(ownerSpotifyUserId, sourceKey)
+            store.sourceSnapshot(ownerSpotifyUserId, sourceKey).also { stored ->
+                logger.info {
+                    "Spotify cache source stored: owner=$ownerSpotifyUserId sourceKey=$sourceKey " +
+                        "resourceKind=${stored.resourceKind} status=${stored.status} itemCount=${stored.itemCount ?: 0}"
+                }
+            }
         } catch (exception: Exception) {
             logger.warn(exception) { "Spotify source refresh failed sourceKey=$sourceKey" }
             store.setSourceFailure(ownerSpotifyUserId, sourceKey, sanitizedErrorCode(exception), clock.millis())

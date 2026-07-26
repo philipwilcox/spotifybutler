@@ -21,7 +21,7 @@ class SpotifyStoreTargetContractTest {
     @Test
     fun schemaVersionAndLegacyTables() {
         val path = Files.createTempDirectory("target-schema-").resolve("cache.db")
-        SpotifyStore.open(path).use { store -> assertEquals(1, store.schemaVersion()) }
+        SpotifyStore.open(path).use { store -> assertEquals(2, store.schemaVersion()) }
         DriverManager.getConnection("jdbc:sqlite:" + path).use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { result ->
@@ -29,8 +29,30 @@ class SpotifyStoreTargetContractTest {
                     assertEquals(false, "cache_metadata" in tables)
                     assertEquals(false, "sync_status" in tables)
                     assertEquals(true, "cache_source_sync" in tables)
+                    assertEquals(true, "spotify_auth_grants" in tables)
+                    assertEquals(true, "browser_sessions" in tables)
                 }
             }
+        }
+    }
+
+    @Test
+    fun additiveMigrationPreservesLibraryData() {
+        val path = Files.createTempDirectory("auth-migration-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(snapshot("migration-track", "migration-playlist"), 10L, "migration-owner")
+        }
+        DriverManager.getConnection("jdbc:sqlite:" + path).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DROP INDEX browser_sessions_user_id")
+                statement.execute("DROP TABLE browser_sessions")
+                statement.execute("DROP TABLE spotify_auth_grants")
+                statement.execute("UPDATE schema_version SET version = 1 WHERE singleton_id = 1")
+            }
+        }
+        SpotifyStore.open(path).use { store ->
+            assertEquals(2, store.schemaVersion())
+            assertEquals(listOf("migration-track"), store.songs("migration-owner").map(SpotifyTrack::id))
         }
     }
 
@@ -55,6 +77,8 @@ class SpotifyStoreTargetContractTest {
             store.replaceCache(snapshot("track-b", "playlist-shared"), 20L, "owner-b")
             assertEquals(listOf("track-a"), store.songs("owner-a").map(SpotifyTrack::id))
             assertEquals(listOf("track-b"), store.songs("owner-b").map(SpotifyTrack::id))
+            assertEquals(listOf("playlist-shared"), store.libraryPlaylists("owner-a").map { it.playlistId })
+            assertEquals(listOf("playlist-shared"), store.libraryPlaylists("owner-b").map { it.playlistId })
             assertEquals(listOf("track-a"), store.playlistItems("playlist-shared", "owner-a").mapNotNull { it.itemId })
             assertEquals(listOf("track-b"), store.playlistItems("playlist-shared", "owner-b").mapNotNull { it.itemId })
             store.saveManagedPlaylist("definition-shared", "playlist-shared", "owner-a", 30L)

@@ -6,6 +6,7 @@ import java.util.Properties
 
 data class ServiceConfig(
     val databasePath: Path,
+    val frontendDirectory: Path,
     val trustedOrigins: Set<String>,
     val secureCookies: Boolean,
     val callbackHttpsRequired: Boolean,
@@ -16,6 +17,8 @@ data class ServiceConfig(
         private const val CONFIG_FILE_ENV = "SPOTIFY_BUTLER_CONFIG_FILE"
         private const val DATABASE_PATH_ENV = "SPOTIFY_BUTLER_DATABASE_PATH"
         private const val DATABASE_PATH_PROPERTY = "spotify.databasePath"
+        private const val FRONTEND_DIRECTORY_ENV = "SPOTIFY_BUTLER_FRONTEND_DIRECTORY"
+        private const val FRONTEND_DIRECTORY_PROPERTY = "spotify.frontendDirectory"
         private const val TRUSTED_ORIGINS_ENV = "SPOTIFY_BUTLER_TRUSTED_ORIGINS"
         private const val TRUSTED_ORIGINS_PROPERTY = "spotify.trustedOrigins"
         private const val SECURE_COOKIES_ENV = "SPOTIFY_BUTLER_SECURE_COOKIES"
@@ -33,9 +36,15 @@ data class ServiceConfig(
             val configuredPath =
                 System.getenv(DATABASE_PATH_ENV)?.trim()?.takeIf(String::isNotEmpty)
                     ?: properties.getProperty(DATABASE_PATH_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
+            val configuredFrontendDirectory =
+                System.getenv(FRONTEND_DIRECTORY_ENV)?.trim()?.takeIf(String::isNotEmpty)
+                    ?: properties.getProperty(FRONTEND_DIRECTORY_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
             return ServiceConfig(
                 databasePath =
                     configuredPath?.let { path -> resolveConfiguredPath(path, configFile) } ?: defaultDatabasePath(),
+                frontendDirectory =
+                    configuredFrontendDirectory?.let { path -> resolveConfiguredPath(path, configFile) }
+                        ?: defaultFrontendDirectory(),
                 trustedOrigins = trustedOrigins(properties),
                 secureCookies = configuredBoolean(SECURE_COOKIES_ENV, SECURE_COOKIES_PROPERTY, properties),
                 callbackHttpsRequired = configuredBoolean(CALLBACK_HTTPS_ENV, CALLBACK_HTTPS_PROPERTY, properties),
@@ -119,6 +128,13 @@ data class ServiceConfig(
 
         private fun defaultDatabasePath(): Path =
             if (Files.isDirectory(Path.of("kt"))) Path.of("kt", "spotify.db") else Path.of("spotify.db")
+
+        private fun defaultFrontendDirectory(): Path =
+            when {
+                Files.isDirectory(Path.of("vue")) -> Path.of("vue", "dist")
+                Files.isDirectory(Path.of("..", "vue")) -> Path.of("..", "vue", "dist")
+                else -> Path.of("dist")
+            }
 
         private val DEFAULT_HOSTS = setOf("127.0.0.1:8888", "localhost:8888")
     }

@@ -57,16 +57,17 @@ GET /api/v1/playlists/{definitionId}/preview?seed=...; it does not use a local r
 SessionController owns authentication phases and the in-memory CSRF token. A 401 clears dependent workspace state; a
 mutation is never transparently replayed.
 
-LibraryController owns the last LibraryModel, request phase, source status display, and explicit full/selective refresh.
-Refreshing a source updates only that source in the UI. The controller does not infer readiness from a global count.
+LibraryController owns the last LibraryModel, request phase, source status display, definitions, library playlist
+summaries, and explicit full/selective refresh. Every successful refresh replaces the complete response, including
+definitions and playlists; request failures remain visible and never render as an empty workspace.
 
-StudioController owns the definition list, selected DefinitionModel, current managed state, PreviewModel, local selection,
-song enrichment, and submit flows:
+StudioController owns the discriminated active definition or read-only library playlist, current managed state,
+PreviewModel, local selection, song enrichment, and submit flows:
 
 1. load session, library, and definitions;
-2. select a definition and request its cached current state and preview;
+2. select a definition and request its cached current state and preview, or select a library playlist through its detail route;
 3. enrich visible IDs through batch songs while retaining caller order;
-4. allow local reorder/remove;
+4. allow local reorder/remove only for definitions; library playlist content remains cached and read-only;
 5. create a destination explicitly when no mapping exists;
 6. submit recurring sync only when a Butler-created destination exists;
 7. offer one-time update with an explicit target playlist ID and display tracked=false.

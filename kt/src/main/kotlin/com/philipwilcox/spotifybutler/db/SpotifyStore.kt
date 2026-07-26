@@ -42,9 +42,124 @@ import java.util.UUID
 class SpotifyStore private constructor(
     private val driver: SqlDriver,
     private val connection: Connection,
+    private val refreshTokenProtector: RefreshTokenProtector,
 ) : AutoCloseable {
+    private val connectionLock = Any()
+
     fun schemaVersion(): Int =
         queryOne("SELECT version FROM schema_version WHERE singleton_id = 1") { it.getInt(1) } ?: 0
+
+    fun spotifyAuthGrant(spotifyUserId: String): StoredSpotifyAuthGrant? =
+        queryOne(
+            "SELECT * FROM spotify_auth_grants WHERE spotify_user_id = ?",
+            spotifyUserId,
+        ) { result ->
+            StoredSpotifyAuthGrant(
+                spotifyUserId = result.getString("spotify_user_id"),
+                refreshToken = refreshTokenProtector.reveal(result.getString("protected_refresh_token")),
+                authorizedAtMillis = result.getLong("authorized_at_millis"),
+                lastRefreshedAtMillis = result.getLongOrNull("last_refreshed_at_millis"),
+            )
+        }
+
+    fun saveSpotifyAuthGrant(
+        spotifyUserId: String,
+        refreshToken: String,
+        authorizedAtMillis: Long,
+        lastRefreshedAtMillis: Long?,
+    ) {
+        execute(
+            """INSERT INTO spotify_auth_grants
+               (spotify_user_id, protected_refresh_token, authorized_at_millis, last_refreshed_at_millis)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(spotify_user_id) DO UPDATE SET
+               protected_refresh_token=excluded.protected_refresh_token,
+               authorized_at_millis=excluded.authorized_at_millis,
+               last_refreshed_at_millis=excluded.last_refreshed_at_millis""",
+            spotifyUserId,
+            refreshTokenProtector.protect(refreshToken),
+            authorizedAtMillis,
+            lastRefreshedAtMillis,
+        )
+    }
+
+    fun updateSpotifyAuthGrantRefreshToken(
+        spotifyUserId: String,
+        refreshToken: String,
+        refreshedAtMillis: Long,
+    ) {
+        execute(
+            """UPDATE spotify_auth_grants SET protected_refresh_token = ?, last_refreshed_at_millis = ?
+               WHERE spotify_user_id = ?""",
+            refreshTokenProtector.protect(refreshToken),
+            refreshedAtMillis,
+            spotifyUserId,
+        )
+    }
+
+    fun browserSession(sessionId: String): StoredBrowserSession? =
+        queryOne(
+            "SELECT * FROM browser_sessions WHERE session_id = ?",
+            sessionId,
+        ) { result ->
+            StoredBrowserSession(
+                sessionId = result.getString("session_id"),
+                spotifyUserId = result.getString("spotify_user_id"),
+                createdAtMillis = result.getLong("created_at_millis"),
+                lastUsedAtMillis = result.getLong("last_used_at_millis"),
+                expiresAtMillis = result.getLong("expires_at_millis"),
+            )
+        }
+
+    fun saveBrowserSession(session: StoredBrowserSession) {
+        execute(
+            """INSERT INTO browser_sessions
+               (session_id, spotify_user_id, created_at_millis, last_used_at_millis, expires_at_millis)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET
+               spotify_user_id=excluded.spotify_user_id,
+               created_at_millis=excluded.created_at_millis,
+               last_used_at_millis=excluded.last_used_at_millis,
+               expires_at_millis=excluded.expires_at_millis""",
+            session.sessionId,
+            session.spotifyUserId,
+            session.createdAtMillis,
+            session.lastUsedAtMillis,
+            session.expiresAtMillis,
+        )
+    }
+
+    fun touchBrowserSession(
+        sessionId: String,
+        lastUsedAtMillis: Long,
+    ) {
+        execute(
+            "UPDATE browser_sessions SET last_used_at_millis = ? WHERE session_id = ?",
+            lastUsedAtMillis,
+            sessionId,
+        )
+    }
+
+    fun rotateBrowserSession(
+        oldSessionId: String,
+        session: StoredBrowserSession,
+    ) {
+        transaction {
+            execute("DELETE FROM browser_sessions WHERE session_id = ?", oldSessionId)
+            saveBrowserSession(session)
+        }
+    }
+
+    fun deleteBrowserSession(sessionId: String) {
+        execute("DELETE FROM browser_sessions WHERE session_id = ?", sessionId)
+    }
+
+    fun deleteAuthenticationState(spotifyUserId: String) {
+        transaction {
+            execute("DELETE FROM browser_sessions WHERE spotify_user_id = ?", spotifyUserId)
+            execute("DELETE FROM spotify_auth_grants WHERE spotify_user_id = ?", spotifyUserId)
+        }
+    }
 
     fun exportTables(): SpotifyTableSnapshot =
         SpotifyTableSnapshot(
@@ -489,6 +604,80 @@ class SpotifyStore private constructor(
             ownerSpotifyUserId,
             playlistId,
         ) { storedPlaylistDetails(it) }
+
+    fun libraryPlaylists(ownerSpotifyUserId: String): List<StoredLibraryPlaylist> =
+        rows(
+            "SELECT p.*, d.description, d.item_count, d.display_url FROM playlists p " +
+                "LEFT JOIN playlist_details d ON d.owner_spotify_user_id = p.owner_spotify_user_id " +
+                "AND d.playlist_id = p.id WHERE p.owner_spotify_user_id = ? " +
+                "AND NOT EXISTS (SELECT 1 FROM managed_playlists m " +
+                "WHERE m.owner_spotify_user_id = p.owner_spotify_user_id " +
+                "AND m.spotify_playlist_id = p.id) ORDER BY p.source_position, p.id",
+            ownerSpotifyUserId,
+        ) { result ->
+            LibraryPlaylistRow(
+                result.getString("id"),
+                result.getString("name"),
+                result.getString("description"),
+                result.getString("href"),
+                result.getString("uri"),
+                result.getIntOrNull("item_count"),
+                result.getString("display_url"),
+            )
+        }.map { row ->
+            val playlistId = row.playlistId
+            val source =
+                queryOne(
+                    "SELECT status, source_revision, last_synced_at_millis FROM cache_source_sync " +
+                        "WHERE owner_spotify_user_id = ? AND source_key = ?",
+                    ownerSpotifyUserId,
+                    "playlist_items:$playlistId",
+                ) { result ->
+                    LibraryPlaylistSource(
+                        CacheSourceStatus.entries.first {
+                            it.name.equals(result.getString("status"), true)
+                        },
+                        result.getString("source_revision"),
+                        result.getLongOrNull("last_synced_at_millis")?.let(Instant::ofEpochMilli),
+                    )
+                }
+            val playableCount =
+                rows(
+                    "SELECT item_id FROM playlist_items WHERE owner_spotify_user_id = ? AND playlist_id = ? " +
+                        "AND is_playable = 1 AND is_local = 0 AND item_type = 'track' AND status = 'playable' " +
+                        "AND item_id IS NOT NULL AND item_uri LIKE 'spotify:track:%' ORDER BY position",
+                    ownerSpotifyUserId,
+                    playlistId,
+                ) { it.getString("item_id") }.size
+            StoredLibraryPlaylist(
+                playlistId,
+                row.name,
+                row.description,
+                row.href,
+                row.uri,
+                row.itemCount,
+                playableCount,
+                "playlist_items:$playlistId",
+                source?.status ?: CacheSourceStatus.EMPTY,
+                source?.sourceRevision,
+                source?.lastSyncedAt,
+                row.displayUrl,
+            )
+        }
+
+    fun libraryPlaylistTrackIds(
+        ownerSpotifyUserId: String,
+        playlistId: String,
+    ): List<String> =
+        playlistItems(playlistId, ownerSpotifyUserId)
+            .filter {
+                it.isPlayable &&
+                    !it.isLocal &&
+                    it.itemType == "track" &&
+                    it.status == "playable" &&
+                    !it.itemId.isNullOrBlank() &&
+                    it.itemUri?.startsWith("spotify:track:") == true
+            }.mapNotNull { it.itemId }
 
     fun findPlaylistByName(
         name: String,
@@ -1429,14 +1618,11 @@ class SpotifyStore private constructor(
         vararg args: Any?,
         mapper: (ResultSet) -> T,
     ): List<T> =
-        connection.prepareStatement(sql).use { statement ->
-            args.forEachIndexed { index, value ->
-                statement.setObject(
-                    index + 1,
-                    value,
-                )
+        synchronized(connectionLock) {
+            connection.prepareStatement(sql).use { statement ->
+                args.forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+                statement.executeQuery().use { result -> buildList { while (result.next()) add(mapper(result)) } }
             }
-            ; statement.executeQuery().use { result -> buildList { while (result.next()) add(mapper(result)) } }
         }
 
     private fun <T> queryOne(
@@ -1449,33 +1635,32 @@ class SpotifyStore private constructor(
         sql: String,
         vararg args: Any?,
     ) {
-        connection.prepareStatement(sql).use { statement ->
-            args.forEachIndexed { index, value ->
-                statement.setObject(
-                    index + 1,
-                    value,
-                )
+        synchronized(connectionLock) {
+            connection.prepareStatement(sql).use { statement ->
+                args.forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+                statement.executeUpdate()
             }
-            ; statement.executeUpdate()
         }
     }
 
-    private fun <T> transaction(block: () -> T): T {
-        val previous = connection.autoCommit
-        connection.autoCommit = false
-        return try {
-            block().also { connection.commit() }
-        } catch (exception: Exception) {
-            connection.rollback()
-            throw exception
-        } finally {
-            connection.autoCommit =
-                previous
+    private fun <T> transaction(block: () -> T): T =
+        synchronized(connectionLock) {
+            val previous = connection.autoCommit
+            connection.autoCommit = false
+            try {
+                block().also { connection.commit() }
+            } catch (exception: Exception) {
+                connection.rollback()
+                throw exception
+            } finally {
+                connection.autoCommit =
+                    previous
+            }
         }
-    }
 
     companion object {
-        const val TARGET_SCHEMA_VERSION = 1
+        const val TARGET_SCHEMA_VERSION = 2
+        private const val LEGACY_SCHEMA_VERSION = 1
         const val DEFAULT_OWNER = "legacy-owner"
         private const val MAX_ERROR_CODE_LENGTH = 80
 
@@ -1521,13 +1706,16 @@ class SpotifyStore private constructor(
                         it,
                     )
                 }
-            require(version == TARGET_SCHEMA_VERSION) {
-                "Database at $path has schema version $version; expected $TARGET_SCHEMA_VERSION. " +
-                    "Recreate the database; migrations are not supported."
+            require(version <= TARGET_SCHEMA_VERSION) {
+                "Database at $path has schema version $version; expected $TARGET_SCHEMA_VERSION or an older " +
+                    "supported version."
             }
         }
 
-        fun open(databasePath: Path): SpotifyStore {
+        fun open(
+            databasePath: Path,
+            refreshTokenProtectionKey: String = DEFAULT_REFRESH_TOKEN_PROTECTION_KEY,
+        ): SpotifyStore {
             val absolutePath = databasePath.toAbsolutePath().normalize()
             val newDatabase = Files.notExists(absolutePath)
             absolutePath.parent?.let(Files::createDirectories)
@@ -1545,8 +1733,9 @@ class SpotifyStore private constructor(
                 }
             }
             val connection = openConnection(absolutePath, false)
+            migrate(connection, absolutePath)
             validateSchema(connection, absolutePath)
-            return SpotifyStore(driver, connection)
+            return SpotifyStore(driver, connection, RefreshTokenProtector(refreshTokenProtectionKey))
         }
 
         fun openReadOnly(databasePath: Path): SpotifyStore {
@@ -1554,10 +1743,85 @@ class SpotifyStore private constructor(
             require(Files.isRegularFile(absolutePath)) { "SQLite database not found at $absolutePath" }
             val connection = openConnection(absolutePath, true)
             validateSchema(connection, absolutePath)
-            return SpotifyStore(JdbcSqliteDriver("jdbc:sqlite:file:$absolutePath?mode=ro"), connection)
+            return SpotifyStore(
+                JdbcSqliteDriver("jdbc:sqlite:file:$absolutePath?mode=ro"),
+                connection,
+                RefreshTokenProtector(DEFAULT_REFRESH_TOKEN_PROTECTION_KEY),
+            )
         }
+
+        private fun migrate(
+            connection: Connection,
+            path: Path,
+        ) {
+            val version =
+                connection
+                    .prepareStatement("SELECT version FROM schema_version WHERE singleton_id = 1")
+                    .use { statement ->
+                        statement.executeQuery().use { result ->
+                            require(result.next()) { "Database at $path has no schema version" }
+                            result.getInt(1)
+                        }
+                    }
+            if (version == TARGET_SCHEMA_VERSION) return
+            require(version == LEGACY_SCHEMA_VERSION) {
+                "Database at $path has schema version $version; expected $TARGET_SCHEMA_VERSION or an older " +
+                    "supported version. Recreate the database or provide a supported migration."
+            }
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        """CREATE TABLE IF NOT EXISTS spotify_auth_grants (
+                           spotify_user_id TEXT NOT NULL PRIMARY KEY,
+                           protected_refresh_token TEXT NOT NULL,
+                           authorized_at_millis INTEGER NOT NULL,
+                           last_refreshed_at_millis INTEGER
+                        )""",
+                    )
+                    statement.execute(
+                        """CREATE TABLE IF NOT EXISTS browser_sessions (
+                           session_id TEXT NOT NULL PRIMARY KEY,
+                           spotify_user_id TEXT NOT NULL,
+                           created_at_millis INTEGER NOT NULL,
+                           last_used_at_millis INTEGER NOT NULL,
+                           expires_at_millis INTEGER NOT NULL
+                        )""",
+                    )
+                    statement.execute(
+                        "CREATE INDEX IF NOT EXISTS browser_sessions_user_id ON browser_sessions (spotify_user_id)",
+                    )
+                    statement.execute(
+                        "UPDATE schema_version SET version = $TARGET_SCHEMA_VERSION WHERE singleton_id = 1",
+                    )
+                }
+                connection.commit()
+            } catch (exception: Exception) {
+                connection.rollback()
+                throw exception
+            } finally {
+                connection.autoCommit = true
+            }
+        }
+
+        private const val DEFAULT_REFRESH_TOKEN_PROTECTION_KEY = "spotify-butler-test-only-default-key"
     }
 }
+
+data class StoredSpotifyAuthGrant(
+    val spotifyUserId: String,
+    val refreshToken: String,
+    val authorizedAtMillis: Long,
+    val lastRefreshedAtMillis: Long?,
+)
+
+data class StoredBrowserSession(
+    val sessionId: String,
+    val spotifyUserId: String,
+    val createdAtMillis: Long,
+    val lastUsedAtMillis: Long,
+    val expiresAtMillis: Long,
+)
 
 data class StoredUserPlaylistDefinition(
     val id: String,
@@ -1613,6 +1877,37 @@ data class StoredPlaylistDetails(
     val ownerId: String?,
     val itemCount: Int?,
     val displayUrl: String?,
+)
+
+data class StoredLibraryPlaylist(
+    val playlistId: String,
+    val name: String,
+    val description: String?,
+    val href: String,
+    val uri: String,
+    val itemCount: Int?,
+    val playableTrackCount: Int,
+    val contentSourceKey: String,
+    val contentStatus: CacheSourceStatus,
+    val sourceRevision: String?,
+    val lastSyncedAt: Instant?,
+    val displayUrl: String?,
+)
+
+private data class LibraryPlaylistRow(
+    val playlistId: String,
+    val name: String,
+    val description: String?,
+    val href: String,
+    val uri: String,
+    val itemCount: Int?,
+    val displayUrl: String?,
+)
+
+private data class LibraryPlaylistSource(
+    val status: CacheSourceStatus,
+    val sourceRevision: String?,
+    val lastSyncedAt: Instant?,
 )
 
 data class ManagedPlaylist(

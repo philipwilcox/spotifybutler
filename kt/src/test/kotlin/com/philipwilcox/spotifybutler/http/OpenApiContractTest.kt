@@ -20,6 +20,7 @@ class OpenApiContractTest {
                 "/api/v1/session/refresh",
                 "/api/v1/library",
                 "/api/v1/library/refresh",
+                "/api/v1/library/playlists/{playlistId}",
                 "/api/v1/playlists",
                 "/api/v1/playlists/{definitionId}",
                 "/api/v1/playlists/{definitionId}/preview",

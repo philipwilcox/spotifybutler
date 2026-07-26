@@ -2,6 +2,7 @@
 .gradle
 # gradle output
 build
+vue/dist/
 
 # Compiled class file
 *.class

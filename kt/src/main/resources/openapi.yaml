@@ -30,6 +30,7 @@ paths:
     get:
       operationId: getSession
       security: [{butlerSession: []}]
+      description: Rehydrates a durable browser session when the in-memory process session is absent and rotates the cookie.
       responses:
         '200': {description: Session, content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
@@ -65,6 +66,14 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/RefreshLibraryRequest'}}}
       responses:
         '200': {description: Refreshed library, content: {application/json: {schema: {$ref: '#/components/schemas/Library'}}}}
+      default: {$ref: '#/components/responses/ErrorResponse'}
+  /api/v1/library/playlists/{playlistId}:
+    parameters: [{$ref: '#/components/parameters/PlaylistId'}]
+    get:
+      operationId: getLibraryPlaylist
+      security: [{butlerSession: []}]
+      responses:
+        '200': {description: Cached library playlist, content: {application/json: {schema: {$ref: '#/components/schemas/LibraryPlaylistDetail'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/playlists:
     get:
@@ -171,6 +180,7 @@ components:
     CsrfToken: {name: X-CSRF-Token, in: header, required: true, schema: {type: string}}
     Origin: {name: Origin, in: header, required: true, schema: {type: string, format: uri}}
     DefinitionId: {name: definitionId, in: path, required: true, schema: {type: string}}
+    PlaylistId: {name: playlistId, in: path, required: true, schema: {type: string}}
     ReturnTo: {name: returnTo, in: query, required: false, schema: {type: string}}
   responses:
     ErrorResponse:
@@ -185,7 +195,9 @@ components:
     Definition: {type: object, required: [definitionId, name, description, kind, editable, enabled, recipe, sourceDependencies, destination], properties: {definitionId: {type: string}, name: {type: string}, description: {type: string}, kind: {type: string, enum: [built_in, owner]}, editable: {type: boolean}, enabled: {type: boolean}, recipe: {$ref: '#/components/schemas/PlaylistRecipe'}, sourceDependencies: {type: array, items: {$ref: '#/components/schemas/SourceDependency'}}, destination: {$ref: '#/components/schemas/Destination'}}}
     DefinitionList: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Definition'}}}}
     Destination: {type: object, required: [definitionId, spotifyPlaylistId, createdAt, lastSyncedAt, lastSeenSnapshotId, canSync, managementStatus], properties: {definitionId: {type: string}, spotifyPlaylistId: {type: string}, createdAt: {type: string, format: date-time}, lastSyncedAt: {type: [string, 'null'], format: date-time}, lastSeenSnapshotId: {type: [string, 'null']}, canSync: {type: boolean}, managementStatus: {type: string, enum: [butler_created]}}}
-    Library: {type: object, required: [ownerSpotifyUserId, status, sources, definitions], properties: {ownerSpotifyUserId: {type: string}, status: {type: string, enum: [empty, ready, partial, refreshing, stale]}, sources: {type: array, items: {$ref: '#/components/schemas/SourceSnapshot'}}, definitions: {type: array, items: {$ref: '#/components/schemas/Definition'}}}}
+    LibraryPlaylist: {type: object, required: [spotifyPlaylistId, name, description, href, uri, displayUrl, declaredItemCount, cachedPlayableTrackCount, contentSourceKey, contentStatus, sourceRevision, lastSyncedAt], properties: {spotifyPlaylistId: {type: string}, name: {type: string}, description: {type: [string, 'null']}, href: {type: string}, uri: {type: string}, displayUrl: {type: [string, 'null']}, declaredItemCount: {type: [integer, 'null']}, cachedPlayableTrackCount: {type: integer}, contentSourceKey: {type: string}, contentStatus: {type: string, enum: [empty, ready, refreshing, stale, error]}, sourceRevision: {type: [string, 'null']}, lastSyncedAt: {type: [string, 'null'], format: date-time}}}
+    LibraryPlaylistDetail: {type: object, required: [summary, trackIds], properties: {summary: {$ref: '#/components/schemas/LibraryPlaylist'}, trackIds: {type: array, items: {type: string}}}}
+    Library: {type: object, required: [ownerSpotifyUserId, status, sources, definitions, playlists], properties: {ownerSpotifyUserId: {type: string}, status: {type: string, enum: [empty, ready, partial, refreshing, stale]}, sources: {type: array, items: {$ref: '#/components/schemas/SourceSnapshot'}}, definitions: {type: array, items: {$ref: '#/components/schemas/Definition'}}, playlists: {type: array, items: {$ref: '#/components/schemas/LibraryPlaylist'}}}}
     Preview: {type: object, required: [definitionId, status, generatedTrackIds, generatedTrackCount, seed, recipeRevision, algorithmVersion, sourceDependencies, generatedAt, unavailableReason], properties: {definitionId: {type: string}, status: {type: string, enum: [ready, empty, partial, unavailable]}, generatedTrackIds: {type: array, items: {type: string}}, generatedTrackCount: {type: integer}, seed: {type: string}, recipeRevision: {type: string}, algorithmVersion: {type: string}, sourceDependencies: {type: array, items: {$ref: '#/components/schemas/SourceDependency'}}, generatedAt: {type: string, format: date-time}, unavailableReason: {type: [string, 'null']}}}
     Current: {type: object, required: [spotifyPlaylistId, trackIds, lastSyncedAt, lastSeenSnapshotId], properties: {spotifyPlaylistId: {type: string}, trackIds: {type: array, items: {type: string}}, lastSyncedAt: {type: [string, 'null'], format: date-time}, lastSeenSnapshotId: {type: [string, 'null']}}}
     CurrentEnvelope: {type: object, required: [current], properties: {current: {oneOf: [{$ref: '#/components/schemas/Current'}, {type: 'null'}]}}}

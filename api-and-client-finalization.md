@@ -35,6 +35,7 @@ through the explicit library refresh operation.
 | DELETE | /api/v1/session | Sign out |
 | GET | /api/v1/library | Read aggregate status and independent source snapshots |
 | POST | /api/v1/library/refresh | Refresh all sources or the requested sourceKeys |
+| GET | /api/v1/library/playlists/{playlistId} | Read one owner-scoped cached playlist in stored item order |
 | GET | /api/v1/playlists | List built-in and owner definitions |
 | POST | /api/v1/playlists | Create an owner definition |
 | GET/PUT | /api/v1/playlists/{definitionId} | Read or edit one owner-scoped definition |
@@ -50,7 +51,11 @@ routes, singular song route, or legacy run route.
 
 ## Resource shapes
 
-Library contains ownerSpotifyUserId, aggregate status, sources, and definition summaries. Each source has sourceKey,
+Library contains ownerSpotifyUserId, aggregate status, sources, definition summaries, and non-Butler playlist summaries.
+Playlist summaries contain the Spotify ID, name, description, links/URI, declared item count, cached playable-track
+count, content source key, content status, source revision, and last sync time. The detail route returns the summary
+plus ordered playable track IDs from cached playlist_items. Managed playlist IDs are excluded by ID, never by name.
+Each source has sourceKey,
 resourceKind, status, nullable sourceRevision, nullable lastSyncedAt, nullable itemCount, canRefresh, and nullable
 sanitized error fields.
 
@@ -77,9 +82,12 @@ mutations, validates successful DTOs at runtime, preserves track-ID order, batch
 retries a mutation automatically.
 
 The session controller owns the CSRF token in memory. The library controller renders independent source statuses and
-offers explicit full or selective refresh. The studio controller keeps the selected recipe, server preview, current
+offers explicit full or selective refresh while replacing the complete library response. The studio controller keeps the selected recipe, server preview, current
 managed destination, and local ordered edits separate. Re-roll requests GET /preview?seed=...; the client never shuffles
 candidates or treats a preview as a Spotify write.
+
+Library playlists are selected on demand, enriched in cached order, and presented read-only. Only definitions can be
+reordered, removed, rerolled, synced, or used for destination actions.
 
 Definition editability and destination syncability are separate capabilities. The UI shows only a Butler-created
 destination or no destination. It offers destination creation before recurring sync and a separate one-time-update flow

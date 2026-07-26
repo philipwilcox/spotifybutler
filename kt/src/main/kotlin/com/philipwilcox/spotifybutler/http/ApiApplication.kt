@@ -1,4 +1,12 @@
-@file:Suppress("TooManyFunctions", "LargeClass", "CyclomaticComplexMethod", "TooGenericExceptionCaught", "MagicNumber")
+@file:Suppress(
+    "TooManyFunctions",
+    "LargeClass",
+    "CyclomaticComplexMethod",
+    "TooGenericExceptionCaught",
+    "MagicNumber",
+    "SwallowedException",
+    "ThrowsCount",
+)
 
 package com.philipwilcox.spotifybutler.http
 
@@ -9,6 +17,7 @@ import com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition
 import com.philipwilcox.spotifybutler.service.AuthoritativePlaylistState
 import com.philipwilcox.spotifybutler.service.DestinationConflictException
 import com.philipwilcox.spotifybutler.service.DestinationCreateRequest
+import com.philipwilcox.spotifybutler.service.LibraryViewService
 import com.philipwilcox.spotifybutler.service.MissingDestinationException
 import com.philipwilcox.spotifybutler.service.OwnerMismatchException
 import com.philipwilcox.spotifybutler.service.PlaylistDefinitionView
@@ -24,6 +33,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.time.Clock
+import java.time.Duration
 import java.util.Base64
 import java.util.UUID
 
@@ -59,6 +69,12 @@ interface PlaylistSyncGateway {
         playlistId: String,
         ownerSpotifyUserId: String,
     ): Boolean = ownsPlaylist(accessToken, playlistId)
+}
+
+interface SpotifySessionAuthenticator {
+    fun refresh(refreshToken: String): TokenRefreshResult
+
+    fun currentUserId(accessToken: String): String
 }
 
 class SpotifyPlaylistSyncGateway(
@@ -104,10 +120,13 @@ class ApiApplication(
     private val authClient: SpotifyAuthClient? = null,
     private val allowedSpotifyUserId: String? = null,
     private val secureCookies: Boolean = false,
+    private val spotifyUserIdLookup: ((String) -> String)? = null,
+    private val sessionAuthenticator: SpotifySessionAuthenticator? = null,
 ) {
     private val logger = KotlinLogging.logger {}
     private val refreshLocks = KeyedLock()
     private val previewService = PlaylistPreviewService(store, clock)
+    private val libraryService = LibraryViewService(store, previewService)
     private val destinationService = PlaylistDestinationService(store, gateway(), clock)
     constructor(
         cacheService: SpotifyCacheService,
@@ -129,6 +148,17 @@ class ApiApplication(
         authClient,
         allowedSpotifyUserId,
         secureCookies,
+        { accessToken -> apiClient.getCurrentUser(accessToken).id },
+        authClient?.let { client ->
+            object : SpotifySessionAuthenticator {
+                override fun refresh(refreshToken: String) =
+                    client.refreshAccessToken(refreshToken).let {
+                        TokenRefreshResult(it.accessToken, it.expiresInSeconds, it.refreshToken)
+                    }
+
+                override fun currentUserId(accessToken: String) = apiClient.getCurrentUser(accessToken).id
+            }
+        },
     )
 
     private fun gateway() =
@@ -165,7 +195,12 @@ class ApiApplication(
         val requestId = request.headers.header("X-Request-Id")?.takeIf(::validRequestId) ?: newRequestId()
         return try {
             require(request.path.startsWith("/api/v1/")) { ApiFailure(404, "not_found", "Route not found") }
-            route(request, requireSession(request)).withRequestId(requestId)
+            val resolution = resolveSession(request)
+            route(request, resolution.session).withRequestId(requestId).let { response ->
+                resolution.rotatedSessionId?.let { sessionId ->
+                    response.copy(headers = response.headers + ("Set-Cookie" to sessionCookie(sessionId)))
+                } ?: response
+            }
         } catch (failure: ApiFailure) {
             errorResponse(failure, requestId).withRequestId(requestId)
         } catch (failure: MissingDestinationException) {
@@ -232,6 +267,12 @@ class ApiApplication(
                 ) &&
                 request.method == "POST" -> refreshSession(request, session)
             parts == listOf("api", "v1", "library") && request.method == "GET" -> library(session)
+            parts.size == 5 &&
+                parts.take(
+                    4,
+                ) == listOf("api", "v1", "library", "playlists") &&
+                request.method == "GET" ->
+                libraryPlaylist(parts[4], session)
             parts == listOf("api", "v1", "library", "refresh") && request.method == "POST" -> refresh(request, session)
             parts == listOf("api", "v1", "playlists") && request.method == "GET" -> definitions(session)
             parts == listOf("api", "v1", "playlists") && request.method == "POST" -> createDefinition(request, session)
@@ -283,8 +324,8 @@ class ApiApplication(
         session: ButlerSession,
     ): ApiResponse {
         requireStateChange(request, session)
-        sessionStore.remove(session.id)
-        return ApiResponse(204, "")
+        sessionStore.signOut(session)
+        return ApiResponse(204, "", mapOf("Set-Cookie" to clearSessionCookie()))
     }
 
     @Suppress("SwallowedException", "TooGenericExceptionCaught")
@@ -296,12 +337,25 @@ class ApiApplication(
         val client = authClient ?: throw ApiFailure(501, "refresh_unavailable", "Session refresh is not configured")
         val rotated =
             try {
-                sessionStore.refresh(session) { refreshToken ->
+                sessionStore.refreshWithResult(session) { refreshToken ->
                     client.refreshAccessToken(refreshToken).let {
-                        it.accessToken to
-                            it.refreshToken
+                        TokenRefreshResult(it.accessToken, it.expiresInSeconds, it.refreshToken)
                     }
                 }
+            } catch (exception: SpotifyAuthClient.SpotifyAuthException) {
+                if (exception.spotifyError == "invalid_grant") sessionStore.invalidate(session.ownerSpotifyUserId)
+                throw ApiFailure(
+                    401,
+                    if (exception.spotifyError ==
+                        "invalid_grant"
+                    ) {
+                        "reauthorization_required"
+                    } else {
+                        "spotify_auth_failure"
+                    },
+                    "Spotify authorization is no longer available",
+                    clearSessionCookie = exception.spotifyError == "invalid_grant",
+                )
             } catch (
                 exception: Exception,
             ) {
@@ -320,6 +374,16 @@ class ApiApplication(
     }
 
     private fun library(session: ButlerSession): ApiResponse = json(200, libraryWire(session))
+
+    private fun libraryPlaylist(
+        playlistId: String,
+        session: ButlerSession,
+    ): ApiResponse =
+        try {
+            json(200, libraryService.playlist(session.ownerSpotifyUserId, playlistId).toWire())
+        } catch (_: com.philipwilcox.spotifybutler.service.LibraryPlaylistNotFoundException) {
+            throw ApiFailure(404, "not_found", "Library playlist not found")
+        }
 
     @Suppress("SwallowedException", "TooGenericExceptionCaught")
     private fun refresh(
@@ -552,21 +616,19 @@ class ApiApplication(
     }
 
     private fun libraryWire(session: ButlerSession): LibraryWire =
-        LibraryWire(
-            session.ownerSpotifyUserId,
-            cacheService
-                .aggregateStatus(
-                    session.ownerSpotifyUserId,
-                ).name
-                .lowercase(),
-            store.sourceSnapshots(session.ownerSpotifyUserId).map {
-                it.toWire()
-            },
-            previewService
-                .definitions(
-                    session.ownerSpotifyUserId,
-                ).map { definitionWire(it, session.ownerSpotifyUserId) },
-        )
+        libraryService.library(session.ownerSpotifyUserId).let { view ->
+            logger.info {
+                "Library API response: owner=${view.ownerSpotifyUserId} sources=${view.sources.size} " +
+                    "definitions=${view.definitions.size} playlists=${view.playlists.size}"
+            }
+            LibraryWire(
+                view.ownerSpotifyUserId,
+                view.status.name.lowercase(),
+                view.sources.map { it.toWire() },
+                view.definitions.map { definitionWire(it, session.ownerSpotifyUserId) },
+                view.playlists.map { it.toWire() },
+            )
+        }
 
     private fun resolveDefinition(
         id: String,
@@ -649,17 +711,98 @@ class ApiApplication(
         }
     }
 
-    private fun requireSession(request: ApiRequest): ButlerSession {
-        val session =
-            sessionStore.find(request.headers.cookie("butler_session"))
-                ?: throw ApiFailure(401, "unauthorized", "A Butler session is required")
+    private fun resolveSession(request: ApiRequest): SessionResolution {
+        val cookieSessionId = request.headers.cookie("butler_session")
+        val existing = sessionStore.find(cookieSessionId)
+        if (existing != null) {
+            val refreshed = proactivelyRefresh(existing)
+            checkAllowedUser(refreshed)
+            return SessionResolution(refreshed, null)
+        }
+        if (request.method != "GET" || request.path != "/api/v1/session") {
+            throw ApiFailure(401, "unauthorized", "A Butler session is required")
+        }
+        val authenticator = sessionAuthenticator
+        if (authenticator == null && (authClient == null || spotifyUserIdLookup == null)) {
+            throw ApiFailure(401, "unauthorized", "A Butler session is required")
+        }
+        val rehydrated =
+            try {
+                sessionStore.rehydrate(
+                    cookieSessionId,
+                    refresh = { refreshToken ->
+                        refreshToken(refreshToken)
+                    },
+                    verifySpotifyUserId = { accessToken -> currentSpotifyUserId(accessToken) },
+                )
+            } catch (exception: SpotifyAuthClient.SpotifyAuthException) {
+                if (exception.spotifyError == "invalid_grant") sessionStore.invalidateSession(cookieSessionId)
+                throw ApiFailure(
+                    401,
+                    if (exception.spotifyError == "invalid_grant") "reauthorization_required" else "unauthorized",
+                    "Spotify authorization is no longer available",
+                    clearSessionCookie = true,
+                )
+            } catch (exception: IllegalArgumentException) {
+                sessionStore.invalidateSession(cookieSessionId)
+                throw ApiFailure(
+                    401,
+                    "reauthorization_required",
+                    "Spotify authorization is no longer available",
+                    clearSessionCookie = true,
+                )
+            } catch (exception: Exception) {
+                throw ApiFailure(502, "spotify_auth_failure", "Spotify session rehydration failed")
+            }
+                ?: throw ApiFailure(401, "unauthorized", "A Butler session is required", clearSessionCookie = true)
+        checkAllowedUser(rehydrated)
+        return SessionResolution(rehydrated, rehydrated.id)
+    }
+
+    private fun proactivelyRefresh(session: ButlerSession): ButlerSession {
+        if (authClient == null && sessionAuthenticator == null) return session
+        if (session.refreshToken == null) return session
+        return try {
+            sessionStore.refreshIfNeeded(session, Duration.ofMinutes(5)) { refreshToken ->
+                refreshToken(refreshToken)
+            }
+        } catch (exception: SpotifyAuthClient.SpotifyAuthException) {
+            if (exception.spotifyError == "invalid_grant") sessionStore.invalidate(session.ownerSpotifyUserId)
+            throw ApiFailure(
+                401,
+                if (exception.spotifyError == "invalid_grant") "reauthorization_required" else "spotify_auth_failure",
+                "Spotify authorization is no longer available",
+                clearSessionCookie = exception.spotifyError == "invalid_grant",
+            )
+        } catch (exception: Exception) {
+            throw ApiFailure(502, "spotify_auth_failure", "Spotify session refresh failed")
+        }
+    }
+
+    private fun checkAllowedUser(session: ButlerSession) {
         if (allowedSpotifyUserId != null &&
             session.ownerSpotifyUserId != allowedSpotifyUserId
         ) {
             throw ApiFailure(403, "user_not_allowed", "This Spotify account is not allowed")
         }
-        return session
     }
+
+    private fun refreshToken(refreshToken: String): TokenRefreshResult =
+        sessionAuthenticator?.refresh(refreshToken)
+            ?: authClient?.refreshAccessToken(refreshToken)?.let {
+                TokenRefreshResult(it.accessToken, it.expiresInSeconds, it.refreshToken)
+            }
+            ?: throw IllegalStateException("Spotify session refresh is not configured")
+
+    private fun currentSpotifyUserId(accessToken: String): String =
+        sessionAuthenticator?.currentUserId(accessToken)
+            ?: spotifyUserIdLookup?.invoke(accessToken)
+            ?: throw IllegalStateException("Spotify identity lookup is not configured")
+
+    private data class SessionResolution(
+        val session: ButlerSession,
+        val rotatedSessionId: String?,
+    )
 
     private fun requireStateChange(
         request: ApiRequest,
@@ -710,7 +853,11 @@ class ApiApplication(
         }
 
     private fun sessionCookie(sessionId: String) =
-        "butler_session=$sessionId; Path=/; Max-Age=43200; SameSite=Lax; HttpOnly" +
+        "butler_session=$sessionId; Path=/; Max-Age=$SESSION_COOKIE_MAX_AGE_SECONDS; SameSite=Strict; HttpOnly" +
+            if (secureCookies) "; Secure" else ""
+
+    private fun clearSessionCookie() =
+        "butler_session=; Path=/; Max-Age=0; SameSite=Strict; HttpOnly" +
             if (secureCookies) "; Secure" else ""
 
     private inline fun <reified T> json(
@@ -724,6 +871,8 @@ class ApiApplication(
     ) = ApiResponse(
         failure.status,
         apiJson.encodeToString(ErrorEnvelope(failure.code, failure.message, requestId, failure.details)),
+        mapOf("Content-Type" to "application/json; charset=utf-8") +
+            if (failure.clearSessionCookie) mapOf("Set-Cookie" to clearSessionCookie()) else emptyMap(),
     )
 
     private fun newRequestId() =
@@ -751,6 +900,7 @@ class ApiApplication(
     private fun ApiResponse.withRequestId(requestId: String) = copy(headers = headers + ("X-Request-Id" to requestId))
 
     private companion object {
+        const val SESSION_COOKIE_MAX_AGE_SECONDS = 15_552_000
         val TRACK_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,200}")
     }
 }
@@ -764,6 +914,7 @@ private data class ApiFailure(
     val code: String,
     override val message: String,
     val details: Map<String, String> = emptyMap(),
+    val clearSessionCookie: Boolean = false,
 ) : RuntimeException(message)
 
 private fun com.philipwilcox.spotifybutler.service.CacheSourceSnapshot.toWire() =
@@ -778,6 +929,25 @@ private fun com.philipwilcox.spotifybutler.service.CacheSourceSnapshot.toWire() 
         lastErrorCode,
         lastErrorAt?.toString(),
     )
+
+private fun com.philipwilcox.spotifybutler.service.LibraryPlaylistSummary.toWire() =
+    LibraryPlaylistWire(
+        spotifyPlaylistId,
+        name,
+        description,
+        href,
+        uri,
+        displayUrl,
+        declaredItemCount,
+        cachedPlayableTrackCount,
+        contentSourceKey,
+        contentStatus.name.lowercase(),
+        sourceRevision,
+        lastSyncedAt?.toString(),
+    )
+
+private fun com.philipwilcox.spotifybutler.service.LibraryPlaylistDetail.toWire() =
+    LibraryPlaylistDetailWire(summary.toWire(), trackIds)
 
 private fun com.philipwilcox.spotifybutler.service.SourceDependency.toWire() =
     SourceDependencyWire(

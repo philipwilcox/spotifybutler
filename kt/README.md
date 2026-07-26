@@ -4,12 +4,31 @@ This service performs Spotify Authorization Code login and caches Spotify librar
 
 1. Copy `secrets.properties.example` to the ignored `secrets.properties` and fill in the Spotify client ID and secret.
 2. Configure the Spotify application redirect URI exactly as `http://127.0.0.1:8888/callback`.
-3. From the repository root, run `./kt/gradlew -p kt run`.
-4. Visit `http://127.0.0.1:8888/start`. After approval, the callback creates the opaque Butler session cookie and
+3. From the repository root, install and build the same-origin studio:
+
+   ```sh
+   npm --prefix vue install
+   npm --prefix vue run build
+   ```
+
+4. From the repository root, run `./kt/gradlew -p kt run`. The Gradle `run` task rebuilds the Vue bundle automatically.
+5. Visit `http://127.0.0.1:8888/`. Choose **Connect Spotify** if the session is not active. After approval, the
+   callback creates the opaque Butler session cookie and
    redirects to the validated relative `returnTo` path (default `/`).
+
+The Kotlin service serves the built bundle from `vue/dist` by default. Set `spotify.frontendDirectory` or
+`SPOTIFY_BUTLER_FRONTEND_DIRECTORY` when the bundle is stored elsewhere. A missing `index.html` returns an actionable
+build-required response. The exact Spotify callback remains `http://127.0.0.1:8888/callback`.
 
 The default database is `kt/spotify.db` when launched from the repository root (or `spotify.db` when launched from
 inside `kt/`). The normal `/start` flow establishes a session without running a full refresh.
+
+Authentication durability: SQLite stores one AES-GCM protected refresh token per Spotify user and opaque browser
+session metadata. The protection key is derived from the Spotify client secret, so the database and the ignored secrets
+file must both have restrictive operating-system permissions. Access tokens, CSRF tokens, and OAuth state are never
+persisted. The six-month `HttpOnly; SameSite=Strict` `butler_session` cookie contains only the local opaque session ID;
+it is an application convenience and does not extend Spotify's refresh-token lifetime. A missing in-memory session is
+rehydrated from SQLite on `GET /api/v1/session`, with a Spotify identity check and cookie rotation.
 
 ## Legacy one-shot run
 

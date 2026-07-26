@@ -17,6 +17,7 @@ import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -33,9 +34,10 @@ class ButlerHttpServer(
     private val callbackHttpsRequired: Boolean = false,
     private val trustedHosts: Set<String> = setOf("127.0.0.1:8888", "localhost:8888"),
     private val trustedProxyAddresses: Set<String> = emptySet(),
+    private val frontendDirectory: Path = Path.of("vue", "dist"),
 ) {
     private val logger = KotlinLogging.logger {}
-    private val sessionStore = SessionStore()
+    private val sessionStore = SessionStore(authStore = store)
     private val apiApplication =
         ApiApplication(
             cacheService = cacheService,
@@ -73,13 +75,8 @@ class ButlerHttpServer(
                     path == "/health" -> health(exchange)
                     path == "/start" -> start(exchange)
                     path == "/callback" -> callback(exchange)
-                    path.startsWith("/api/v1/") -> api(exchange)
-                    else ->
-                        json(
-                            exchange,
-                            HttpURLConnection.HTTP_NOT_FOUND,
-                            errorJson("not_found", "Route not found", requestId),
-                        )
+                    path == "/api/v1" || path.startsWith("/api/v1/") -> api(exchange)
+                    else -> frontend(exchange, requestId)
                 }
         } catch (failure: RequestFailure) {
             status = json(exchange, failure.status, errorJson("request_rejected", failure.message, requestId))
@@ -156,7 +153,7 @@ class ButlerHttpServer(
                 errorJson("user_not_allowed", "This Spotify account is not allowed", requestId(exchange)),
             )
         }
-        val session = sessionStore.create(user.id, token.accessToken, token.refreshToken)
+        val session = sessionStore.create(user.id, token.accessToken, token.refreshToken, token.expiresInSeconds)
         exchange.responseHeaders.add("Set-Cookie", clearStateCookie())
         exchange.responseHeaders.add("Set-Cookie", sessionCookie(session.id))
         exchange.responseHeaders.add("Location", authorization.returnTo)
@@ -177,7 +174,52 @@ class ButlerHttpServer(
             )
         val response = apiApplication.handle(request)
         response.headers.forEach { (name, value) -> exchange.responseHeaders.set(name, value) }
+        exchange.responseHeaders.set("Cache-Control", "no-store")
         return json(exchange, response.status, response.body)
+    }
+
+    private fun frontend(
+        exchange: HttpExchange,
+        requestId: String,
+    ): Int {
+        requireGet(exchange)
+        val resolver = FrontendAssetResolver(frontendDirectory)
+        if (resolver.isUnsafe(exchange.requestURI.rawPath)) {
+            throw RequestFailure(HttpURLConnection.HTTP_BAD_REQUEST, "Invalid frontend asset path")
+        }
+        if (!java.nio.file.Files
+                .isRegularFile(frontendDirectory.resolve("index.html"))
+        ) {
+            return frontendBuildRequired(exchange, requestId)
+        }
+        val asset = resolver.resolve(exchange.requestURI.rawPath)
+        if (asset == null) {
+            return json(
+                exchange,
+                HttpURLConnection.HTTP_NOT_FOUND,
+                errorJson("not_found", "Frontend asset not found", requestId),
+            )
+        }
+        exchange.responseHeaders.set("Content-Type", asset.contentType)
+        exchange.responseHeaders.set("Cache-Control", asset.cacheControl)
+        exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, asset.bytes.size.toLong())
+        exchange.responseBody.use { it.write(asset.bytes) }
+        return HttpURLConnection.HTTP_OK
+    }
+
+    private fun frontendBuildRequired(
+        exchange: HttpExchange,
+        requestId: String,
+    ): Int {
+        val message =
+            "Frontend build is missing. Run `npm --prefix vue install && npm --prefix vue run build` before starting Spotify Butler."
+        exchange.responseHeaders.set("Content-Type", "text/plain; charset=utf-8")
+        exchange.responseHeaders.set("Cache-Control", "no-store")
+        exchange.responseHeaders.set("X-Request-Id", requestId)
+        val bytes = message.toByteArray(StandardCharsets.UTF_8)
+        exchange.sendResponseHeaders(HttpURLConnection.HTTP_UNAVAILABLE, bytes.size.toLong())
+        exchange.responseBody.use { it.write(bytes) }
+        return HttpURLConnection.HTTP_UNAVAILABLE
     }
 
     private fun readBoundedBody(exchange: HttpExchange): String? {
@@ -226,7 +268,8 @@ class ButlerHttpServer(
 
     private fun clearStateCookie(): String = cookie(SpotifyAuthClient.STATE_COOKIE, "", 0, httpOnly = true)
 
-    private fun sessionCookie(sessionId: String): String = cookie("butler_session", sessionId, 43_200, httpOnly = true)
+    private fun sessionCookie(sessionId: String): String =
+        cookie("butler_session", sessionId, SESSION_COOKIE_MAX_AGE_SECONDS, httpOnly = true)
 
     private fun cookie(
         name: String,
@@ -235,7 +278,9 @@ class ButlerHttpServer(
         httpOnly: Boolean,
     ): String =
         buildString {
-            append("$name=$value; Path=/; Max-Age=$maxAge; SameSite=Lax")
+            append(
+                "$name=$value; Path=/; Max-Age=$maxAge; SameSite=${if (name == "butler_session") "Strict" else "Lax"}",
+            )
             if (httpOnly) append("; HttpOnly")
             if (secureCookies) append("; Secure")
         }
@@ -270,6 +315,7 @@ class ButlerHttpServer(
 
     companion object {
         private const val MAX_REQUEST_BYTES = 1_048_576
+        private const val SESSION_COOKIE_MAX_AGE_SECONDS = 15_552_000
     }
 
     private fun newRequestId(): String = "req-${UUID.randomUUID()}"
