@@ -186,6 +186,13 @@ CREATE TABLE user_playlist_definition_items (
         REFERENCES user_playlist_definitions(owner_spotify_user_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE playlist_recipe_preferences (
+    owner_spotify_user_id TEXT NOT NULL,
+    definition_id TEXT NOT NULL,
+    shuffle_after_generation INTEGER NOT NULL,
+    PRIMARY KEY (owner_spotify_user_id, definition_id)
+);
+
 CREATE INDEX playlist_items_owner_playlist_position
     ON playlist_items (owner_spotify_user_id, playlist_id, position);
 

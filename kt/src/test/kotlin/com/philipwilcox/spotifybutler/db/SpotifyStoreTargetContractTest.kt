@@ -3,6 +3,7 @@ package com.philipwilcox.spotifybutler.db
 import com.philipwilcox.spotifybutler.service.CandidateSource
 import com.philipwilcox.spotifybutler.service.OrderingPolicy
 import com.philipwilcox.spotifybutler.service.PlaylistRecipe
+import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.RankingStrategy
 import com.philipwilcox.spotifybutler.service.SelectionPolicy
 import com.philipwilcox.spotifybutler.spotify.SavedTrack
@@ -19,9 +20,42 @@ import kotlin.test.assertNotNull
 
 class SpotifyStoreTargetContractTest {
     @Test
+    fun bulkPlaylistPersistencePreservesOrderDuplicatesAndValidatesBeforeDelete() {
+        val path = Files.createTempDirectory("bulk-playlist-persistence-").resolve("cache.db")
+        val tracks = (1..1001).map { track("track-$it") }
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    savedTracks = tracks.map { SavedTrack(null, it) },
+                    topTracks = emptyList(),
+                    topArtists = emptyList(),
+                    playlists = emptyList(),
+                    playlistTracks = emptyList(),
+                ),
+                10L,
+                "owner",
+            )
+            store.saveManagedPlaylist("definition", "playlist", "owner", 10L)
+            val requested = tracks.map(SpotifyTrack::id) + "track-1"
+
+            PublishOperationLog.with("publish-adopt", "flow-bulk") {
+                store.publishPlaylistTrackIds("playlist", requested, 20L, "owner", "snapshot-1")
+            }
+
+            assertEquals(requested, store.playlistItems("playlist", "owner").mapNotNull { it.itemId })
+            assertEquals("snapshot-1", store.managedPlaylist("definition", "owner")?.lastSeenSnapshotId)
+
+            assertFailsWith<IllegalArgumentException> {
+                store.publishPlaylistTrackIds("playlist", listOf("track-2", "missing"), 30L, "owner")
+            }
+            assertEquals(requested, store.playlistItems("playlist", "owner").mapNotNull { it.itemId })
+        }
+    }
+
+    @Test
     fun schemaVersionAndLegacyTables() {
         val path = Files.createTempDirectory("target-schema-").resolve("cache.db")
-        SpotifyStore.open(path).use { store -> assertEquals(2, store.schemaVersion()) }
+        SpotifyStore.open(path).use { store -> assertEquals(3, store.schemaVersion()) }
         DriverManager.getConnection("jdbc:sqlite:" + path).use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table'").use { result ->
@@ -31,6 +65,7 @@ class SpotifyStoreTargetContractTest {
                     assertEquals(true, "cache_source_sync" in tables)
                     assertEquals(true, "spotify_auth_grants" in tables)
                     assertEquals(true, "browser_sessions" in tables)
+                    assertEquals(true, "playlist_recipe_preferences" in tables)
                 }
             }
         }
@@ -51,8 +86,25 @@ class SpotifyStoreTargetContractTest {
             }
         }
         SpotifyStore.open(path).use { store ->
-            assertEquals(2, store.schemaVersion())
+            assertEquals(3, store.schemaVersion())
             assertEquals(listOf("migration-track"), store.songs("migration-owner").map(SpotifyTrack::id))
+            assertEquals(null, store.playlistRecipePreference("RECENT_LIKED_100", "migration-owner"))
+        }
+    }
+
+    @Test
+    fun recipePreferenceMigrationFromSchemaTwoAddsTheNewTable() {
+        val path = Files.createTempDirectory("recipe-preference-migration-").resolve("cache.db")
+        SpotifyStore.open(path).use { }
+        DriverManager.getConnection("jdbc:sqlite:" + path).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DROP TABLE playlist_recipe_preferences")
+                statement.execute("UPDATE schema_version SET version = 2 WHERE singleton_id = 1")
+            }
+        }
+        SpotifyStore.open(path).use { store ->
+            assertEquals(3, store.schemaVersion())
+            assertEquals(null, store.playlistRecipePreference("RECENT_LIKED_100", "owner"))
         }
     }
 
@@ -109,6 +161,21 @@ class SpotifyStoreTargetContractTest {
             assertEquals(recipe, saved.recipe)
             assertEquals(listOf("item-a"), saved.trackIds)
             assertEquals(null, store.userPlaylistDefinition("same", "owner-b"))
+        }
+    }
+
+    @Test
+    fun recipePreferenceIsOwnerScopedAndSurvivesReopen() {
+        val path = Files.createTempDirectory("recipe-preferences-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            store.savePlaylistRecipePreference("RECENT_LIKED_100", "owner-a", true)
+            store.savePlaylistRecipePreference("RECENT_LIKED_100", "owner-b", false)
+            assertEquals(true, store.playlistRecipePreference("RECENT_LIKED_100", "owner-a"))
+            assertEquals(false, store.playlistRecipePreference("RECENT_LIKED_100", "owner-b"))
+        }
+        SpotifyStore.openReadOnly(path).use { store ->
+            assertEquals(true, store.playlistRecipePreference("RECENT_LIKED_100", "owner-a"))
+            assertEquals(null, store.playlistRecipePreference("RECENT_LIKED_100", "owner-c"))
         }
     }
 

@@ -2,20 +2,30 @@
 
 The notes here should be IGNORED for any current work, and only represent ideas for future directions to explore.
 
-## Cleanup
+## Colors
 
-We won't need migrations, we'll just delete all the legacy schemas and datas and start fresh.
+Revisit the SVG colors vs the element colors here which are more muted.
 
-## API Updates
+## Replace Docker Workflow
 
-Make changes to be up to date with the 2026 changes to the Spotify API.
+Let's publish this to the docker service to run from my laptop server!
+
+## Album Art and Track Info Layout
+
+Improve and add this
+
+## Bulk Sync
+
+Come up with a good flow around "republish all generated playlists" or multi-select of them to enable backend parallization of the sync.
 
 ## Editable Playlists
 
-Instead of deterministic playlist preview and generation, we want *fully client-editable* playlists, which suggests
-moving towards a model where we return a list of song identifiers, and POST back the final ordered list after the user
-makes any desired edits.
+Let's make this able to edit non-generated playlists in the library too, and do things like shuffle their ordering with our shuffle logic.
 
-To minimize payload size, this suggests moving towards a ID-only playlist API and a separate song enrichment API that
-can take either just one ID or a list of ID for returning the full info, that a client could cache instead of needing
-to send back and forth every time.
+## Styling
+
+Revisit all UX elements. Make tab and angled button styles like my original proposal.
+
+## Feedback
+
+When we know how many paginated POSTs to make to sync playlists, expose this back to the frontend as progress! (websockets?)

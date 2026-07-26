@@ -8,6 +8,7 @@ fun playlistRecipe(block: PlaylistRecipeBuilder.() -> Unit): PlaylistRecipe =
 
 @PlaylistRecipeDsl
 class PlaylistRecipeBuilder {
+    private var shuffleAfterGeneration: Boolean = true
     private var source: CandidateSource? = null
     private var predicate: TrackPredicate = TrackPredicate.All
     private var distinctness: DistinctnessPolicy = DistinctnessPolicy.By(CandidateIdentity.SpotifyUri)
@@ -38,8 +39,13 @@ class PlaylistRecipeBuilder {
         ordering = orderingPolicy
     }
 
+    fun shuffleAfterGeneration(enabled: Boolean) {
+        shuffleAfterGeneration = enabled
+    }
+
     fun build(): PlaylistRecipe =
         PlaylistRecipe(
+            shuffleAfterGeneration = shuffleAfterGeneration,
             source = requireNotNull(source) { "A playlist recipe must define a source" },
             predicate = predicate,
             distinctness = distinctness,

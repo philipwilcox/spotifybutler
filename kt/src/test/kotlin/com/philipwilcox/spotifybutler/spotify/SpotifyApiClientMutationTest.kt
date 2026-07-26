@@ -1,43 +1,25 @@
 package com.philipwilcox.spotifybutler.spotify
 
+import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import java.net.URI
 import java.net.URLDecoder
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class SpotifyApiClientMutationTest {
     @Test
-    fun `playlist writes use current Spotify item resources and batch sizes`() {
+    fun `playlist replacement uses current Spotify item resources and batch sizes`() {
         val transport = RecordingMutationTransport()
         val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
-        val tracks = (1..205).map { track("track-$it") }
+        val trackIds = (1..205).map { "track-$it" }
 
-        client.addTracks("token", "playlist-id", tracks)
-        client.replaceTracks("token", "playlist-id", tracks)
-        client.replaceTracks("token", "playlist-id", emptyList())
+        client.replaceTrackIds("token", "playlist-id", trackIds)
+        client.replaceTrackIds("token", "playlist-id", emptyList())
 
-        assertEquals(listOf("POST", "POST", "POST", "PUT", "POST", "POST", "PUT"), transport.methods)
-        assertEquals(listOf(100, 100, 5, 100, 100, 5, 0), transport.uriCounts)
-    }
-
-    @Test
-    fun `saved track removal uses distinct IDs in batches of fifty`() {
-        val transport = RecordingMutationTransport()
-        val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
-        val ids = (1..101).map { "track-$it" } + "track-1"
-
-        client.removeSavedTracks("token", ids)
-
-        assertEquals(listOf("DELETE", "DELETE", "DELETE"), transport.methods)
-        assertEquals(listOf(40, 40, 21), transport.uriCounts)
-        assertEquals(
-            listOf("/v1/me/library", "/v1/me/library", "/v1/me/library"),
-            transport.uris.map(URI::create).map {
-                it.path
-            },
-        )
-        assertEquals(true, transport.uris.all { it.contains("uris=") })
+        assertEquals(listOf("PUT", "POST", "POST", "PUT"), transport.methods)
+        assertEquals(listOf(100, 100, 5, 0), transport.uriCounts)
     }
 
     @Test
@@ -45,17 +27,43 @@ class SpotifyApiClientMutationTest {
         val transport = RecordingMutationTransport()
         val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
 
-        assertEquals("created-playlist", client.createPlaylist("token", "Generated Playlist"))
+        assertEquals(
+            "created-playlist",
+            client.createPlaylistMetadata("token", "Generated Playlist").id,
+        )
         assertEquals("https://api.example.test/v1/me/playlists", transport.uris[0].substringBefore('?'))
 
         transport.failureStatus = 500
         assertFailsWith<IllegalArgumentException> {
-            client.addTracks("token", "playlist-id", listOf(track("failure")))
+            client.replaceTrackIds("token", "playlist-id", listOf("failure"))
         }
     }
 
-    private fun track(id: String) =
-        SpotifyTrack(id, id, "https://api.example.test/tracks/$id", "spotify:track:$id", "2026", "artist", "{}")
+    @Test
+    fun `authoritative playlist replacement uses the mutation snapshot without rereading playlist items`() {
+        val transport = RecordingMutationTransport()
+        val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
+
+        val state = client.replaceTrackIdsAuthoritative("token", "playlist-id", listOf("track-1", "track-2"))
+
+        assertEquals(listOf("track-1", "track-2"), state.trackIds)
+        assertEquals("snapshot-write", state.snapshotId)
+        assertEquals(listOf("PUT"), transport.methods)
+    }
+
+    @Test
+    fun `publish logging context counts replacement calls and records the last step`() {
+        val transport = RecordingMutationTransport()
+        val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
+
+        PublishOperationLog.with("publish-adopt", "flow-1", expectedExternalCalls = 2) { log ->
+            client.replaceTrackIds("token", "playlist-id", (1..101).map { "track-$it" })
+            assertContains(log.logFields(), "flowId=flow-1")
+            assertContains(log.logFields(), "step=2 of 2")
+            assertContains(log.logFields(), "stepDurationMs=")
+            assertContains(log.logFields(), "elapsedMs=")
+        }
+    }
 }
 
 private class RecordingMutationTransport : SpotifyHttpTransport {
@@ -81,7 +89,10 @@ private class RecordingMutationTransport : SpotifyHttpTransport {
         body: String,
     ): SpotifyHttpResponse {
         record("POST", uri, body)
-        return SpotifyHttpResponse(failureStatus ?: 201, "{\"id\":\"created-playlist\"}")
+        return SpotifyHttpResponse(
+            failureStatus ?: 201,
+            "{\"id\":\"created-playlist\",\"snapshot_id\":\"snapshot-write\"}",
+        )
     }
 
     override fun put(
@@ -90,7 +101,7 @@ private class RecordingMutationTransport : SpotifyHttpTransport {
         body: String,
     ): SpotifyHttpResponse {
         record("PUT", uri, body)
-        return SpotifyHttpResponse(failureStatus ?: 201, "{}")
+        return SpotifyHttpResponse(failureStatus ?: 201, "{\"snapshot_id\":\"snapshot-write\"}")
     }
 
     override fun delete(

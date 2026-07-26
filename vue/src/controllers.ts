@@ -1,10 +1,22 @@
 import type { ButlerApi } from './api'
 import { reactive } from 'vue'
-import type { CurrentDestination, Definition, Library, LibraryPlaylist, Preview, SelectionState, Session, Song } from './types'
+import type { CurrentDestination, Definition, Library, LibraryPlaylist, Preview, PublishPlan, SelectionState, Session, Song } from './types'
 
 type ErrorLike = { status?: number }
 
 const errorMessage = (error: unknown, fallback: string): string => error instanceof Error ? error.message : fallback
+
+const secureRandomInt = (exclusiveUpperBound: number): number => {
+  if (!Number.isSafeInteger(exclusiveUpperBound) || exclusiveUpperBound <= 0 || exclusiveUpperBound > 0x1_0000_0000) {
+    throw new RangeError('Random bound must be a positive integer no larger than 2^32')
+  }
+  const limit = 0x1_0000_0000 - (0x1_0000_0000 % exclusiveUpperBound)
+  const value = new Uint32Array(1)
+  do {
+    crypto.getRandomValues(value)
+  } while (value[0] >= limit)
+  return value[0] % exclusiveUpperBound
+}
 
 export class SessionController {
   state = reactive<{ session: Session | null; loading: boolean; error: string | null }>({ session: null, loading: false, error: null })
@@ -102,7 +114,7 @@ export class StudioController {
     loading: boolean
     error: string | null
     conflict: boolean
-    oneTimeResult: string | null
+    publishPlan: PublishPlan | null
   }>({
     activeKind: null,
     definition: null,
@@ -113,12 +125,16 @@ export class StudioController {
     loading: false,
     error: null,
     conflict: false,
-    oneTimeResult: null,
+    publishPlan: null,
   })
   private operationSerial = 0
   private activeOperations = 0
 
-  constructor(private readonly api: ButlerApi, private readonly seedGenerator: () => string = () => crypto.randomUUID()) {}
+  constructor(
+    private readonly api: ButlerApi,
+    private readonly seedGenerator: () => string = () => crypto.randomUUID(),
+    private readonly randomInt: (exclusiveUpperBound: number) => number = secureRandomInt,
+  ) {}
 
   async load(definition: Definition): Promise<void> { await this.selectDefinition(definition) }
 
@@ -197,6 +213,24 @@ export class StudioController {
     }
   }
 
+  async updateShuffleAfterGeneration(enabled: boolean): Promise<boolean> {
+    if (this.state.activeKind !== 'definition' || !this.state.definition) return false
+    const serial = this.beginOperation()
+    const definitionId = this.state.definition.definitionId
+    this.state.error = null
+    try {
+      const definition = await this.api.updateRecipeSettings(definitionId, enabled)
+      if (!this.isCurrent(serial)) return false
+      this.state.definition = definition
+      return true
+    } catch (error) {
+      if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Recipe setting update failed')
+      return false
+    } finally {
+      this.finishOperation()
+    }
+  }
+
   moveTrack(index: number, direction: -1 | 1): void {
     if (this.state.activeKind !== 'definition') return
     const target = index + direction
@@ -216,25 +250,58 @@ export class StudioController {
     this.state.selection = { ...this.state.selection, dirty: true, orderedIds: ids }
   }
 
+  shuffleTrackOrder(): void {
+    if (this.state.activeKind !== 'definition' || this.state.selection.orderedIds.length < 2) return
+    this.operationSerial += 1
+    const ids = [...this.state.selection.orderedIds]
+    for (let index = ids.length - 1; index > 0; index -= 1) {
+      const target = this.randomInt(index + 1)
+      ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    }
+    this.state.selection = { ...this.state.selection, dirty: true, orderedIds: ids }
+  }
+
   removeTrack(index: number): void {
     if (this.state.activeKind !== 'definition' || index < 0 || index >= this.state.selection.orderedIds.length) return
     this.operationSerial += 1
     this.state.selection = { ...this.state.selection, dirty: true, orderedIds: this.state.selection.orderedIds.filter((_, itemIndex) => itemIndex !== index) }
   }
 
-  async createDestination(input: { name?: string; description?: string; public?: boolean; collaborative?: boolean } = {}): Promise<void> {
-    if (this.state.activeKind !== 'definition' || !this.state.definition) return
+  async planPublish(): Promise<PublishPlan | null> {
+    if (this.state.activeKind !== 'definition' || !this.state.definition) return null
     const serial = this.beginOperation()
     const definitionId = this.state.definition.definitionId
     this.state.error = null
     try {
-      const destination = await this.api.createDestination(definitionId, input)
+      const plan = await this.api.planPublish(definitionId)
       if (this.isCurrent(serial)) {
-        this.state.definition = { ...this.state.definition, destination }
-        this.state.current = null
+        this.state.publishPlan = plan
+        return plan
       }
     } catch (error) {
-      if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Destination creation failed')
+      if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Publish planning failed')
+    } finally {
+      this.finishOperation()
+    }
+    return null
+  }
+
+  async publish(action: 'create' | 'adopt', spotifyPlaylistId?: string): Promise<boolean> {
+    if (this.state.activeKind !== 'definition' || !this.state.definition) return false
+    const serial = this.beginOperation()
+    const definition = this.state.definition
+    this.state.error = null
+    try {
+      const destination = await this.api.publishDestination(definition.definitionId, action, this.state.selection.orderedIds, spotifyPlaylistId, this.state.publishPlan?.publishFlowId)
+      if (!this.isCurrent(serial)) return false
+      this.state.definition = { ...definition, destination }
+      this.state.current = null
+      this.state.selection = { ...this.state.selection, dirty: false }
+      this.state.publishPlan = null
+      return true
+    } catch (error) {
+      if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Publish failed')
+      return false
     } finally {
       this.finishOperation()
     }
@@ -242,7 +309,7 @@ export class StudioController {
 
   async sync(): Promise<boolean> {
     if (this.state.activeKind !== 'definition' || !this.state.definition?.destination) {
-      this.state.error = 'Create a Butler destination before recurring synchronization.'
+      this.state.error = 'Publish a destination before recurring synchronization.'
       return false
     }
     const serial = this.beginOperation()
@@ -263,28 +330,6 @@ export class StudioController {
         if ((error as ErrorLike).status === 409) this.state.conflict = true
         this.state.error = errorMessage(error, 'Synchronization failed')
       }
-      return false
-    } finally {
-      this.finishOperation()
-    }
-  }
-
-  async oneTimeUpdate(playlistId: string): Promise<boolean> {
-    if (this.state.activeKind !== 'definition' || !this.state.definition || !playlistId.trim()) {
-      this.state.error = 'A Spotify playlist ID is required.'
-      return false
-    }
-    const serial = this.beginOperation()
-    const definitionId = this.state.definition.definitionId
-    this.state.error = null
-    try {
-      const result = await this.api.oneTimeUpdate(definitionId, playlistId.trim(), this.state.selection.orderedIds)
-      if (!this.isCurrent(serial)) return false
-      if (result.tracked !== false) throw new Error('Server returned an invalid tracked state')
-      this.state.oneTimeResult = `Updated ${result.spotifyPlaylistId}; this playlist remains unmanaged (tracked=false).`
-      return true
-    } catch (error) {
-      if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'One-time update failed')
       return false
     } finally {
       this.finishOperation()

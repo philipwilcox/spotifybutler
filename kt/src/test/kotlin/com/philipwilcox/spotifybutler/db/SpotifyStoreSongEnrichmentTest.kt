@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 
 class SpotifyStoreSongEnrichmentTest {
     @Test
-    fun `bounded enrichment returns only requested songs in request occurrence order`() {
+    fun `bounded enrichment returns unique requested songs in first-seen order`() {
         val path = Files.createTempDirectory("spotify-song-enrichment-").resolve("cache.db")
 
         SpotifyStore.open(path).use { store ->
@@ -25,7 +25,7 @@ class SpotifyStoreSongEnrichmentTest {
             )
 
             assertEquals(
-                listOf("track-two", "track-one", "track-two"),
+                listOf("track-two", "track-one"),
                 store.songEnrichment(listOf("track-two", "missing", "track-one", "track-two")).map { it.id },
             )
             assertEquals("track-one", store.songEnrichment("track-one")?.id)

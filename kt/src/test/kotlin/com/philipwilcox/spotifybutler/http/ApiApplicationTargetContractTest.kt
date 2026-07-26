@@ -28,25 +28,82 @@ class ApiApplicationTargetContractTest {
     }
 
     @Test
-    fun destinationCreationAndOneTimeUpdateHaveSeparateSideEffects() {
+    fun publishPlansAndPublishesManagedDestination() {
         withApplication { app, session, gateway, store ->
-            val create = app.handle(request("POST", "/api/v1/playlists/RECENT_LIKED_100/destinations", session, "{}"))
-            assertEquals(201, create.status, create.body)
-            assertEquals(1, store.managedPlaylists(OWNER).size)
-            val mappingBefore = store.managedPlaylist("RECENT_LIKED_100", OWNER)
-            val oneTime =
+            val plan = app.handle(request("POST", "/api/v1/playlists/RECENT_LIKED_100/publish-plan", session, "{}"))
+            assertEquals(200, plan.status, plan.body)
+            assertTrue(plan.body.contains("\"action\":\"create\""))
+            assertTrue(plan.body.contains("\"publishFlowId\":\""))
+            val flowId = Regex("\\\"publishFlowId\\\":\\\"([^\\\"]+)\\\"").find(plan.body)?.groupValues?.get(1)
+            require(!flowId.isNullOrBlank())
+            val publish =
                 app.handle(
                     request(
                         "POST",
-                        "/api/v1/playlists/RECENT_LIKED_100/one-time-updates",
+                        "/api/v1/playlists/RECENT_LIKED_100/publish",
                         session,
-                        "{\"spotifyPlaylistId\":\"existing-playlist\",\"trackIds\":[\"one\"]}",
+                        "{\"action\":\"create\",\"trackIds\":[\"one\"],\"publishFlowId\":\"$flowId\"}",
                     ),
                 )
-            assertEquals(200, oneTime.status, oneTime.body)
-            assertTrue(oneTime.body.contains("\"tracked\":false"))
-            assertEquals(mappingBefore, store.managedPlaylist("RECENT_LIKED_100", OWNER))
-            assertEquals("existing-playlist", gateway.lastPlaylistId)
+            assertEquals(200, publish.status, publish.body)
+            assertEquals(flowId, plan.headers["X-Spotify-Butler-Publish-Flow-Id"])
+            assertEquals(flowId, publish.headers["X-Spotify-Butler-Publish-Flow-Id"])
+            assertEquals(1, store.managedPlaylists(OWNER).size)
+            assertEquals("created-playlist", store.managedPlaylist("RECENT_LIKED_100", OWNER)?.spotifyPlaylistId)
+            assertEquals("created-playlist", gateway.lastPlaylistId)
+            assertEquals(listOf("one"), gateway.tracks)
+            assertEquals(
+                404,
+                app.handle(request("POST", "/api/v1/playlists/RECENT_LIKED_100/destinations", session, "{}")).status,
+            )
+            assertEquals(
+                404,
+                app
+                    .handle(
+                        request(
+                            "POST",
+                            "/api/v1/playlists/RECENT_LIKED_100/one-time-updates",
+                            session,
+                            "{}",
+                        ),
+                    ).status,
+            )
+        }
+    }
+
+    @Test
+    fun recipeSettingsCanUpdateBuiltInShufflePreference() {
+        withApplication { app, session, _, store ->
+            val response =
+                app.handle(
+                    request(
+                        "PUT",
+                        "/api/v1/playlists/RECENT_LIKED_100/recipe-settings",
+                        session,
+                        "{\"shuffleAfterGeneration\":true}",
+                    ),
+                )
+            assertEquals(200, response.status, response.body)
+            assertTrue(response.body.contains("\"shuffleAfterGeneration\":true"))
+            assertEquals(true, store.playlistRecipePreference("RECENT_LIKED_100", OWNER))
+        }
+    }
+
+    @Test
+    fun bulkSongsReturnsUniqueKnownTracksAndMissingIdsInRequestOrder() {
+        withApplication { app, session, _, _ ->
+            val response =
+                app.handle(
+                    request(
+                        "POST",
+                        "/api/v1/songs/bulk",
+                        session,
+                        "{\"trackIds\":[\"missing\",\"one\",\"one\"]}",
+                    ),
+                )
+            assertEquals(200, response.status, response.body)
+            assertTrue(response.body.contains("\"items\":[{\"id\":\"one\""))
+            assertTrue(response.body.contains("\"missingIds\":[\"missing\"]"))
         }
     }
 
@@ -122,7 +179,7 @@ class ApiApplicationTargetContractTest {
 
         override fun createPlaylist(
             accessToken: String,
-            request: com.philipwilcox.spotifybutler.service.DestinationCreateRequest,
+            name: String,
         ) = "created-playlist"
     }
 

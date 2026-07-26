@@ -85,14 +85,37 @@ class PlaylistPreviewService(
     }
 
     fun definitions(ownerSpotifyUserId: String): List<PlaylistDefinitionView> =
-        builtIns() + store.userPlaylistDefinitions(ownerSpotifyUserId).map { it.toView() }
+        builtIns(ownerSpotifyUserId) + store.userPlaylistDefinitions(ownerSpotifyUserId).map { it.toView() }
+
+    fun updateShuffleAfterGeneration(
+        definitionId: String,
+        ownerSpotifyUserId: String,
+        enabled: Boolean,
+    ): PlaylistDefinitionView {
+        val ownerDefinition = store.userPlaylistDefinition(definitionId, ownerSpotifyUserId)
+        if (ownerDefinition != null) {
+            store.saveUserPlaylistDefinition(
+                ownerDefinition.copy(
+                    recipe = requireNotNull(ownerDefinition.recipe).copy(shuffleAfterGeneration = enabled),
+                ),
+            )
+            return requireNotNull(store.userPlaylistDefinition(definitionId, ownerSpotifyUserId)) {
+                "Playlist definition was not saved"
+            }.toView()
+        }
+        require(builtIns(ownerSpotifyUserId).any { it.definitionId == definitionId }) {
+            "Playlist definition not found"
+        }
+        store.savePlaylistRecipePreference(definitionId, ownerSpotifyUserId, enabled)
+        return builtIns(ownerSpotifyUserId).first { it.definitionId == definitionId }
+    }
 
     fun resolve(
         definitionId: String,
         ownerSpotifyUserId: String,
     ): PlaylistDefinitionView =
         store.userPlaylistDefinition(definitionId, ownerSpotifyUserId)?.toView()
-            ?: builtIns().firstOrNull { it.definitionId == definitionId }
+            ?: builtIns(ownerSpotifyUserId).firstOrNull { it.definitionId == definitionId }
             ?: error("Playlist definition not found")
 
     fun sourceDependencies(
@@ -100,12 +123,16 @@ class PlaylistPreviewService(
         ownerSpotifyUserId: String,
     ): List<SourceDependency> = dependencies(definition.recipe, ownerSpotifyUserId)
 
-    private fun builtIns(): List<PlaylistDefinitionView> =
+    private fun builtIns(ownerSpotifyUserId: String): List<PlaylistDefinitionView> =
         PlaylistQueries
             .definitions(
                 clock.instant().atZone(java.time.ZoneOffset.UTC).year,
                 BUILT_IN_MIN_YEAR,
             ).map { definition ->
+                val recipe = definition.toPlaylistRecipe()
+                val shuffleAfterGeneration =
+                    store.playlistRecipePreference(definition.id.name, ownerSpotifyUserId)
+                        ?: recipe.shuffleAfterGeneration
                 PlaylistDefinitionView(
                     definition.id.name,
                     null,
@@ -114,7 +141,7 @@ class PlaylistPreviewService(
                     DefinitionKind.BUILT_IN,
                     false,
                     true,
-                    definition.toPlaylistRecipe(),
+                    recipe.copy(shuffleAfterGeneration = shuffleAfterGeneration),
                 )
             }
 

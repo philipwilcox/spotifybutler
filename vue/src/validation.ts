@@ -6,7 +6,7 @@ import type {
   Library,
   LibraryPlaylist,
   LibraryPlaylistDetail,
-  OneTimeUpdate,
+  PublishPlan,
   Preview,
   Session,
   Song,
@@ -92,8 +92,12 @@ const recipe = (value: unknown, path: string): Definition['recipe'] => {
   })
   checkNode(required(selection, 'rankBy', `${path}.selection`), `${path}.selection.rankBy`)
   checkNode(required(v, 'ordering', path), `${path}.ordering`)
+  const shuffleAfterGeneration = 'shuffleAfterGeneration' in v
+    ? bool(v.shuffleAfterGeneration, `${path}.shuffleAfterGeneration`)
+    : true
   return {
     schemaVersion: nonNegativeInteger(required(v, 'schemaVersion', path), `${path}.schemaVersion`),
+    shuffleAfterGeneration,
     source: v.source as Record<string, unknown>,
     predicate: v.predicate as Record<string, unknown>,
     distinctness: v.distinctness as Record<string, unknown>,
@@ -270,15 +274,27 @@ export const parseSongs = (value: unknown): { items: Song[]; missingIds: string[
   }
 }
 
-export const parseOneTimeUpdate = (value: unknown): OneTimeUpdate => {
-  const v = object(value, 'oneTimeUpdate')
-  if (required(v, 'tracked', 'oneTimeUpdate') !== false) fail('oneTimeUpdate.tracked', 'must be false')
+export const parsePublishPlan = (value: unknown): PublishPlan => {
+  const v = object(value, 'publishPlan')
+  const action = oneOf(required(v, 'action', 'publishPlan'), ['create', 'adopt', 'choose', 'blocked'] as const, 'publishPlan.action')
+  const candidates = array(required(v, 'candidates', 'publishPlan'), 'publishPlan.candidates').map((item, i) => {
+    const candidate = object(item, `publishPlan.candidates[${i}]`)
+    const itemCount = required(candidate, 'itemCount', `publishPlan.candidates[${i}]`)
+    return {
+      spotifyPlaylistId: string(required(candidate, 'spotifyPlaylistId', `publishPlan.candidates[${i}]`), `publishPlan.candidates[${i}].spotifyPlaylistId`),
+      name: string(required(candidate, 'name', `publishPlan.candidates[${i}]`), `publishPlan.candidates[${i}].name`),
+      description: nullableString(required(candidate, 'description', `publishPlan.candidates[${i}]`), `publishPlan.candidates[${i}].description`),
+      itemCount: itemCount === null ? null : nonNegativeInteger(itemCount, `publishPlan.candidates[${i}].itemCount`),
+      displayUrl: nullableString(required(candidate, 'displayUrl', `publishPlan.candidates[${i}]`), `publishPlan.candidates[${i}].displayUrl`),
+    }
+  })
   return {
-    spotifyPlaylistId: string(required(v, 'spotifyPlaylistId', 'oneTimeUpdate'), 'oneTimeUpdate.spotifyPlaylistId'),
-    trackIds: array(required(v, 'trackIds', 'oneTimeUpdate'), 'oneTimeUpdate.trackIds').map((item, i) => string(item, `oneTimeUpdate.trackIds[${i}]`)),
-    lastSeenSnapshotId: nullableString(required(v, 'lastSeenSnapshotId', 'oneTimeUpdate'), 'oneTimeUpdate.lastSeenSnapshotId'),
-    appliedAt: string(required(v, 'appliedAt', 'oneTimeUpdate'), 'oneTimeUpdate.appliedAt'),
-    tracked: false,
+    definitionId: string(required(v, 'definitionId', 'publishPlan'), 'publishPlan.definitionId'),
+    playlistName: string(required(v, 'playlistName', 'publishPlan'), 'publishPlan.playlistName'),
+    action,
+    candidates,
+    message: nullableString(required(v, 'message', 'publishPlan'), 'publishPlan.message'),
+    publishFlowId: string(required(v, 'publishFlowId', 'publishPlan'), 'publishPlan.publishFlowId'),
   }
 }
 

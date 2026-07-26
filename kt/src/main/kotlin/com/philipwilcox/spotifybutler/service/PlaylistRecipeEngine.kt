@@ -11,18 +11,26 @@ class PlaylistRecipeEngine {
     ): PlaylistGenerationResult {
         val canonicalRecipe = PlaylistRecipeCodec.canonicalize(recipe)
         val recipeRevision = PlaylistRecipeCodec.revision(canonicalRecipe)
+        val selectionRevision =
+            PlaylistRecipeCodec.revision(canonicalRecipe.copy(shuffleAfterGeneration = false))
         val eligible = candidates.filter { canonicalRecipe.predicate.matches(it, context) }
         val distinct = applyDistinctness(canonicalRecipe.distinctness, eligible)
-        val ranked = distinct.sortedWith(rankComparator(canonicalRecipe.selection.rankBy, seed, recipeRevision))
+        val ranked = distinct.sortedWith(rankComparator(canonicalRecipe.selection.rankBy, seed, selectionRevision))
         val selectedAndRejected = admit(ranked, canonicalRecipe.selection)
         val ordered =
             selectedAndRejected.selected.sortedWith(
-                orderComparator(canonicalRecipe.ordering, seed, recipeRevision),
+                orderComparator(canonicalRecipe.ordering, seed, selectionRevision),
             )
+        val generated =
+            if (canonicalRecipe.shuffleAfterGeneration) {
+                ordered.sortedWith(shuffleComparator(seed, recipeRevision))
+            } else {
+                ordered
+            }
         return PlaylistGenerationResult(
             candidates = eligible,
             distinctCandidates = distinct,
-            selected = ordered,
+            selected = generated,
             rejectedByQuota = selectedAndRejected.rejected,
         )
     }
@@ -132,6 +140,17 @@ class PlaylistRecipeEngine {
                         )
                 }
             comparison.takeUnless { it == 0 } ?: left.identity.compareTo(right.identity)
+        }
+
+    private fun shuffleComparator(
+        seed: ByteArray,
+        recipeRevision: String,
+    ): Comparator<CandidateTrack> =
+        Comparator { left, right ->
+            compareBytes(
+                shuffleRank(seed, recipeRevision, left),
+                shuffleRank(seed, recipeRevision, right),
+            ).takeUnless { it == 0 } ?: left.identity.compareTo(right.identity)
         }
 
     private fun compareRankValues(

@@ -15,8 +15,8 @@ import com.philipwilcox.spotifybutler.db.StoredPlaylistItem
 import com.philipwilcox.spotifybutler.db.StoredSong
 import com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition
 import com.philipwilcox.spotifybutler.service.AuthoritativePlaylistState
+import com.philipwilcox.spotifybutler.service.CacheSourceKey
 import com.philipwilcox.spotifybutler.service.DestinationConflictException
-import com.philipwilcox.spotifybutler.service.DestinationCreateRequest
 import com.philipwilcox.spotifybutler.service.LibraryViewService
 import com.philipwilcox.spotifybutler.service.MissingDestinationException
 import com.philipwilcox.spotifybutler.service.OwnerMismatchException
@@ -26,6 +26,8 @@ import com.philipwilcox.spotifybutler.service.PlaylistDestinationService
 import com.philipwilcox.spotifybutler.service.PlaylistPreview
 import com.philipwilcox.spotifybutler.service.PlaylistPreviewService
 import com.philipwilcox.spotifybutler.service.PlaylistRecipeCodec
+import com.philipwilcox.spotifybutler.service.PublishAction
+import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
@@ -54,9 +56,18 @@ interface PlaylistSyncGateway {
         trackIds: List<String>,
     )
 
+    fun replaceTracksAuthoritative(
+        accessToken: String,
+        playlistId: String,
+        trackIds: List<String>,
+    ): PlaylistRemoteState {
+        replaceTracks(accessToken, playlistId, trackIds)
+        return current(accessToken, playlistId)
+    }
+
     fun createPlaylist(
         accessToken: String,
-        request: DestinationCreateRequest,
+        name: String,
     ): String = error("Playlist creation is not supported")
 
     fun ownsPlaylist(
@@ -91,16 +102,21 @@ class SpotifyPlaylistSyncGateway(
         trackIds: List<String>,
     ) = apiClient.replaceTrackIds(accessToken, playlistId, trackIds)
 
+    override fun replaceTracksAuthoritative(
+        accessToken: String,
+        playlistId: String,
+        trackIds: List<String>,
+    ) = apiClient.replaceTrackIdsAuthoritative(accessToken, playlistId, trackIds).let {
+        PlaylistRemoteState(it.trackIds, it.snapshotId)
+    }
+
     override fun createPlaylist(
         accessToken: String,
-        request: DestinationCreateRequest,
+        name: String,
     ) = apiClient
         .createPlaylistMetadata(
             accessToken,
-            request.name ?: "Spotify Butler Playlist",
-            request.description,
-            request.public ?: false,
-            request.collaborative ?: false,
+            name,
         ).id
 
     override fun ownsPlaylist(
@@ -165,8 +181,8 @@ class ApiApplication(
         object : PlaylistDestinationGateway {
             override fun create(
                 accessToken: String,
-                request: DestinationCreateRequest,
-            ) = syncGateway.createPlaylist(accessToken, request)
+                name: String,
+            ) = syncGateway.createPlaylist(accessToken, name)
 
             override fun owns(
                 accessToken: String,
@@ -178,10 +194,10 @@ class ApiApplication(
                 accessToken: String,
                 playlistId: String,
                 trackIds: List<String>,
-            ): AuthoritativePlaylistState {
-                syncGateway.replaceTracks(accessToken, playlistId, trackIds)
-                return current(accessToken, playlistId)
-            }
+            ): AuthoritativePlaylistState =
+                syncGateway.replaceTracksAuthoritative(accessToken, playlistId, trackIds).let {
+                    AuthoritativePlaylistState(playlistId, it.trackIds, it.snapshotId)
+                }
 
             override fun current(
                 accessToken: String,
@@ -293,12 +309,20 @@ class ApiApplication(
                 request.method == "PUT" -> updateDefinition(parts[3], request, session)
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "recipe-settings" &&
+                request.method == "PUT" -> updateRecipeSettings(parts[3], request, session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "preview" &&
                 request.method == "GET" -> preview(parts[3], request, session)
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
-                parts[4] == "destinations" &&
-                request.method == "POST" -> createDestination(parts[3], request, session)
+                parts[4] == "publish-plan" &&
+                request.method == "POST" -> publishPlan(parts[3], request, session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "publish" &&
+                request.method == "POST" -> publish(parts[3], request, session)
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "current" &&
@@ -307,10 +331,7 @@ class ApiApplication(
                 parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "syncs" &&
                 request.method == "POST" -> sync(parts[3], request, session)
-            parts.size == 5 &&
-                parts.take(3) == listOf("api", "v1", "playlists") &&
-                parts[4] == "one-time-updates" &&
-                request.method == "POST" -> oneTimeUpdate(parts[3], request, session)
+            parts == listOf("api", "v1", "songs", "bulk") && request.method == "POST" -> bulkSongs(request, session)
             parts == listOf("api", "v1", "songs") && request.method == "GET" -> songs(request, session)
             else -> throw ApiFailure(404, "not_found", "Route not found")
         }
@@ -477,6 +498,26 @@ class ApiApplication(
         )
     }
 
+    private fun updateRecipeSettings(
+        definitionId: String,
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val input = body<UpdateRecipeSettingsRequest>(request)
+        val definition =
+            try {
+                previewService.updateShuffleAfterGeneration(
+                    definitionId,
+                    session.ownerSpotifyUserId,
+                    input.shuffleAfterGeneration,
+                )
+            } catch (exception: IllegalArgumentException) {
+                throw ApiFailure(404, "not_found", "Playlist definition not found")
+            }
+        return json(200, definitionWire(definition, session.ownerSpotifyUserId))
+    }
+
     private fun preview(
         definitionId: String,
         request: ApiRequest,
@@ -484,21 +525,68 @@ class ApiApplication(
     ): ApiResponse =
         json(200, previewService.preview(definitionId, session.ownerSpotifyUserId, request.query["seed"]).toWire())
 
-    private fun createDestination(
+    private fun publishPlan(
         definitionId: String,
         request: ApiRequest,
         session: ButlerSession,
     ): ApiResponse {
         requireStateChange(request, session)
-        val input = request.body?.let { body<DestinationCreateRequestWire>(request) } ?: DestinationCreateRequestWire()
-        val destination =
-            destinationService.create(
-                definitionId,
-                session.ownerSpotifyUserId,
-                session.accessToken,
-                DestinationCreateRequest(input.name, input.description, input.public, input.collaborative),
-            )
-        return json(201, destination.toWire(definitionId))
+        if (destinationService.current(definitionId, session.ownerSpotifyUserId) != null) {
+            throw ApiFailure(409, "destination_exists", "The definition already has a destination")
+        }
+        val flowId = UUID.randomUUID().toString()
+        return PublishOperationLog.with("publish-plan", flowId) {
+            refreshLocks.withLock(session.ownerSpotifyUserId) {
+                try {
+                    cacheService.refreshSource(
+                        session.ownerSpotifyUserId,
+                        session.accessToken,
+                        CacheSourceKey.PLAYLISTS,
+                    )
+                    val definition = resolveDefinition(definitionId, session.ownerSpotifyUserId)
+                    val plan =
+                        destinationService
+                            .planPublish(definitionId, session.ownerSpotifyUserId, definition.name)
+                            .copy(publishFlowId = flowId)
+                    json(200, plan.toWire())
+                        .withPublishFlowId(flowId)
+                } catch (exception: IllegalArgumentException) {
+                    throw ApiFailure(400, "invalid_publish", exception.message ?: "Publish planning failed")
+                } catch (exception: Exception) {
+                    throw ApiFailure(502, "spotify_failure", "Spotify playlist lookup failed")
+                }
+            }
+        }
+    }
+
+    private fun publish(
+        definitionId: String,
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val input = body<PublishDestinationRequest>(request)
+        val action =
+            runCatching { PublishAction.valueOf(input.action.uppercase()) }
+                .getOrElse { throw ApiFailure(400, "invalid_publish", "Publish action must be create or adopt") }
+        val flowId = input.publishFlowId ?: UUID.randomUUID().toString()
+        val operation = if (action == PublishAction.ADOPT) "publish-adopt" else "publish-create"
+        val expectedExternalCalls = 1 + ((input.trackIds.size + 99) / 100).coerceAtLeast(1)
+        return PublishOperationLog.with(operation, flowId, expectedExternalCalls) {
+            validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
+            val definition = resolveDefinition(definitionId, session.ownerSpotifyUserId)
+            val destination =
+                destinationService.publish(
+                    definitionId,
+                    session.ownerSpotifyUserId,
+                    session.accessToken,
+                    definition.name,
+                    action,
+                    input.spotifyPlaylistId,
+                    input.trackIds,
+                )
+            json(200, destination.toWire(definitionId)).withPublishFlowId(flowId)
+        }
     }
 
     private fun current(
@@ -561,35 +649,6 @@ class ApiApplication(
         )
     }
 
-    private fun oneTimeUpdate(
-        definitionId: String,
-        request: ApiRequest,
-        session: ButlerSession,
-    ): ApiResponse {
-        requireStateChange(request, session)
-        val input = body<OneTimeUpdateRequest>(request)
-        validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
-        val result =
-            destinationService.oneTimeUpdate(
-                definitionId,
-                session.ownerSpotifyUserId,
-                session.accessToken,
-                input.spotifyPlaylistId,
-                input.trackIds,
-                input.expectedDestinationSnapshotId,
-            )
-        return json(
-            200,
-            OneTimePlaylistUpdateWire(
-                result.spotifyPlaylistId,
-                result.trackIds,
-                result.lastSeenSnapshotId,
-                result.appliedAt.toString(),
-                false,
-            ),
-        )
-    }
-
     private fun songs(
         request: ApiRequest,
         session: ButlerSession,
@@ -611,6 +670,29 @@ class ApiApplication(
                         tracksById[it]
                     }.map(StoredSong::toSongWire),
                 ids.distinct().filterNot(tracksById::containsKey),
+            ),
+        )
+    }
+
+    private fun bulkSongs(
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val ids =
+            body<BulkSongsRequest>(request)
+                .trackIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+        require(ids.isNotEmpty()) { "trackIds must contain at least one track ID" }
+        require(ids.size <= MAX_BULK_SONG_IDS) { "trackIds contains too many entries" }
+        val tracksById = store.songEnrichment(ids, session.ownerSpotifyUserId).associateBy(StoredSong::id)
+        return json(
+            200,
+            SongsWire(
+                ids.mapNotNull { tracksById[it] }.map(StoredSong::toSongWire),
+                ids.filterNot(tracksById::containsKey),
             ),
         )
     }
@@ -900,6 +982,7 @@ class ApiApplication(
     private fun ApiResponse.withRequestId(requestId: String) = copy(headers = headers + ("X-Request-Id" to requestId))
 
     private companion object {
+        const val MAX_BULK_SONG_IDS = 10_000
         const val SESSION_COOKIE_MAX_AGE_SECONDS = 15_552_000
         val TRACK_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,200}")
     }
@@ -968,6 +1051,28 @@ private fun com.philipwilcox.spotifybutler.service.DestinationState.toWire(defin
         lastSeenSnapshotId,
         canSync,
     )
+
+private fun com.philipwilcox.spotifybutler.service.PublishPlan.toWire() =
+    PublishPlanWire(
+        definitionId,
+        playlistName,
+        action.name.lowercase(),
+        candidates.map {
+            PublishPlaylistCandidateWire(
+                it.spotifyPlaylistId,
+                it.name,
+                it.description,
+                it.itemCount,
+                it.displayUrl,
+            )
+        },
+        message,
+        publishFlowId ?: error("Publish plan flow ID is required at the API boundary"),
+    )
+
+private fun ApiResponse.withPublishFlowId(flowId: String) = copy(headers = headers + (PUBLISH_FLOW_ID_HEADER to flowId))
+
+private const val PUBLISH_FLOW_ID_HEADER = "X-Spotify-Butler-Publish-Flow-Id"
 
 private fun PlaylistPreview.toWire() =
     PreviewWire(

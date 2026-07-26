@@ -2,6 +2,7 @@ package com.philipwilcox.spotifybutler.service
 
 fun PlaylistDefinition.toPlaylistRecipe(): PlaylistRecipe =
     PlaylistRecipe(
+        shuffleAfterGeneration = query !is PlaylistQuery.RecentLiked,
         source = recipeSource(query),
         predicate = recipePredicate(query),
         selection = recipeSelection(query),

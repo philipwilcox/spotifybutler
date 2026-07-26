@@ -120,17 +120,41 @@ paths:
       responses:
         '200': {description: Preview, content: {application/json: {schema: {$ref: '#/components/schemas/Preview'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
-  /api/v1/playlists/{definitionId}/destinations:
+  /api/v1/playlists/{definitionId}/recipe-settings:
     parameters: [{$ref: '#/components/parameters/DefinitionId'}]
-    post:
-      operationId: createDestination
+    put:
+      operationId: updateRecipeSettings
       security: [{butlerSession: []}]
       parameters: [{$ref: '#/components/parameters/CsrfToken'}, {$ref: '#/components/parameters/Origin'}]
       requestBody:
-        required: false
-        content: {application/json: {schema: {$ref: '#/components/schemas/DestinationCreateRequest'}}}
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UpdateRecipeSettingsRequest'}}}
       responses:
-        '201': {description: Destination, content: {application/json: {schema: {$ref: '#/components/schemas/Destination'}}}}
+        '200': {description: Definition, content: {application/json: {schema: {$ref: '#/components/schemas/Definition'}}}}
+      default: {$ref: '#/components/responses/ErrorResponse'}
+  /api/v1/playlists/{definitionId}/publish-plan:
+    parameters: [{$ref: '#/components/parameters/DefinitionId'}]
+    post:
+      operationId: planPublish
+      security: [{butlerSession: []}]
+      parameters: [{$ref: '#/components/parameters/CsrfToken'}, {$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object}}}
+      responses:
+        '200': {description: Publish plan, content: {application/json: {schema: {$ref: '#/components/schemas/PublishPlan'}}}}
+      default: {$ref: '#/components/responses/ErrorResponse'}
+  /api/v1/playlists/{definitionId}/publish:
+    parameters: [{$ref: '#/components/parameters/DefinitionId'}]
+    post:
+      operationId: publishDestination
+      security: [{butlerSession: []}]
+      parameters: [{$ref: '#/components/parameters/CsrfToken'}, {$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PublishDestinationRequest'}}}
+      responses:
+        '200': {description: Published destination, content: {application/json: {schema: {$ref: '#/components/schemas/Destination'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/playlists/{definitionId}/current:
     parameters: [{$ref: '#/components/parameters/DefinitionId'}]
@@ -152,24 +176,23 @@ paths:
       responses:
         '200': {description: Current destination, content: {application/json: {schema: {$ref: '#/components/schemas/CurrentEnvelope'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
-  /api/v1/playlists/{definitionId}/one-time-updates:
-    parameters: [{$ref: '#/components/parameters/DefinitionId'}]
-    post:
-      operationId: oneTimeUpdate
-      security: [{butlerSession: []}]
-      parameters: [{$ref: '#/components/parameters/CsrfToken'}, {$ref: '#/components/parameters/Origin'}]
-      requestBody:
-        required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/OneTimeUpdateRequest'}}}
-      responses:
-        '200': {description: Applied update, content: {application/json: {schema: {$ref: '#/components/schemas/OneTimePlaylistUpdate'}}}}
-      default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/songs:
     get:
       operationId: getSongs
       security: [{butlerSession: []}]
       parameters:
         - {name: ids, in: query, required: true, x-maxIds: 50, schema: {type: string}}
+      responses:
+        '200': {description: Songs, content: {application/json: {schema: {$ref: '#/components/schemas/Songs'}}}}
+      default: {$ref: '#/components/responses/ErrorResponse'}
+  /api/v1/songs/bulk:
+    post:
+      operationId: bulkSongs
+      security: [{butlerSession: []}]
+      parameters: [{$ref: '#/components/parameters/CsrfToken'}, {$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BulkSongsRequest'}}}
       responses:
         '200': {description: Songs, content: {application/json: {schema: {$ref: '#/components/schemas/Songs'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
@@ -191,7 +214,7 @@ components:
     Session: {type: object, required: [userId, csrfToken, expiresAt], properties: {userId: {type: string}, csrfToken: {type: string}, expiresAt: {type: string, format: date-time}}}
     SourceDependency: {type: object, required: [sourceKey, resourceKind, sourceRevision, lastSyncedAt, itemCount, usable], properties: {sourceKey: {type: string}, resourceKind: {type: string}, sourceRevision: {type: [string, 'null']}, lastSyncedAt: {type: [string, 'null'], format: date-time}, itemCount: {type: [integer, 'null'], minimum: 0}, usable: {type: boolean}}}
     SourceSnapshot: {type: object, required: [sourceKey, resourceKind, status, sourceRevision, lastSyncedAt, itemCount, canRefresh, lastErrorCode, lastErrorAt], properties: {sourceKey: {type: string}, resourceKind: {type: string}, status: {type: string, enum: [empty, ready, refreshing, stale, error]}, sourceRevision: {type: [string, 'null']}, lastSyncedAt: {type: [string, 'null'], format: date-time}, itemCount: {type: [integer, 'null'], minimum: 0}, canRefresh: {type: boolean}, lastErrorCode: {type: [string, 'null']}, lastErrorAt: {type: [string, 'null'], format: date-time}}}
-    PlaylistRecipe: {type: object, required: [schemaVersion, source, predicate, distinctness, selection, ordering], properties: {schemaVersion: {type: integer}, source: {type: object}, predicate: {type: object}, distinctness: {type: object}, selection: {type: object}, ordering: {type: object}}}
+    PlaylistRecipe: {type: object, required: [schemaVersion, shuffleAfterGeneration, source, predicate, distinctness, selection, ordering], properties: {schemaVersion: {type: integer}, shuffleAfterGeneration: {type: boolean}, source: {type: object}, predicate: {type: object}, distinctness: {type: object}, selection: {type: object}, ordering: {type: object}}}
     Definition: {type: object, required: [definitionId, name, description, kind, editable, enabled, recipe, sourceDependencies, destination], properties: {definitionId: {type: string}, name: {type: string}, description: {type: string}, kind: {type: string, enum: [built_in, owner]}, editable: {type: boolean}, enabled: {type: boolean}, recipe: {$ref: '#/components/schemas/PlaylistRecipe'}, sourceDependencies: {type: array, items: {$ref: '#/components/schemas/SourceDependency'}}, destination: {$ref: '#/components/schemas/Destination'}}}
     DefinitionList: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Definition'}}}}
     Destination: {type: object, required: [definitionId, spotifyPlaylistId, createdAt, lastSyncedAt, lastSeenSnapshotId, canSync, managementStatus], properties: {definitionId: {type: string}, spotifyPlaylistId: {type: string}, createdAt: {type: string, format: date-time}, lastSyncedAt: {type: [string, 'null'], format: date-time}, lastSeenSnapshotId: {type: [string, 'null']}, canSync: {type: boolean}, managementStatus: {type: string, enum: [butler_created]}}}
@@ -201,12 +224,14 @@ components:
     Preview: {type: object, required: [definitionId, status, generatedTrackIds, generatedTrackCount, seed, recipeRevision, algorithmVersion, sourceDependencies, generatedAt, unavailableReason], properties: {definitionId: {type: string}, status: {type: string, enum: [ready, empty, partial, unavailable]}, generatedTrackIds: {type: array, items: {type: string}}, generatedTrackCount: {type: integer}, seed: {type: string}, recipeRevision: {type: string}, algorithmVersion: {type: string}, sourceDependencies: {type: array, items: {$ref: '#/components/schemas/SourceDependency'}}, generatedAt: {type: string, format: date-time}, unavailableReason: {type: [string, 'null']}}}
     Current: {type: object, required: [spotifyPlaylistId, trackIds, lastSyncedAt, lastSeenSnapshotId], properties: {spotifyPlaylistId: {type: string}, trackIds: {type: array, items: {type: string}}, lastSyncedAt: {type: [string, 'null'], format: date-time}, lastSeenSnapshotId: {type: [string, 'null']}}}
     CurrentEnvelope: {type: object, required: [current], properties: {current: {oneOf: [{$ref: '#/components/schemas/Current'}, {type: 'null'}]}}}
-    OneTimePlaylistUpdate: {type: object, required: [spotifyPlaylistId, trackIds, lastSeenSnapshotId, appliedAt, tracked], properties: {spotifyPlaylistId: {type: string}, trackIds: {type: array, items: {type: string}}, lastSeenSnapshotId: {type: [string, 'null']}, appliedAt: {type: string, format: date-time}, tracked: {const: false}}}
     RefreshLibraryRequest: {type: object, properties: {sourceKeys: {type: [array, 'null'], items: {type: string}}}}
     CreateDefinitionRequest: {type: object, required: [name, recipe], properties: {name: {type: string, minLength: 1, maxLength: 200}, description: {type: string, maxLength: 2000, default: ''}, recipe: {$ref: '#/components/schemas/PlaylistRecipe'}, enabled: {type: boolean, default: true}}}
-    DestinationCreateRequest: {type: object, properties: {name: {type: [string, 'null']}, description: {type: [string, 'null']}, public: {type: [boolean, 'null']}, collaborative: {type: [boolean, 'null']}}}
+    UpdateRecipeSettingsRequest: {type: object, required: [shuffleAfterGeneration], properties: {shuffleAfterGeneration: {type: boolean}}}
+    PublishPlaylistCandidate: {type: object, required: [spotifyPlaylistId, name, description, itemCount, displayUrl], properties: {spotifyPlaylistId: {type: string}, name: {type: string}, description: {type: [string, 'null']}, itemCount: {type: [integer, 'null']}, displayUrl: {type: [string, 'null']}}}
+    PublishPlan: {type: object, required: [definitionId, playlistName, action, candidates, message, publishFlowId], properties: {definitionId: {type: string}, playlistName: {type: string}, action: {type: string, enum: [create, adopt, choose, blocked]}, candidates: {type: array, items: {$ref: '#/components/schemas/PublishPlaylistCandidate'}}, message: {type: [string, 'null']}, publishFlowId: {type: string}}}
+    PublishDestinationRequest: {type: object, required: [action, trackIds], properties: {action: {type: string, enum: [create, adopt]}, spotifyPlaylistId: {type: [string, 'null']}, trackIds: {type: array, maxItems: 5000, items: {type: string}}, publishFlowId: {type: [string, 'null']}}}
     SyncRequest: {type: object, required: [trackIds], properties: {trackIds: {type: array, maxItems: 5000, items: {type: string}}, expectedDestinationSnapshotId: {type: [string, 'null']}}}
-    OneTimeUpdateRequest: {type: object, required: [spotifyPlaylistId, trackIds], properties: {spotifyPlaylistId: {type: string}, trackIds: {type: array, maxItems: 5000, items: {type: string}}, expectedDestinationSnapshotId: {type: [string, 'null']}}}
+    BulkSongsRequest: {type: object, required: [trackIds], properties: {trackIds: {type: array, minItems: 1, maxItems: 10000, items: {type: string}}}}
     Album: {type: object, required: [id, name, href, uri, releaseDate], properties: {id: {type: [string, 'null']}, name: {type: [string, 'null']}, href: {type: [string, 'null']}, uri: {type: [string, 'null']}, releaseDate: {type: [string, 'null']}}}
     Artist: {type: object, required: [id, name, href, uri], properties: {id: {type: [string, 'null']}, name: {type: [string, 'null']}, href: {type: [string, 'null']}, uri: {type: [string, 'null']}}}
     Song: {type: object, required: [id, name, href, uri, album, artists, durationMs, explicit, available], properties: {id: {type: string}, name: {type: string}, href: {type: string}, uri: {type: string}, album: {$ref: '#/components/schemas/Album'}, artists: {type: array, items: {$ref: '#/components/schemas/Artist'}}, durationMs: {type: [integer, 'null']}, explicit: {type: [boolean, 'null']}, available: {type: boolean}}}

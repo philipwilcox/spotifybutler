@@ -19,4 +19,5 @@ data class SpotifyTableSnapshot(
     val userPlaylistDefinitions: List<JsonObject>,
     val userPlaylistDefinitionItems: List<JsonObject>,
     val cacheSourceSync: List<JsonObject> = emptyList(),
+    val playlistRecipePreferences: List<JsonObject> = emptyList(),
 )

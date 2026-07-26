@@ -71,7 +71,7 @@ class PlaylistRecipeFixtureTest {
             ),
         )
         expectedUris?.let { expected ->
-            if (definition.id !in RANDOM_OR_QUOTA_DEFINITIONS) {
+            if (definition.id !in RANDOM_OR_QUOTA_DEFINITIONS && !recipe.shuffleAfterGeneration) {
                 assertEquals(expected, actualTracks.map { it.uri }, definition.id.name)
             }
         }

@@ -5,7 +5,7 @@ import type { Definition } from './types'
 
 const definition: Definition = {
   definitionId: 'RECENT_LIKED_100', name: 'Recent liked', description: 'test', kind: 'built_in', editable: false, enabled: true,
-  recipe: { schemaVersion: 1, source: {}, predicate: {}, distinctness: {}, selection: {}, ordering: {} }, sourceDependencies: [], destination: null,
+  recipe: { schemaVersion: 1, shuffleAfterGeneration: false, source: {}, predicate: {}, distinctness: {}, selection: {}, ordering: {} }, sourceDependencies: [], destination: null,
 }
 const preview = (ids: string[], seed = 'seed-a') => ({ definitionId: definition.definitionId, status: 'ready' as const, generatedTrackIds: ids, generatedTrackCount: ids.length, seed, recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null })
 const deferred = <T>() => {
@@ -19,7 +19,7 @@ function fakeApi(overrides: Partial<ButlerApi> = {}): ButlerApi {
   return {
     getSession: vi.fn(), refreshSession: vi.fn(), deleteSession: vi.fn(), getLibrary: vi.fn(), refreshLibrary: vi.fn(), listDefinitions: vi.fn(),
     getDefinition: vi.fn().mockResolvedValue(definition), previewDefinition: vi.fn().mockResolvedValue(preview(['one', 'two'])), getCurrentDestination: vi.fn().mockResolvedValue(null),
-    getSongs: vi.fn().mockResolvedValue([]), getLibraryPlaylist: vi.fn(), createDestination: vi.fn(), syncDestination: vi.fn(), oneTimeUpdate: vi.fn(), ...overrides,
+    getSongs: vi.fn().mockResolvedValue([]), getLibraryPlaylist: vi.fn(), planPublish: vi.fn(), publishDestination: vi.fn(), syncDestination: vi.fn(), updateRecipeSettings: vi.fn().mockResolvedValue(definition), ...overrides,
   }
 }
 
@@ -68,13 +68,26 @@ describe('StudioController', () => {
     expect(api.previewDefinition).toHaveBeenLastCalledWith(definition.definitionId, 'seed-b')
   })
 
+  it('persists the shuffle setting without replacing the current preview', async () => {
+    const api = fakeApi({
+      updateRecipeSettings: vi.fn().mockResolvedValue({ ...definition, recipe: { ...definition.recipe, shuffleAfterGeneration: true } }),
+    })
+    const studio = new StudioController(api)
+    await studio.load(definition)
+    const previewBefore = studio.state.preview
+    expect(await studio.updateShuffleAfterGeneration(true)).toBe(true)
+    expect(api.updateRecipeSettings).toHaveBeenCalledWith(definition.definitionId, true)
+    expect(studio.state.definition?.recipe.shuffleAfterGeneration).toBe(true)
+    expect(studio.state.preview).toBe(previewBefore)
+  })
+
   it('rejects recurring sync without a destination and preserves staged data on conflict', async () => {
     const api = fakeApi({ syncDestination: vi.fn().mockRejectedValue(Object.assign(new Error('changed'), { status: 409 })) })
     const studio = new StudioController(api)
     await studio.load(definition)
     studio.moveTrack(1, -1)
     expect(await studio.sync()).toBe(false)
-    expect(studio.state.error).toContain('Create a Butler destination')
+    expect(studio.state.error).toContain('Publish a destination')
     studio.state.definition = { ...definition, destination: { definitionId: definition.definitionId, spotifyPlaylistId: 'managed', createdAt: 'now', lastSyncedAt: null, lastSeenSnapshotId: 'snap-a', canSync: true, managementStatus: 'butler_created' } }
     expect(await studio.sync()).toBe(false)
     expect(studio.state.selection.orderedIds).toEqual(['two', 'one'])
@@ -82,12 +95,13 @@ describe('StudioController', () => {
     expect(api.syncDestination).toHaveBeenCalledOnce()
   })
 
-  it('updates the displayed destination snapshot after sync and reports unmanaged one-time updates', async () => {
+  it('updates the displayed destination snapshot after sync and publishes a new destination', async () => {
     const managed = { definitionId: definition.definitionId, spotifyPlaylistId: 'managed', createdAt: 'now', lastSyncedAt: null, lastSeenSnapshotId: 'snap-a', canSync: true, managementStatus: 'butler_created' as const }
     const api = fakeApi({
       getCurrentDestination: vi.fn().mockResolvedValue({ spotifyPlaylistId: 'managed', trackIds: ['one', 'two'], lastSyncedAt: null, lastSeenSnapshotId: 'snap-a' }),
       syncDestination: vi.fn().mockResolvedValue({ spotifyPlaylistId: 'managed', trackIds: ['two', 'one'], lastSyncedAt: '2026-02-01T00:00:00Z', lastSeenSnapshotId: 'snap-b' }),
-      oneTimeUpdate: vi.fn().mockResolvedValue({ spotifyPlaylistId: 'other', trackIds: ['two'], lastSeenSnapshotId: null, appliedAt: '2026-02-01T00:00:00Z', tracked: false }),
+      planPublish: vi.fn().mockResolvedValue({ definitionId: definition.definitionId, playlistName: definition.name, action: 'create', candidates: [], message: null, publishFlowId: 'flow-1' }),
+      publishDestination: vi.fn().mockResolvedValue(managed),
     })
     const studio = new StudioController(api)
     await studio.load({ ...definition, destination: managed })
@@ -95,9 +109,20 @@ describe('StudioController', () => {
     expect(await studio.sync()).toBe(true)
     expect(studio.state.definition?.destination?.lastSeenSnapshotId).toBe('snap-b')
     expect(studio.state.selection.dirty).toBe(false)
-    expect(await studio.oneTimeUpdate(' other ')).toBe(true)
-    expect(studio.state.oneTimeResult).toContain('tracked=false')
-    expect(api.oneTimeUpdate).toHaveBeenCalledWith(definition.definitionId, 'other', ['two', 'one'])
+    studio.state.definition = { ...definition, destination: null }
+    expect(await studio.planPublish()).toMatchObject({ action: 'create' })
+    expect(await studio.publish('create')).toBe(true)
+    expect(api.publishDestination).toHaveBeenCalledWith(definition.definitionId, 'create', ['two', 'one'], undefined, 'flow-1')
+  })
+
+  it('shuffles the staged order with Fisher-Yates and marks it dirty', async () => {
+    const randomValues = [0, 0, 1]
+    const api = fakeApi({ previewDefinition: vi.fn().mockResolvedValue(preview(['one', 'two', 'three', 'four'])) })
+    const studio = new StudioController(api, undefined, exclusiveUpperBound => randomValues[4 - exclusiveUpperBound])
+    await studio.load(definition)
+    studio.shuffleTrackOrder()
+    expect(studio.state.selection.orderedIds).toEqual(['three', 'two', 'four', 'one'])
+    expect(studio.state.selection.dirty).toBe(true)
   })
 })
 

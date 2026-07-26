@@ -24,11 +24,13 @@ class OpenApiContractTest {
                 "/api/v1/playlists",
                 "/api/v1/playlists/{definitionId}",
                 "/api/v1/playlists/{definitionId}/preview",
-                "/api/v1/playlists/{definitionId}/destinations",
+                "/api/v1/playlists/{definitionId}/recipe-settings",
+                "/api/v1/playlists/{definitionId}/publish-plan",
+                "/api/v1/playlists/{definitionId}/publish",
                 "/api/v1/playlists/{definitionId}/current",
                 "/api/v1/playlists/{definitionId}/syncs",
-                "/api/v1/playlists/{definitionId}/one-time-updates",
                 "/api/v1/songs",
+                "/api/v1/songs/bulk",
             )
         assertEquals(expected, paths.keys.map { it.toString() }.toSet())
         assertEquals(
@@ -54,7 +56,8 @@ class OpenApiContractTest {
         assertTrue(source.contains("ownerSpotifyUserId"))
         assertTrue(source.contains("sourceDependencies"))
         assertTrue(source.contains("recipeRevision"))
-        assertTrue(source.contains("tracked: {const: false}"))
+        assertTrue(source.contains("PublishPlan"))
+        assertTrue(source.contains("PublishDestinationRequest"))
     }
 
     private fun document(): Map<*, *> {

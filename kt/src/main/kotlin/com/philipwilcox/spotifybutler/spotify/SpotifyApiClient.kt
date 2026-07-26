@@ -1,5 +1,7 @@
 package com.philipwilcox.spotifybutler.spotify
 
+import com.philipwilcox.spotifybutler.service.PublishOperationLog
+import com.philipwilcox.spotifybutler.service.PublishStepTiming
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -161,11 +163,6 @@ class SpotifyApiClient(
             accessToken,
         )
 
-    fun createPlaylist(
-        accessToken: String,
-        name: String,
-    ): String = createPlaylistMetadata(accessToken, name).id
-
     fun createPlaylistMetadata(
         accessToken: String,
         name: String,
@@ -180,44 +177,13 @@ class SpotifyApiClient(
                 put("collaborative", collaborative)
                 put("description", description ?: "Automatically generated playlist from Spotify Butler app")
             }.toString()
-        val response = transport.post(apiUri("/v1/me/playlists"), accessToken, body)
-        val parsed = parseMutationResponse(response, "create playlist")
-        return SpotifyCreatedPlaylist(
-            id = parsed.optionalString("id") ?: error("Spotify create playlist response did not contain id"),
-            name = parsed.optionalString("name") ?: name,
-            description = parsed.optionalString("description"),
-        )
-    }
-
-    fun addTracks(
-        accessToken: String,
-        playlistId: String,
-        tracks: List<SpotifyTrack>,
-    ) {
-        tracks.chunked(PLAYLIST_WRITE_BATCH_SIZE).forEach { batch ->
-            val body = trackUrisBody(batch)
-            requireMutationSuccess(
-                transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, body),
-                "add tracks to playlist",
-            )
-        }
-    }
-
-    fun replaceTracks(
-        accessToken: String,
-        playlistId: String,
-        tracks: List<SpotifyTrack>,
-    ) {
-        val batches = tracks.chunked(PLAYLIST_WRITE_BATCH_SIZE)
-        val firstBatch = batches.firstOrNull().orEmpty()
-        requireMutationSuccess(
-            transport.put(apiUri("/v1/playlists/$playlistId/items"), accessToken, trackUrisBody(firstBatch)),
-            "replace playlist tracks",
-        )
-        batches.drop(1).forEach { batch ->
-            requireMutationSuccess(
-                transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, trackUrisBody(batch)),
-                "append playlist tracks",
+        return timedMutation("POST", apiUri("/v1/me/playlists"), "create playlist", {
+            transport.post(apiUri("/v1/me/playlists"), accessToken, body)
+        }) { parsed ->
+            SpotifyCreatedPlaylist(
+                id = parsed.optionalString("id") ?: error("Spotify create playlist response did not contain id"),
+                name = parsed.optionalString("name") ?: name,
+                description = parsed.optionalString("description"),
             )
         }
     }
@@ -226,13 +192,15 @@ class SpotifyApiClient(
         accessToken: String,
         playlistId: String,
     ): SpotifyPlaylistCurrent {
-        val trackIds =
-            pagedItems("/v1/playlists/$playlistId/items", accessToken)
-                .mapNotNull { item -> parsePlaylistTrack(item, playlistId)?.track?.takeIf { it.available }?.id }
+        val trackIdsFuture =
+            CompletableFuture.supplyAsync {
+                pagedItems("/v1/playlists/$playlistId/items", accessToken)
+                    .mapNotNull { item -> parsePlaylistTrack(item, playlistId)?.track?.takeIf { it.available }?.id }
+            }
         val snapshotId =
             getJsonObject(apiUri("/v1/playlists/$playlistId?fields=snapshot_id"), accessToken, pageSequence = 0)
                 .optionalString("snapshot_id")
-        return SpotifyPlaylistCurrent(trackIds, snapshotId)
+        return SpotifyPlaylistCurrent(trackIdsFuture.join(), snapshotId)
     }
 
     fun replaceTrackIds(
@@ -263,24 +231,18 @@ class SpotifyApiClient(
         playlistId: String,
         trackIds: List<String>,
     ): SpotifyPlaylistCurrent {
-        replaceTrackIds(accessToken, playlistId, trackIds)
-        return getPlaylistCurrent(accessToken, playlistId)
-    }
-
-    fun removeSavedTracks(
-        accessToken: String,
-        trackIds: List<String>,
-    ) {
-        trackIds.distinct().chunked(SAVED_TRACK_WRITE_BATCH_SIZE).forEach { batch ->
-            val uris =
-                batch.joinToString(",") {
-                    java.net.URLEncoder.encode("spotify:track:$it", Charsets.UTF_8)
-                }
-            requireMutationSuccess(
-                transport.delete(apiUri("/v1/me/library?uris=$uris"), accessToken),
-                "remove saved tracks",
+        val batches = trackIds.chunked(PLAYLIST_WRITE_BATCH_SIZE)
+        var snapshotId =
+            replaceTrackUris(
+                accessToken,
+                playlistId,
+                batches.firstOrNull().orEmpty().map(::trackUri),
+                append = false,
             )
+        batches.drop(1).forEach { batch ->
+            snapshotId = replaceTrackUris(accessToken, playlistId, batch.map(::trackUri), append = true) ?: snapshotId
         }
+        return SpotifyPlaylistCurrent(trackIds, snapshotId)
     }
 
     override fun fetchCache(accessToken: String): SpotifyCacheSnapshot {
@@ -393,25 +355,36 @@ class SpotifyApiClient(
         accessToken: String,
         pageSequence: Int,
     ): JsonObject {
-        val response = transport.get(uri, accessToken)
-        require(response.statusCode in HttpURLConnection.HTTP_OK until HttpURLConnection.HTTP_MULT_CHOICE) {
-            "Spotify API request failed with HTTP ${response.statusCode} for $uri"
+        val progress = PublishOperationLog.current()
+        val call = progress?.beginExternalCall()
+        var timing: PublishStepTiming? = null
+        try {
+            val response = transport.get(uri, accessToken)
+            require(response.statusCode in HttpURLConnection.HTTP_OK until HTTP_SUCCESS_LIMIT) {
+                "Spotify API request failed with HTTP ${response.statusCode} for $uri"
+            }
+            if (captureEnabled) {
+                logger.info {
+                    "$SPOTIFY_CAPTURE_EVENT_MARKER ${captureLogger.successfulResponse(
+                        method = "GET",
+                        uri = uri,
+                        status = response.statusCode,
+                        pageSequence = pageSequence,
+                        body = response.body,
+                    )}"
+                }
+            }
+            val parsed = parseSpotifyResponse(response.body)
+            updateExpectedPageCount(progress, parsed, pageSequence)
+            timing = call?.let { progress.finishExternalCall(it) }
+            logger.info {
+                "Spotify response summary: method=GET path=${uri.rawPath} status=${response.statusCode} " +
+                    "pageSequence=$pageSequence ${responseSummary(parsed)}${timingFields(timing)}"
+            }
+            return parsed
+        } finally {
+            if (call != null && timing == null) progress.finishExternalCall(call)
         }
-        logger.info {
-            "$SPOTIFY_CAPTURE_EVENT_MARKER ${captureLogger.successfulResponse(
-                method = "GET",
-                uri = uri,
-                status = response.statusCode,
-                pageSequence = pageSequence,
-                body = response.body,
-            )}"
-        }
-        val parsed = parseSpotifyResponse(response.body)
-        logger.info {
-            "Spotify response summary: method=GET path=${uri.rawPath} status=${response.statusCode} " +
-                "pageSequence=$pageSequence ${responseSummary(parsed)}"
-        }
-        return parsed
     }
 
     private fun responseSummary(response: JsonObject): String {
@@ -441,22 +414,75 @@ class SpotifyApiClient(
         }
     }
 
-    private fun trackUrisBody(tracks: List<SpotifyTrack>): String = uriBody(tracks.map(SpotifyTrack::uri))
-
     private fun replaceTrackUris(
         accessToken: String,
         playlistId: String,
         uris: List<String>,
         append: Boolean,
-    ) {
-        val response =
-            if (append) {
-                transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
-            } else {
-                transport.put(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
+    ): String? =
+        timedMutation(
+            method = if (append) "POST" else "PUT",
+            uri = apiUri("/v1/playlists/$playlistId/items"),
+            operation = if (append) "append playlist tracks" else "replace playlist tracks",
+            request = {
+                if (append) {
+                    transport.post(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
+                } else {
+                    transport.put(apiUri("/v1/playlists/$playlistId/items"), accessToken, uriBody(uris))
+                }
+            },
+        ) { parsed -> parsed.optionalString("snapshot_id") }
+
+    private fun <T> timedMutation(
+        method: String,
+        uri: URI,
+        operation: String,
+        request: () -> SpotifyHttpResponse,
+        transform: (JsonObject) -> T,
+    ): T {
+        val progress = PublishOperationLog.current()
+        val call = progress?.beginExternalCall()
+        var timing: PublishStepTiming? = null
+        try {
+            val response = request()
+            requireMutationSuccess(response, operation)
+            val parsed = parseSpotifyResponse(response.body)
+            timing = call?.let { progress.finishExternalCall(it) }
+            logger.info {
+                "Spotify response summary: method=$method path=${uri.rawPath} status=${response.statusCode} " +
+                    "${responseSummary(parsed)}${timingFields(timing)}"
             }
-        requireMutationSuccess(response, if (append) "append playlist tracks" else "replace playlist tracks")
+            return transform(parsed)
+        } finally {
+            if (call != null && timing == null) progress.finishExternalCall(call)
+        }
     }
+
+    private fun updateExpectedPageCount(
+        progress: PublishOperationLog?,
+        response: JsonObject,
+        pageSequence: Int,
+    ) {
+        if (progress == null) return
+        val nextPresent = !response.optionalString("next").isNullOrBlank()
+        val total = response.optionalLong("total") ?: (response["tracks"] as? JsonObject)?.optionalLong("total")
+        val limit = response.optionalLong("limit") ?: PAGE_SIZE.toLong()
+        val pageCount =
+            if (total != null && limit > 0) {
+                ((total + limit - 1) / limit).toInt()
+            } else if (!nextPresent) {
+                pageSequence.coerceAtLeast(1)
+            } else {
+                null
+            }
+        pageCount?.let(progress::setExpectedExternalCallsIfUnknown)
+    }
+
+    private fun timingFields(timing: PublishStepTiming?): String =
+        timing
+            ?.let {
+                " ${PublishOperationLog.current()?.logFields(it)}"
+            }.orEmpty()
 
     private fun trackUri(trackId: String): String = "spotify:track:$trackId"
 
@@ -486,8 +512,11 @@ class SpotifyApiClient(
         private const val PAGE_SIZE = 50
         private const val PLAYLIST_FETCH_CONCURRENCY = 2
         private const val PLAYLIST_WRITE_BATCH_SIZE = 100
-        private const val SAVED_TRACK_WRITE_BATCH_SIZE = 40
+        private const val HTTP_SUCCESS_LIMIT = 300
     }
+
+    private val captureEnabled: Boolean =
+        System.getenv("SPOTIFY_BUTLER_CAPTURE_LOG")?.trim()?.isNotEmpty() == true
 }
 
 data class SpotifyPlaylistCurrent(

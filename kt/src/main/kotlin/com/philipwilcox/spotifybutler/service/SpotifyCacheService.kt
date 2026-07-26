@@ -72,7 +72,9 @@ class SpotifyCacheService(
             store.sourceSnapshot(ownerSpotifyUserId, sourceKey).also { stored ->
                 logger.info {
                     "Spotify cache source stored: owner=$ownerSpotifyUserId sourceKey=$sourceKey " +
-                        "resourceKind=${stored.resourceKind} status=${stored.status} itemCount=${stored.itemCount ?: 0}"
+                        "resourceKind=${stored.resourceKind} status=${stored.status} " +
+                        "itemCount=${stored.itemCount ?: 0}" +
+                        PublishOperationLog.current()?.let { " ${it.logFields()}" }.orEmpty()
                 }
             }
         } catch (exception: Exception) {

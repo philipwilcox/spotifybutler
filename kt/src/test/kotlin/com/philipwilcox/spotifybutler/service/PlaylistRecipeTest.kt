@@ -3,6 +3,7 @@ package com.philipwilcox.spotifybutler.service
 import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -74,12 +75,48 @@ class PlaylistRecipeTest {
     }
 
     @Test
+    fun `post-generation shuffle is deterministic and preserves selected tracks`() {
+        val candidates =
+            listOf(
+                candidate("first", "2024-01-01T00:00:00Z", "artist-a", "album-1"),
+                candidate("second", "2024-01-02T00:00:00Z", "artist-a", "album-2"),
+                candidate("third", "2024-01-03T00:00:00Z", "artist-b", "album-1"),
+                candidate("fourth", "2024-01-04T00:00:00Z", "artist-b", "album-3"),
+            )
+        val recipe =
+            quotaRecipe().copy(
+                shuffleAfterGeneration = true,
+                selection = SelectionPolicy(target = null, rankBy = RankingStrategy.AddedAtAscending),
+                ordering = OrderingPolicy.AddedAtAscending,
+            )
+
+        val first = PlaylistRecipeEngine().generate(recipe, candidates, seed)
+        val second = PlaylistRecipeEngine().generate(recipe, candidates.reversed(), seed)
+
+        assertEquals(first.selected.map { it.identity }, second.selected.map { it.identity })
+        assertEquals(candidates.map { it.identity }.toSet(), first.selected.map { it.identity }.toSet())
+        assertNotEquals(candidates.map { it.identity }, first.selected.map { it.identity })
+    }
+
+    @Test
+    fun `built-in defaults enable shuffle except recent liked`() {
+        val definitions = PlaylistQueries.definitions(2026, 2016).associateBy { it.id }
+
+        assertFalse(
+            definitions.getValue(PlaylistDefinitionId.RECENT_LIKED_100).toPlaylistRecipe().shuffleAfterGeneration,
+        )
+        definitions.filterKeys { it != PlaylistDefinitionId.RECENT_LIKED_100 }.values.forEach {
+            assertTrue(it.toPlaylistRecipe().shuffleAfterGeneration, it.id.name)
+        }
+    }
+
+    @Test
     fun `selection rank uses stable known-answer bytes`() {
         val recipeRevision = PlaylistRecipeCodec.revision(quotaRecipe())
         val candidate = candidate("first", "2024-01-01T00:00:00Z", "artist-a", "album-1")
 
         assertEquals(
-            "c316aba1f1e43d63de303abbc56b7827c6474d5953e1752878f9f6b290d56f97",
+            "eab0c0deaedc92cc7eba0912c13b3543a76fd4d3ff0d7d0a7116d453da4598a9",
             selectionRank(seed, recipeRevision, candidate).toHex(),
         )
     }
@@ -99,6 +136,7 @@ class PlaylistRecipeTest {
                     rankedBy(RankingStrategy.AddedAtAscending)
                 }
                 orderBy(OrderingPolicy.AddedAtAscending)
+                shuffleAfterGeneration(false)
             }
 
         assertEquals(PlaylistRecipeCodec.encode(direct), PlaylistRecipeCodec.encode(dsl))
@@ -119,6 +157,7 @@ class PlaylistRecipeTest {
 
     private fun quotaRecipe() =
         PlaylistRecipe(
+            shuffleAfterGeneration = false,
             source = CandidateSource.SavedTracks,
             predicate = TrackPredicate.ReleaseYearRange(minInclusive = 2020),
             selection =

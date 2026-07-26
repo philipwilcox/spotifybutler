@@ -93,10 +93,17 @@ class ButlerHttpServer(
         } finally {
             val durationMs = (System.nanoTime() - startedAt) / 1_000_000
             logger.info {
-                "Request finished: method=${exchange.requestMethod} path=$path status=$status durationMs=$durationMs"
+                "Request finished: method=${exchange.requestMethod} path=$path status=$status durationMs=$durationMs" +
+                    publishFlowIdSuffix(exchange)
             }
         }
     }
+
+    private fun publishFlowIdSuffix(exchange: HttpExchange): String =
+        exchange.responseHeaders
+            .getFirst("X-Spotify-Butler-Publish-Flow-Id")
+            ?.let { " publishFlowId=$it" }
+            .orEmpty()
 
     private fun health(exchange: HttpExchange): Int {
         requireGet(exchange)

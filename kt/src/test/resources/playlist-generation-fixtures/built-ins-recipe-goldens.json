@@ -6,78 +6,78 @@
   "goldens": [
     {
       "definitionId": "RECENT_LIKED_100",
-      "recipeRevision": "bd75a5ba1e5181dfdf65198b5edd4ade0c4ebea0dcab41ca4c4353ecf7af2014",
+      "recipeRevision": "228eedaa4fce3d6db012d41144609ce16999872022cf8d8977d192d65fb4854e",
       "orderedUris": ["spotify:track:a01", "spotify:track:a02", "spotify:track:a03", "spotify:track:a04", "spotify:track:a05", "spotify:track:a06", "spotify:track:a07", "spotify:track:a08", "spotify:track:a09", "spotify:track:a10", "spotify:track:a11", "spotify:track:a12", "spotify:track:a13", "spotify:track:b01", "spotify:track:b02", "spotify:track:n01"]
     },
     {
       "definitionId": "RANDOM_LIKED_100",
-      "recipeRevision": "9eb4882f417e91e6d89fb79dd24a6de13f9432c49ef604ace211db847b7f049e",
-      "orderedUris": ["spotify:track:a05", "spotify:track:a06", "spotify:track:a10", "spotify:track:a02", "spotify:track:a04", "spotify:track:a03", "spotify:track:n01", "spotify:track:b01", "spotify:track:a07", "spotify:track:a09", "spotify:track:a12", "spotify:track:a13", "spotify:track:a08", "spotify:track:b02", "spotify:track:a11", "spotify:track:a01"]
+      "recipeRevision": "8ed62e649d2bc89bb4a5810f0b7d0e3d812152b6bdf4a5e6d3590b14b38e5c3a",
+      "orderedUris": ["spotify:track:a09", "spotify:track:a04", "spotify:track:b01", "spotify:track:a01", "spotify:track:a11", "spotify:track:a03", "spotify:track:n01", "spotify:track:a07", "spotify:track:a06", "spotify:track:a12", "spotify:track:a02", "spotify:track:a08", "spotify:track:a13", "spotify:track:a10", "spotify:track:b02", "spotify:track:a05"]
     },
     {
       "definitionId": "COLLECTED_DISCOVER_WEEKLY",
-      "recipeRevision": "50d8c9a5449816c817510601a618214e7fa165917889d292679270a77344b4a6",
-      "orderedUris": ["spotify:track:dw-collected", "spotify:track:dw-new"]
+      "recipeRevision": "f296f9d5d5dc2d02a316c205560ab3b211824015d5378ef424da8f3e5ac57a27",
+      "orderedUris": ["spotify:track:dw-new", "spotify:track:dw-collected"]
     },
     {
       "definitionId": "LIKED_PER_ARTIST",
-      "recipeRevision": "e2d4670123dc5b3b78e9cdecf427bfcce40bea6a18a155cdb2b9297e9920078a",
-      "orderedUris": ["spotify:track:a08", "spotify:track:a13", "spotify:track:a05", "spotify:track:a06", "spotify:track:a09", "spotify:track:n01", "spotify:track:a04", "spotify:track:a11", "spotify:track:b01", "spotify:track:a01", "spotify:track:a12", "spotify:track:b02", "spotify:track:a10", "spotify:track:a03", "spotify:track:a07"]
+      "recipeRevision": "f91eaf1a18eef55567afe46ac2e655d1bf636d01018447b12e70fd2ad9a4efd7",
+      "orderedUris": ["spotify:track:a11", "spotify:track:a02", "spotify:track:a07", "spotify:track:a01", "spotify:track:b01", "spotify:track:a08", "spotify:track:a06", "spotify:track:b02", "spotify:track:n01", "spotify:track:a04", "spotify:track:a05", "spotify:track:a09", "spotify:track:a12", "spotify:track:a13", "spotify:track:a03"]
     },
     {
       "definitionId": "ROLLING_RECENT_20",
-      "recipeRevision": "10ae258d01d3efb22a329f5f3a317876dd1299a14be1fed75e07cba542a97f25",
-      "orderedUris": ["spotify:track:a09", "spotify:track:a12", "spotify:track:b01", "spotify:track:b02", "spotify:track:a07", "spotify:track:a10", "spotify:track:a08", "spotify:track:a11", "spotify:track:a13"]
+      "recipeRevision": "7b67630b182cb55cc87d879bc2f4155c3082d2340ab23337edcffc4bb77d7c62",
+      "orderedUris": ["spotify:track:a13", "spotify:track:a07", "spotify:track:a10", "spotify:track:a12", "spotify:track:a09", "spotify:track:b01", "spotify:track:b02", "spotify:track:a11", "spotify:track:a08"]
     },
     {
       "definitionId": "ROLLING_PRIOR_20",
-      "recipeRevision": "ffb9934305fc109ca1e3ecf109943ce6a3824767c9d9ab3a85613a645db5f2bc",
-      "orderedUris": ["spotify:track:a03", "spotify:track:a04", "spotify:track:a06", "spotify:track:a05"]
+      "recipeRevision": "3cb515536b97ada0aad294899b69dc03cdcd177739f8d3fc6d832565c25a3ed1",
+      "orderedUris": ["spotify:track:a04", "spotify:track:a05", "spotify:track:a06", "spotify:track:a03"]
     },
     {
       "definitionId": "ROLLING_PRE_40",
-      "recipeRevision": "42662510ca68e487506e9a92981838084e387dc5cf72873a09d84ef8da3ed3bf",
+      "recipeRevision": "0a6b5d99614e039cca9531dd0f2b2f8df359bca92fd8da42970d3e39d816e03d",
       "orderedUris": ["spotify:track:a01", "spotify:track:a02"]
     },
     {
       "definitionId": "NOT_TOP_ARTISTS",
-      "recipeRevision": "0fa7b3fafe9eb898aaff25f54d851ce6865f16d57c1fbbdb1c261eb8ebd6e3f8",
+      "recipeRevision": "649e6cb4e6caf1fd2e1a988f6614c995553cb86b4f839063f813bd7d461f5b98",
       "orderedUris": ["spotify:track:b01", "spotify:track:b02"]
     },
     {
       "definitionId": "NOT_TOP_TRACKS",
-      "recipeRevision": "6efd1784e1a003ad153b8f64727b3bb0a3c59c7aa0eeb31f88350d101f4fc99c",
-      "orderedUris": ["spotify:track:a02", "spotify:track:a03", "spotify:track:a04", "spotify:track:a05", "spotify:track:a06", "spotify:track:a07", "spotify:track:a08", "spotify:track:a09", "spotify:track:a10", "spotify:track:a11", "spotify:track:a12", "spotify:track:a13", "spotify:track:b01", "spotify:track:b02", "spotify:track:n01"]
+      "recipeRevision": "85de292b3522a6e2063bf16fded2f6f05e377f3a94275753df8887cc9e4e6122",
+      "orderedUris": ["spotify:track:a07", "spotify:track:b01", "spotify:track:a05", "spotify:track:a13", "spotify:track:a03", "spotify:track:a02", "spotify:track:a09", "spotify:track:a08", "spotify:track:n01", "spotify:track:b02", "spotify:track:a12", "spotify:track:a10", "spotify:track:a11", "spotify:track:a04", "spotify:track:a06"]
     },
     {
       "definitionId": "DECADE_1980",
-      "recipeRevision": "64594fd661cb2a427f813213d05234fdb353af119ac5727dc9e5ba4cf27660a4",
-      "orderedUris": ["spotify:track:a01", "spotify:track:a02"]
+      "recipeRevision": "23afddd43673d89c4f4f9ba54f629c54a84278a723997397fa696bf255908ddb",
+      "orderedUris": ["spotify:track:a02", "spotify:track:a01"]
     },
     {
       "definitionId": "DECADE_1990",
-      "recipeRevision": "7139b1c9f51145681ce44d7588b4fb19770278fdba252473aac9eea6a0695f44",
+      "recipeRevision": "92d7c484d6ca442bdce161f4717f8659b25bd660750c2a9ab0e75aca9b085163",
       "orderedUris": ["spotify:track:a03", "spotify:track:a04"]
     },
     {
       "definitionId": "DECADE_2000",
-      "recipeRevision": "1dbce898018356e8301fecf203e212366e1cb227fed4afc7ebafc4646f65b0f8",
-      "orderedUris": ["spotify:track:a05", "spotify:track:a06"]
+      "recipeRevision": "8ef28a765536e66d2b7a5611a82a5a43920ae603ca147f5d806dfa743281c0de",
+      "orderedUris": ["spotify:track:a06", "spotify:track:a05"]
     },
     {
       "definitionId": "DECADE_2010",
-      "recipeRevision": "a0af2ee92c98274c108dc623644517c6a4f19139ebdb29509822d79f6642cc88",
+      "recipeRevision": "e805bb54df6403aab25e8668de4c2a3d2c0452e51388306d8fb1ea94e5e8856b",
       "orderedUris": ["spotify:track:a07", "spotify:track:a08"]
     },
     {
       "definitionId": "DECADE_2020",
-      "recipeRevision": "c1119f649156af73f4a49eedcc1641e7ab51b84c0c43a2a50205425d747bc116",
-      "orderedUris": ["spotify:track:a09", "spotify:track:a10", "spotify:track:a11", "spotify:track:a12", "spotify:track:a13", "spotify:track:b01", "spotify:track:b02"]
+      "recipeRevision": "3a16a5a317d7c244a879834f73d754901135782f2e9dd5cccfc6aa124e357edd",
+      "orderedUris": ["spotify:track:b01", "spotify:track:a09", "spotify:track:a10", "spotify:track:a13", "spotify:track:b02", "spotify:track:a11", "spotify:track:a12"]
     },
     {
       "definitionId": "RECENT_5_PER_ARTIST",
-      "recipeRevision": "6b19422a67ddd6f0a24f2ab057d4b490e2f40b96edb29b24fb65a58f84731dd2",
-      "orderedUris": ["spotify:track:a11", "spotify:track:a13", "spotify:track:b02", "spotify:track:a12", "spotify:track:b01"]
+      "recipeRevision": "f1071b6704b79a4856d7fec9ad008472b0de853e6247359c565d52afa90d55b2",
+      "orderedUris": ["spotify:track:b02", "spotify:track:a11", "spotify:track:b01", "spotify:track:a12", "spotify:track:a13"]
     }
   ]
 }

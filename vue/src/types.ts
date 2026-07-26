@@ -30,6 +30,7 @@ export interface SourceSnapshot {
 
 export interface PlaylistRecipe {
   readonly schemaVersion: number
+  readonly shuffleAfterGeneration: boolean
   readonly source: Record<string, unknown>
   readonly predicate: Record<string, unknown>
   readonly distinctness: Record<string, unknown>
@@ -119,12 +120,23 @@ export interface Song {
   readonly available: boolean
 }
 
-export interface OneTimeUpdate {
+export type PublishPlanAction = 'create' | 'adopt' | 'choose' | 'blocked'
+
+export interface PublishCandidate {
   readonly spotifyPlaylistId: string
-  readonly trackIds: readonly string[]
-  readonly lastSeenSnapshotId: string | null
-  readonly appliedAt: string
-  readonly tracked: false
+  readonly name: string
+  readonly description: string | null
+  readonly itemCount: number | null
+  readonly displayUrl: string | null
+}
+
+export interface PublishPlan {
+  readonly definitionId: string
+  readonly playlistName: string
+  readonly action: PublishPlanAction
+  readonly candidates: readonly PublishCandidate[]
+  readonly message: string | null
+  readonly publishFlowId: string
 }
 
 export interface ApiErrorDto {

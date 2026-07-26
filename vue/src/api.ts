@@ -1,5 +1,5 @@
-import type { ApiErrorDto, CurrentDestination, Definition, Library, LibraryPlaylistDetail, OneTimeUpdate, Preview, Session, Song } from './types'
-import { parseCurrent, parseDefinition, parseDefinitionList, parseDestination, parseError, parseLibrary, parseLibraryPlaylistDetail, parseOneTimeUpdate, parsePreview, parseSession, parseSongs } from './validation'
+import type { ApiErrorDto, CurrentDestination, Definition, Library, LibraryPlaylistDetail, Preview, PublishPlan, Session, Song } from './types'
+import { parseCurrent, parseDefinition, parseDefinitionList, parseDestination, parseError, parseLibrary, parseLibraryPlaylistDetail, parsePreview, parsePublishPlan, parseSession, parseSongs } from './validation'
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -20,10 +20,11 @@ export interface ButlerApi {
   listDefinitions(): Promise<Definition[]>
   getDefinition(id: string): Promise<Definition>
   previewDefinition(id: string, seed?: string): Promise<Preview>
-  createDestination(id: string, input?: { name?: string; description?: string; public?: boolean; collaborative?: boolean }): Promise<Definition['destination']>
+  updateRecipeSettings(id: string, shuffleAfterGeneration: boolean): Promise<Definition>
+  planPublish(id: string): Promise<PublishPlan>
+  publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<Definition['destination']>
   getCurrentDestination(id: string): Promise<CurrentDestination | null>
   syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<CurrentDestination | null>
-  oneTimeUpdate(id: string, spotifyPlaylistId: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<OneTimeUpdate>
   getSongs(ids: readonly string[]): Promise<Song[]>
 }
 
@@ -53,22 +54,26 @@ export class ButlerApiClient implements ButlerApi {
 
   async previewDefinition(id: string, seed?: string): Promise<Preview> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/preview${seed ? `?seed=${encodeURIComponent(seed)}` : ''}`, 'GET', undefined, parsePreview) }
 
-  async createDestination(id: string, input: { name?: string; description?: string; public?: boolean; collaborative?: boolean } = {}): Promise<Definition['destination']> {
-    return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/destinations`, 'POST', Object.keys(input).length === 0 ? undefined : input, parseDestination)
+  async updateRecipeSettings(id: string, shuffleAfterGeneration: boolean): Promise<Definition> {
+    return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/recipe-settings`, 'PUT', { shuffleAfterGeneration }, parseDefinition)
+  }
+
+  async planPublish(id: string): Promise<PublishPlan> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/publish-plan`, 'POST', {}, parsePublishPlan) }
+
+  async publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<Definition['destination']> {
+    return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/publish`, 'POST', { action, spotifyPlaylistId: spotifyPlaylistId ?? null, trackIds, publishFlowId: publishFlowId ?? null }, parseDestination)
   }
 
   async getCurrentDestination(id: string): Promise<CurrentDestination | null> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/current`, 'GET', undefined, parseCurrent) }
 
   async syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<CurrentDestination | null> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/syncs`, 'POST', { trackIds, expectedDestinationSnapshotId: expectedDestinationSnapshotId ?? null }, parseCurrent) }
 
-  async oneTimeUpdate(id: string, spotifyPlaylistId: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<OneTimeUpdate> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/one-time-updates`, 'POST', { spotifyPlaylistId, trackIds, expectedDestinationSnapshotId: expectedDestinationSnapshotId ?? null }, parseOneTimeUpdate) }
-
   async getSongs(ids: readonly string[]): Promise<Song[]> {
-    const requestedIds = ids.filter(id => id.trim().length > 0)
-    const uniqueBatches: string[][] = []
-    for (let index = 0; index < requestedIds.length; index += 50) uniqueBatches.push([...requestedIds.slice(index, index + 50)])
-    const responses = await Promise.all(uniqueBatches.filter(batch => batch.length > 0).map(batch => this.request(`/api/v1/songs?ids=${batch.map(encodeURIComponent).join(',')}`, 'GET', undefined, parseSongs)))
-    return responses.flatMap(response => response.items)
+    const requestedIds = [...new Set(ids.map(id => id.trim()).filter(id => id.length > 0))]
+    if (requestedIds.length === 0) return []
+    if (requestedIds.length > 10_000) throw new Error('Too many tracks to enrich in one request')
+    const response = await this.request('/api/v1/songs/bulk', 'POST', { trackIds: requestedIds }, parseSongs)
+    return response.items
   }
 
   private async request<T>(path: string, method: string, body: unknown, parse: (value: unknown) => T): Promise<T> {

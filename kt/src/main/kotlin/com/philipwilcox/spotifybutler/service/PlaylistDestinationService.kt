@@ -5,13 +5,6 @@ import com.philipwilcox.spotifybutler.db.SpotifyStore
 import java.time.Clock
 import java.time.Instant
 
-data class DestinationCreateRequest(
-    val name: String? = null,
-    val description: String? = null,
-    val public: Boolean? = null,
-    val collaborative: Boolean? = null,
-)
-
 data class AuthoritativePlaylistState(
     val spotifyPlaylistId: String,
     val trackIds: List<String>,
@@ -27,18 +20,39 @@ data class DestinationState(
     val canSync: Boolean = true,
 )
 
-data class OneTimePlaylistUpdate(
+data class PublishPlaylistCandidate(
     val spotifyPlaylistId: String,
-    val trackIds: List<String>,
-    val lastSeenSnapshotId: String?,
-    val appliedAt: Instant,
-    val tracked: Boolean = false,
+    val name: String,
+    val description: String?,
+    val itemCount: Int?,
+    val displayUrl: String?,
 )
+
+data class PublishPlan(
+    val definitionId: String,
+    val playlistName: String,
+    val action: PublishPlanAction,
+    val candidates: List<PublishPlaylistCandidate> = emptyList(),
+    val message: String? = null,
+    val publishFlowId: String? = null,
+)
+
+enum class PublishPlanAction {
+    CREATE,
+    ADOPT,
+    CHOOSE,
+    BLOCKED,
+}
+
+enum class PublishAction {
+    CREATE,
+    ADOPT,
+}
 
 interface PlaylistDestinationGateway {
     fun create(
         accessToken: String,
-        request: DestinationCreateRequest,
+        name: String,
     ): String
 
     fun owns(
@@ -64,16 +78,87 @@ class PlaylistDestinationService(
     private val gateway: PlaylistDestinationGateway,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    fun create(
+    fun planPublish(
+        definitionId: String,
+        ownerSpotifyUserId: String,
+        playlistName: String,
+    ): PublishPlan {
+        requireDefinition(definitionId, ownerSpotifyUserId)
+        val matches = store.findPlaylistsByName(playlistName, ownerSpotifyUserId)
+        val owned = matches.filter { it.ownerId == ownerSpotifyUserId }
+        val action =
+            when {
+                owned.isEmpty() && matches.isEmpty() -> PublishPlanAction.CREATE
+                owned.size == 1 -> PublishPlanAction.ADOPT
+                owned.size > 1 -> PublishPlanAction.CHOOSE
+                else -> PublishPlanAction.BLOCKED
+            }
+        return PublishPlan(
+            definitionId,
+            playlistName,
+            action,
+            owned.map { it.toCandidate(playlistName) },
+            if (action == PublishPlanAction.BLOCKED) {
+                "A playlist named \"$playlistName\" exists, but it is not owned by the authenticated Spotify user."
+            } else {
+                null
+            },
+        )
+    }
+
+    fun publish(
         definitionId: String,
         ownerSpotifyUserId: String,
         accessToken: String,
-        request: DestinationCreateRequest,
+        playlistName: String,
+        action: PublishAction,
+        spotifyPlaylistId: String?,
+        trackIds: List<String>,
     ): DestinationState {
         requireDefinition(definitionId, ownerSpotifyUserId)
-        val playlistId = gateway.create(accessToken, request)
+        val playlistId =
+            when (action) {
+                PublishAction.CREATE -> createPlaylist(accessToken, playlistName, ownerSpotifyUserId)
+                PublishAction.ADOPT -> adoptPlaylist(accessToken, playlistName, spotifyPlaylistId, ownerSpotifyUserId)
+            }
         store.saveManagedPlaylist(definitionId, playlistId, ownerSpotifyUserId, clock.millis())
+        val authoritative = gateway.replace(accessToken, playlistId, trackIds)
+        val now = clock.millis()
+        store.updateManagedPlaylistState(definitionId, ownerSpotifyUserId, now, authoritative.snapshotId)
+        store.publishPlaylistTrackIds(
+            playlistId,
+            authoritative.trackIds,
+            now,
+            ownerSpotifyUserId,
+            authoritative.snapshotId,
+        )
         return current(definitionId, ownerSpotifyUserId)!!
+    }
+
+    private fun createPlaylist(
+        accessToken: String,
+        playlistName: String,
+        ownerSpotifyUserId: String,
+    ): String {
+        if (store.findPlaylistsByName(playlistName, ownerSpotifyUserId).any { it.ownerId == ownerSpotifyUserId }) {
+            throw DestinationConflictException()
+        }
+        return gateway.create(accessToken, playlistName)
+    }
+
+    private fun adoptPlaylist(
+        accessToken: String,
+        playlistName: String,
+        spotifyPlaylistId: String?,
+        ownerSpotifyUserId: String,
+    ): String {
+        val candidate =
+            store
+                .findPlaylistsByName(playlistName, ownerSpotifyUserId)
+                .firstOrNull { it.id == spotifyPlaylistId && it.ownerId == ownerSpotifyUserId }
+                ?: throw OwnerMismatchException()
+        if (!gateway.owns(accessToken, candidate.id, ownerSpotifyUserId)) throw OwnerMismatchException()
+        return candidate.id
     }
 
     fun current(
@@ -109,29 +194,6 @@ class PlaylistDestinationService(
         return authoritative
     }
 
-    fun oneTimeUpdate(
-        definitionId: String,
-        ownerSpotifyUserId: String,
-        accessToken: String,
-        spotifyPlaylistId: String,
-        trackIds: List<String>,
-        expectedSnapshotId: String? = null,
-    ): OneTimePlaylistUpdate {
-        requireDefinition(definitionId, ownerSpotifyUserId)
-        if (!gateway.owns(accessToken, spotifyPlaylistId, ownerSpotifyUserId)) throw OwnerMismatchException()
-        if (expectedSnapshotId != null) {
-            val current = gateway.current(accessToken, spotifyPlaylistId)
-            if (current.snapshotId != expectedSnapshotId) throw DestinationConflictException()
-        }
-        val authoritative = gateway.replace(accessToken, spotifyPlaylistId, trackIds)
-        return OneTimePlaylistUpdate(
-            spotifyPlaylistId,
-            authoritative.trackIds,
-            authoritative.snapshotId,
-            clock.instant(),
-        )
-    }
-
     private fun requireDefinition(
         definitionId: String,
         owner: String,
@@ -155,6 +217,15 @@ class PlaylistDestinationService(
             Instant.ofEpochMilli(createdAtMillis),
             lastSyncedAtMillis?.let(Instant::ofEpochMilli),
             lastSeenSnapshotId,
+        )
+
+    private fun com.philipwilcox.spotifybutler.db.ExistingPlaylistMetadata.toCandidate(defaultName: String) =
+        PublishPlaylistCandidate(
+            id,
+            name ?: defaultName,
+            description,
+            itemCount,
+            displayUrl,
         )
 }
 

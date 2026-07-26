@@ -8,10 +8,10 @@ import com.philipwilcox.spotifybutler.service.CacheSourceSnapshot
 import com.philipwilcox.spotifybutler.service.CacheSourceStatus
 import com.philipwilcox.spotifybutler.service.CandidateSource
 import com.philipwilcox.spotifybutler.service.CandidateTrack
-import com.philipwilcox.spotifybutler.service.PlaylistQuery
 import com.philipwilcox.spotifybutler.service.PlaylistRecipe
 import com.philipwilcox.spotifybutler.service.PlaylistRecipeCodec
 import com.philipwilcox.spotifybutler.service.PlaylistRecipeEngine
+import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.RecipeExecutionContext
 import com.philipwilcox.spotifybutler.spotify.PlaylistTrack
 import com.philipwilcox.spotifybutler.spotify.SavedTrack
@@ -21,6 +21,7 @@ import com.philipwilcox.spotifybutler.spotify.SpotifyPlaylist
 import com.philipwilcox.spotifybutler.spotify.SpotifyPlaylistItem
 import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import com.philipwilcox.spotifybutler.spotify.decodeStoredTrack
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -44,6 +45,7 @@ class SpotifyStore private constructor(
     private val connection: Connection,
     private val refreshTokenProtector: RefreshTokenProtector,
 ) : AutoCloseable {
+    private val logger = KotlinLogging.logger {}
     private val connectionLock = Any()
 
     fun schemaVersion(): Int =
@@ -260,6 +262,16 @@ class SpotifyStore private constructor(
                         "definition_id" to it.getString("definition_id"),
                         "position" to it.getLong("position"),
                         "recipe_item_payload" to it.getString("recipe_item_payload"),
+                    )
+                },
+            playlistRecipePreferences =
+                rows(
+                    "SELECT * FROM playlist_recipe_preferences ORDER BY owner_spotify_user_id, definition_id",
+                ) {
+                    jsonRow(
+                        "owner_spotify_user_id" to it.getString("owner_spotify_user_id"),
+                        "definition_id" to it.getString("definition_id"),
+                        "shuffle_after_generation" to it.getLong("shuffle_after_generation"),
                     )
                 },
             cacheSourceSync =
@@ -579,8 +591,22 @@ class SpotifyStore private constructor(
         ids: List<String>,
         ownerSpotifyUserId: String? = null,
     ): List<StoredSong> {
-        val byId = songs(ownerSpotifyUserId).associateBy(SpotifyTrack::id)
-        return ids.mapNotNull { id -> byId[id]?.let(::toStoredSong) }
+        val normalizedIds = ids.map(String::trim).filter(String::isNotBlank).distinct()
+        if (normalizedIds.isEmpty()) return emptyList()
+        val placeholders = normalizedIds.joinToString(",") { "?" }
+        val ownerClause = if (ownerSpotifyUserId == null) "" else "owner_spotify_user_id = ? AND "
+        val args =
+            buildList<Any?> {
+                ownerSpotifyUserId?.let(::add)
+                addAll(normalizedIds)
+            }
+        val byId =
+            rows(
+                "SELECT * FROM songs WHERE $ownerClause id IN ($placeholders)",
+                *args.toTypedArray(),
+                mapper = ::decodeSong,
+            ).associateBy(SpotifyTrack::id)
+        return normalizedIds.mapNotNull { id -> byId[id]?.let(::toStoredSong) }
     }
 
     fun songEnrichment(id: String): StoredSong? = songEnrichment(listOf(id)).singleOrNull()
@@ -682,12 +708,29 @@ class SpotifyStore private constructor(
     fun findPlaylistByName(
         name: String,
         ownerSpotifyUserId: String,
-    ): ExistingPlaylistMetadata? =
-        queryOne(
-            "SELECT id FROM playlists WHERE owner_spotify_user_id = ? AND name = ? ORDER BY source_position LIMIT 1",
+    ): ExistingPlaylistMetadata? = findPlaylistsByName(name, ownerSpotifyUserId).firstOrNull()
+
+    fun findPlaylistsByName(
+        name: String,
+        ownerSpotifyUserId: String,
+    ): List<ExistingPlaylistMetadata> =
+        rows(
+            "SELECT p.id, p.name, d.description, d.item_count, d.display_url, d.owner_id " +
+                "FROM playlists p LEFT JOIN playlist_details d " +
+                "ON d.owner_spotify_user_id = p.owner_spotify_user_id AND d.playlist_id = p.id " +
+                "WHERE p.owner_spotify_user_id = ? AND p.name = ? ORDER BY p.source_position, p.id",
             ownerSpotifyUserId,
             name,
-        ) { ExistingPlaylistMetadata(it.getString(1)) }
+        ) {
+            ExistingPlaylistMetadata(
+                id = it.getString("id"),
+                name = it.getString("name"),
+                description = it.getString("description"),
+                itemCount = it.getIntOrNull("item_count"),
+                displayUrl = it.getString("display_url"),
+                ownerId = it.getString("owner_id"),
+            )
+        }
 
     fun playlistMatchesByName(name: String): List<ExistingPlaylistMetadata> =
         rows("SELECT id FROM playlists WHERE name = ? ORDER BY owner_spotify_user_id, source_position", name) {
@@ -788,6 +831,34 @@ class SpotifyStore private constructor(
             ownerSpotifyUserId,
         ) { storedDefinition(it) }
 
+    fun playlistRecipePreference(
+        definitionId: String,
+        ownerSpotifyUserId: String,
+    ): Boolean? =
+        queryOne(
+            "SELECT shuffle_after_generation FROM playlist_recipe_preferences " +
+                "WHERE owner_spotify_user_id = ? AND definition_id = ?",
+            ownerSpotifyUserId,
+            definitionId,
+        ) { it.getInt(1) != 0 }
+
+    fun savePlaylistRecipePreference(
+        definitionId: String,
+        ownerSpotifyUserId: String,
+        shuffleAfterGeneration: Boolean,
+    ) {
+        execute(
+            """INSERT INTO playlist_recipe_preferences
+               (owner_spotify_user_id, definition_id, shuffle_after_generation)
+               VALUES (?, ?, ?)
+               ON CONFLICT(owner_spotify_user_id, definition_id) DO UPDATE SET
+               shuffle_after_generation=excluded.shuffle_after_generation""",
+            ownerSpotifyUserId,
+            definitionId,
+            if (shuffleAfterGeneration) 1 else 0,
+        )
+    }
+
     fun saveUserPlaylistDefinition(definition: StoredUserPlaylistDefinition) {
         val recipe = definition.recipe ?: fallbackRecipe(definition.trackIds)
         val encoded = PlaylistRecipeCodec.encode(recipe)
@@ -834,96 +905,6 @@ class SpotifyStore private constructor(
 
     fun hasCompletedSync(ownerSpotifyUserId: String = defaultOwner()): Boolean =
         sourceSnapshots(ownerSpotifyUserId).any { it.status == CacheSourceStatus.READY }
-
-    fun duplicateSavedTrackIds(ownerSpotifyUserId: String = defaultOwner()): List<String> =
-        rows(
-            """SELECT id FROM saved_tracks WHERE owner_spotify_user_id = ? AND id IN
-               (SELECT id FROM saved_tracks WHERE owner_spotify_user_id = ? GROUP BY id HAVING COUNT(*) > 1)
-               ORDER BY source_position""",
-            ownerSpotifyUserId,
-            ownerSpotifyUserId,
-        ) { it.getString(1) }.drop(1)
-
-    fun deleteSavedTracks(
-        trackIds: List<String>,
-        ownerSpotifyUserId: String = defaultOwner(),
-    ) {
-        transaction {
-            trackIds.distinct().forEach {
-                execute("DELETE FROM saved_tracks WHERE owner_spotify_user_id = ? AND id = ?", ownerSpotifyUserId, it)
-            }
-        }
-    }
-
-    fun execute(query: PlaylistQuery): List<SpotifyTrack> = execute(defaultOwner(), query)
-
-    fun execute(
-        ownerSpotifyUserId: String,
-        query: PlaylistQuery,
-    ): List<SpotifyTrack> {
-        val saved = savedTracks(ownerSpotifyUserId)
-        val topArtists = topArtistIds(ownerSpotifyUserId)
-        val topTracks = topTrackIds(ownerSpotifyUserId)
-        val filtered =
-            when (query) {
-                is PlaylistQuery.RecentLiked ->
-                    savedEntries(ownerSpotifyUserId)
-                        .sortedByDescending {
-                            it.addedAt
-                        }.map { it.track }
-                        .take(query.limit.toInt())
-                is PlaylistQuery.RandomLiked -> saved.sortedBy(SpotifyTrack::id).take(query.limit.toInt())
-                is PlaylistQuery.CollectedDiscoverWeekly -> {
-                    val collected = playlistTracksByName(ownerSpotifyUserId, query.collectedName)
-                    val discover = playlistTracksByName(ownerSpotifyUserId, query.sourceName)
-                    (
-                        collected +
-                            discover.filter {
-                                it.releaseDate?.substringBefore('-')?.toLongOrNull() ?: 0L >=
-                                    query.minReleaseYear &&
-                                    it.id !in collected.map(SpotifyTrack::id)
-                            }
-                    )
-                }
-                is PlaylistQuery.SavedPerArtist -> perArtist(saved, query.limit.toInt())
-                is PlaylistQuery.SavedInYearRangePerArtist ->
-                    perArtist(
-                        saved.filter {
-                            yearIn(it, query.minYear, query.maxYear)
-                        },
-                        query.limit.toInt(),
-                    )
-                is PlaylistQuery.SavedThroughYearPerArtist ->
-                    perArtist(
-                        saved.filter {
-                            yearIn(it, null, query.maxYear)
-                        },
-                        query.limit.toInt(),
-                    )
-                is PlaylistQuery.SavedSinceYearPerArtist ->
-                    perArtist(
-                        saved.filter {
-                            yearIn(it, query.minYear, null)
-                        },
-                        query.limit.toInt(),
-                    )
-                PlaylistQuery.SavedNotByTopArtists ->
-                    saved.filter {
-                        it.primaryArtistId == null ||
-                            it.primaryArtistId !in topArtists
-                    }
-                PlaylistQuery.SavedNotInTopTracks -> saved.filter { it.id !in topTracks }
-                is PlaylistQuery.SavedInYearRange ->
-                    saved.filter {
-                        yearIn(
-                            it,
-                            query.minYearInclusive,
-                            query.maxYearExclusive,
-                        )
-                    }
-            }
-        return filtered
-    }
 
     fun candidates(source: CandidateSource): List<CandidateTrack> = candidates(defaultOwner(), source)
 
@@ -989,12 +970,6 @@ class SpotifyStore private constructor(
             playlistId,
         ) { decodeStoredTrack(it.getString(1), "playlist $playlistId") }
 
-    fun findPlaylistTracksByName(
-        name: String,
-        ownerSpotifyUserId: String,
-    ): List<SpotifyTrack> =
-        findPlaylistByName(name, ownerSpotifyUserId)?.id?.let { playlistTracksById(ownerSpotifyUserId, it) }.orEmpty()
-
     private fun defaultOwner(): String =
         queryOne("SELECT owner_spotify_user_id FROM cache_source_sync ORDER BY owner_spotify_user_id LIMIT 1") {
             it.getString(1)
@@ -1058,29 +1033,76 @@ class SpotifyStore private constructor(
         playlistId: String,
         trackIds: List<String>,
     ) {
+        val startedAtNanos = System.nanoTime()
+        val lookupStartedAtNanos = startedAtNanos
+        val tracksById = tracksByIds(trackIds, owner)
+        val lookupDurationMs = elapsedMillis(lookupStartedAtNanos)
+        val missingTrackId = trackIds.firstOrNull { it !in tracksById }
+        require(missingTrackId == null) { "Cannot publish unknown track $missingTrackId" }
+
         execute("DELETE FROM playlist_items WHERE owner_spotify_user_id = ? AND playlist_id = ?", owner, playlistId)
-        trackIds.forEachIndexed { position, trackId ->
-            val track = song(trackId, owner) ?: error("Cannot publish unknown track $trackId")
-            execute(
-                """INSERT INTO playlist_items
-                   (owner_spotify_user_id, playlist_id, position, added_at, added_by_id, is_local, item_type,
-                    is_playable, item_id, item_uri, status, complete_item_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                owner,
-                playlistId,
-                position,
-                null,
-                null,
-                0,
-                "track",
-                1,
-                track.id,
-                track.uri,
-                "playable",
-                "{\"item\":${track.rawJson}}",
-            )
+        val itemWriteStartedAtNanos = System.nanoTime()
+        val insertSql =
+            """INSERT INTO playlist_items
+               (owner_spotify_user_id, playlist_id, position, added_at, added_by_id, is_local, item_type,
+                is_playable, item_id, item_uri, status, complete_item_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        connection.prepareStatement(insertSql).use { statement ->
+            trackIds.forEachIndexed { position, trackId ->
+                val track = tracksById.getValue(trackId)
+                listOf(
+                    owner,
+                    playlistId,
+                    position,
+                    null,
+                    null,
+                    0,
+                    "track",
+                    1,
+                    track.id,
+                    track.uri,
+                    "playable",
+                    "{\"item\":${track.rawJson}}",
+                ).forEachIndexed { index, value -> statement.setObject(index + JDBC_PARAMETER_OFFSET, value) }
+                statement.addBatch()
+            }
+            statement.executeBatch()
+        }
+        logger.info {
+            "Playlist persistence timing: playlistId=$playlistId itemCount=${trackIds.size} " +
+                "lookupDurationMs=$lookupDurationMs itemWriteDurationMs=${elapsedMillis(itemWriteStartedAtNanos)} " +
+                "totalPersistenceDurationMs=${elapsedMillis(startedAtNanos)} " +
+                persistenceLogFields()
         }
     }
+
+    private fun tracksByIds(
+        ids: List<String>,
+        owner: String,
+    ): Map<String, SpotifyTrack> {
+        if (ids.isEmpty()) return emptyMap()
+        return ids
+            .distinct()
+            .chunked(SONG_LOOKUP_CHUNK_SIZE)
+            .flatMap { chunk ->
+                val placeholders = chunk.joinToString(",") { "?" }
+                rows(
+                    "SELECT * FROM songs WHERE owner_spotify_user_id = ? AND id IN ($placeholders)",
+                    owner,
+                    *chunk.toTypedArray(),
+                    mapper = ::decodeSong,
+                )
+            }.associateBy(SpotifyTrack::id)
+    }
+
+    private fun persistenceLogFields(): String =
+        PublishOperationLog
+            .current()
+            ?.logFields()
+            ?.let { " $it" }
+            .orEmpty()
+
+    private fun elapsedMillis(startedAtNanos: Long): Long = (System.nanoTime() - startedAtNanos) / NANOS_PER_MILLISECOND
 
     private fun inferredPlaylistItems(snapshot: SpotifyCacheSnapshot): List<SpotifyPlaylistItem> =
         snapshot.playlistTracks.mapIndexed { position, value ->
@@ -1367,8 +1389,6 @@ class SpotifyStore private constructor(
             SavedEntry(decodeStoredTrack(it.getString("track_json"), "saved track"), it.getString("added_at"))
         }
 
-    private fun savedTracks(owner: String): List<SpotifyTrack> = savedEntries(owner).map(SavedEntry::track)
-
     private fun topTracks(owner: String): List<SpotifyTrack> =
         rows("SELECT * FROM top_tracks WHERE owner_spotify_user_id = ? ORDER BY source_position", owner) {
             decodeStoredTrack(it.getString("track_json"), "top track")
@@ -1390,25 +1410,6 @@ class SpotifyStore private constructor(
             ?.let {
                 playlistTracksById(owner, it)
             }.orEmpty()
-
-    private fun perArtist(
-        tracks: List<SpotifyTrack>,
-        limit: Int,
-    ): List<SpotifyTrack> =
-        tracks
-            .groupBy {
-                it.primaryArtistId
-            }.flatMap { (_, values) -> values.sortedBy(SpotifyTrack::id).take(limit) }
-
-    private fun yearIn(
-        track: SpotifyTrack,
-        min: Long?,
-        max: Long?,
-    ): Boolean {
-        val year =
-            year(track.releaseDate) ?: return false
-        return (min == null || year >= min) && (max == null || year < max)
-    }
 
     private fun year(value: String?): Long? = value?.substringBefore('-')?.toLongOrNull()
 
@@ -1659,8 +1660,12 @@ class SpotifyStore private constructor(
         }
 
     companion object {
-        const val TARGET_SCHEMA_VERSION = 2
+        private const val SONG_LOOKUP_CHUNK_SIZE = 900
+        private const val JDBC_PARAMETER_OFFSET = 1
+        private const val NANOS_PER_MILLISECOND = 1_000_000L
+        const val TARGET_SCHEMA_VERSION = 3
         private const val LEGACY_SCHEMA_VERSION = 1
+        private const val PREVIOUS_SCHEMA_VERSION = 2
         const val DEFAULT_OWNER = "legacy-owner"
         private const val MAX_ERROR_CODE_LENGTH = 80
 
@@ -1764,7 +1769,7 @@ class SpotifyStore private constructor(
                         }
                     }
             if (version == TARGET_SCHEMA_VERSION) return
-            require(version == LEGACY_SCHEMA_VERSION) {
+            require(version == LEGACY_SCHEMA_VERSION || version == PREVIOUS_SCHEMA_VERSION) {
                 "Database at $path has schema version $version; expected $TARGET_SCHEMA_VERSION or an older " +
                     "supported version. Recreate the database or provide a supported migration."
             }
@@ -1790,6 +1795,14 @@ class SpotifyStore private constructor(
                     )
                     statement.execute(
                         "CREATE INDEX IF NOT EXISTS browser_sessions_user_id ON browser_sessions (spotify_user_id)",
+                    )
+                    statement.execute(
+                        """CREATE TABLE IF NOT EXISTS playlist_recipe_preferences (
+                           owner_spotify_user_id TEXT NOT NULL,
+                           definition_id TEXT NOT NULL,
+                           shuffle_after_generation INTEGER NOT NULL,
+                           PRIMARY KEY (owner_spotify_user_id, definition_id)
+                        )""",
                     )
                     statement.execute(
                         "UPDATE schema_version SET version = $TARGET_SCHEMA_VERSION WHERE singleton_id = 1",
@@ -1921,6 +1934,11 @@ data class ManagedPlaylist(
 
 data class ExistingPlaylistMetadata(
     val id: String,
+    val name: String? = null,
+    val description: String? = null,
+    val itemCount: Int? = null,
+    val displayUrl: String? = null,
+    val ownerId: String? = null,
 )
 
 private fun jsonRow(vararg values: Pair<String, Any?>): JsonObject =

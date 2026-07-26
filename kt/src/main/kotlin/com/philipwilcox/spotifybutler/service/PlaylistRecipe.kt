@@ -11,6 +11,7 @@ import java.time.Instant
 @Serializable
 data class PlaylistRecipe(
     val schemaVersion: Int = 1,
+    val shuffleAfterGeneration: Boolean = true,
     val source: CandidateSource,
     val predicate: TrackPredicate = TrackPredicate.All,
     val distinctness: DistinctnessPolicy = DistinctnessPolicy.By(CandidateIdentity.SpotifyUri),
@@ -307,6 +308,12 @@ internal fun orderingRank(
     recipeRevision: String,
     candidate: CandidateTrack,
 ): ByteArray = digest("order-v1", seed, recipeRevision, candidate.identity)
+
+internal fun shuffleRank(
+    seed: ByteArray,
+    recipeRevision: String,
+    candidate: CandidateTrack,
+): ByteArray = digest("shuffle-v1", seed, recipeRevision, candidate.identity)
 
 private fun digest(
     domain: String,

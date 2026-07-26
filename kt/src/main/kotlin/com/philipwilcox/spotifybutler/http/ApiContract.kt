@@ -133,14 +133,6 @@ data class ApiResponse(
     val current: CurrentWire?,
 )
 
-@Serializable data class OneTimePlaylistUpdateWire(
-    val spotifyPlaylistId: String,
-    val trackIds: List<String>,
-    val lastSeenSnapshotId: String?,
-    val appliedAt: String,
-    val tracked: Boolean,
-)
-
 @Serializable data class CreateDefinitionRequest(
     val name: String,
     val description: String = "",
@@ -148,11 +140,32 @@ data class ApiResponse(
     val enabled: Boolean = true,
 )
 
-@Serializable data class DestinationCreateRequestWire(
-    val name: String? = null,
-    val description: String? = null,
-    val public: Boolean? = null,
-    val collaborative: Boolean? = null,
+@Serializable data class UpdateRecipeSettingsRequest(
+    val shuffleAfterGeneration: Boolean,
+)
+
+@Serializable data class PublishPlaylistCandidateWire(
+    val spotifyPlaylistId: String,
+    val name: String,
+    val description: String?,
+    val itemCount: Int?,
+    val displayUrl: String?,
+)
+
+@Serializable data class PublishPlanWire(
+    val definitionId: String,
+    val playlistName: String,
+    val action: String,
+    val candidates: List<PublishPlaylistCandidateWire>,
+    val message: String?,
+    val publishFlowId: String,
+)
+
+@Serializable data class PublishDestinationRequest(
+    val action: String,
+    val spotifyPlaylistId: String? = null,
+    val trackIds: List<String>,
+    val publishFlowId: String? = null,
 )
 
 @Serializable data class SyncPlaylistRequest(
@@ -160,10 +173,8 @@ data class ApiResponse(
     val expectedDestinationSnapshotId: String? = null,
 )
 
-@Serializable data class OneTimeUpdateRequest(
-    val spotifyPlaylistId: String,
+@Serializable data class BulkSongsRequest(
     val trackIds: List<String>,
-    val expectedDestinationSnapshotId: String? = null,
 )
 
 @Serializable data class AlbumWire(
