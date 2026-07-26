@@ -48,6 +48,28 @@ tasks.register<Exec>("buildVueFrontend") {
     commandLine(resolveNpmExecutable(rootDir.parentFile), "--prefix", "vue", "run", "build")
 }
 
+val dockerImageRepository = "192.168.1.201:5000/phil/spotify-butler"
+val dockerImageTag = providers.gradleProperty("dockerImageTag").orElse("latest")
+val dockerPublicHost = providers.gradleProperty("dockerPublicHost").orElse("butler.example.invalid")
+
+tasks.register<Exec>("dockerPublishImage") {
+    group = "docker"
+    description = "Build and publish the Spotify Butler image to the configured local registry."
+    workingDir(rootDir.parentFile)
+    commandLine(
+        "docker",
+        "buildx",
+        "build",
+        "--platform=linux/amd64",
+        "--tag",
+        "$dockerImageRepository:${dockerImageTag.get()}",
+        "--build-arg",
+        "BUTLER_PUBLIC_HOST=${dockerPublicHost.get()}",
+        "--push",
+        ".",
+    )
+}
+
 tasks.named<JavaExec>("run") {
     dependsOn("buildVueFrontend")
 }

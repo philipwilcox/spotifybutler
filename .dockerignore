@@ -1,5 +1,23 @@
-.gitignore
-.idea
-src/lib/secrets.ts
-node_modules
-spotify.db
+# Credentials and deployment-only secret material
+kt/secrets*.properties
+deploy/secrets.docker.*
+**/.env
+**/.env.*
+
+# Local state and potentially identifying upstream data
+**/*.db
+**/*.db-*
+kt/raw-captures/
+**/*capture*.jsonl
+**/*.draft.jsonl
+
+# Generated dependencies and build output
+**/node_modules/
+kt/build/
+vue/dist/
+out/
+
+# Local logs and editor metadata
+**/*.log
+.idea/
+.gradle/
