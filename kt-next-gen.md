@@ -26,6 +26,24 @@ Let's make this able to edit non-generated playlists in the library too, and do 
 
 Revisit all UX elements. Make tab and angled button styles like my original proposal.
 
+## Perf - Full Library Sync
+
+Parallelize this. Also provide ways to only fetch liked songs, not update remote playlists. But also add "update just
+this playlist" button for each playlist + source.
+
 ## Feedback
 
 When we know how many paginated POSTs to make to sync playlists, expose this back to the frontend as progress! (websockets?)
+
+## Recipe Builder UI
+
+Let's figure out a slick way to do this
+
+## LastFM Integration
+
+Pull personal stats and richer genre information
+
+## AI
+
+Recipes from human language and button-guided stuff, like "start with four artists or songs, find others in my library
+that are closest." At the song-level that would be per-song not per-artist, even.

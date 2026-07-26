@@ -25,6 +25,7 @@ fun main() {
         apiClient = apiClient,
         cacheService = SpotifyCacheService(apiClient, store),
         store = store,
+        host = config.bindHost,
         frontendDirectory = config.frontendDirectory,
         allowedSpotifyUserId = secrets.allowedSpotifyUserId,
         trustedOrigins = config.trustedOrigins,

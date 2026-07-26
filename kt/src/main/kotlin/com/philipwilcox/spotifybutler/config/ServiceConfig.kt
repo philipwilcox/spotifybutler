@@ -7,6 +7,7 @@ import java.util.Properties
 data class ServiceConfig(
     val databasePath: Path,
     val frontendDirectory: Path,
+    val bindHost: String,
     val trustedOrigins: Set<String>,
     val secureCookies: Boolean,
     val callbackHttpsRequired: Boolean,
@@ -19,6 +20,8 @@ data class ServiceConfig(
         private const val DATABASE_PATH_PROPERTY = "spotify.databasePath"
         private const val FRONTEND_DIRECTORY_ENV = "SPOTIFY_BUTLER_FRONTEND_DIRECTORY"
         private const val FRONTEND_DIRECTORY_PROPERTY = "spotify.frontendDirectory"
+        private const val BIND_HOST_ENV = "SPOTIFY_BUTLER_HOST"
+        private const val BIND_HOST_PROPERTY = "spotify.host"
         private const val TRUSTED_ORIGINS_ENV = "SPOTIFY_BUTLER_TRUSTED_ORIGINS"
         private const val TRUSTED_ORIGINS_PROPERTY = "spotify.trustedOrigins"
         private const val SECURE_COOKIES_ENV = "SPOTIFY_BUTLER_SECURE_COOKIES"
@@ -45,12 +48,20 @@ data class ServiceConfig(
                 frontendDirectory =
                     configuredFrontendDirectory?.let { path -> resolveConfiguredPath(path, configFile) }
                         ?: defaultFrontendDirectory(),
+                bindHost = configuredHost(properties),
                 trustedOrigins = trustedOrigins(properties),
                 secureCookies = configuredBoolean(SECURE_COOKIES_ENV, SECURE_COOKIES_PROPERTY, properties),
                 callbackHttpsRequired = configuredBoolean(CALLBACK_HTTPS_ENV, CALLBACK_HTTPS_PROPERTY, properties),
                 trustedHosts = configuredSet(TRUSTED_HOSTS_ENV, TRUSTED_HOSTS_PROPERTY, properties, DEFAULT_HOSTS),
                 trustedProxyAddresses = configuredSet(TRUSTED_PROXIES_ENV, TRUSTED_PROXIES_PROPERTY, properties),
             )
+        }
+
+        private fun configuredHost(properties: Properties): String {
+            val configured = System.getenv(BIND_HOST_ENV) ?: properties.getProperty(BIND_HOST_PROPERTY)
+            return configured?.trim()?.also { host ->
+                require(host.isNotEmpty()) { "$BIND_HOST_ENV must not be blank" }
+            } ?: "0.0.0.0"
         }
 
         private fun trustedOrigins(properties: Properties): Set<String> {
