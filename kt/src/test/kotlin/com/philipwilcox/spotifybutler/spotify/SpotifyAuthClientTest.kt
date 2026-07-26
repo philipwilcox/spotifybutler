@@ -14,7 +14,7 @@ class SpotifyAuthClientTest {
     fun `authorization uses PKCE and callback state is single use`() {
         val client =
             SpotifyAuthClient(
-                secrets = Secrets("client", "secret", "http://127.0.0.1:8888/callback", null),
+                secrets = Secrets("client", "secret", "http://127.0.0.1:8888/callback"),
                 clock = Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC),
             )
 

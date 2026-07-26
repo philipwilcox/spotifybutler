@@ -2,13 +2,12 @@
 
 The notes here should be IGNORED for any current work, and only represent ideas for future directions to explore.
 
-## Colors
-
-Revisit the SVG colors vs the element colors here which are more muted.
-
 ## Replace Docker Workflow
 
-Let's publish this to the docker service to run from my laptop server!
+Remove the secrets file / mounted file fallback stuff in favor of env vars that we added? though how to use that for local mode.
+
+## Admin Panel
+Show who's used it! And possibly expand the "known users only restriction" after all if i ever deploy publicly.
 
 ## Album Art and Track Info Layout
 
