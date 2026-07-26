@@ -64,7 +64,10 @@ class ButlerServiceTest {
                 clock = fixedClock(),
             ).run("token", refresh = true, ownerSpotifyUserId = "owner-1")
 
-            assertEquals("owner-1", store.cacheMetadata()?.ownerSpotifyUserId)
+            assertEquals(
+                "owner-1",
+                store.sourceSnapshot("owner-1", CacheSourceKey.SAVED_TRACKS).ownerSpotifyUserId,
+            )
         }
     }
 

@@ -18,7 +18,7 @@ class SpotifyAuthClientTest {
                 clock = Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC),
             )
 
-        val authorization = client.beginAuthorization(refresh = false, returnTo = "/app")
+        val authorization = client.beginAuthorization(returnTo = "/app")
         val location = authorization.location.toString()
         val callback = client.consumeCallbackAuthorization(authorization.state, authorization.state)
 

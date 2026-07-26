@@ -34,13 +34,11 @@ class SpotifyAuthClient(
     )
 
     data class CallbackAuthorization(
-        val refresh: Boolean,
         val codeVerifier: String,
         val returnTo: String,
     )
 
     private data class PendingAuthorization(
-        val refresh: Boolean,
         val expiresAt: Instant,
         val codeVerifier: String,
         val returnTo: String,
@@ -49,15 +47,12 @@ class SpotifyAuthClient(
     private val pendingAuthorizations = ConcurrentHashMap<String, PendingAuthorization>()
     private val random = SecureRandom()
 
-    fun beginAuthorization(
-        refresh: Boolean,
-        returnTo: String = "/",
-    ): AuthorizationRequest {
+    fun beginAuthorization(returnTo: String = "/"): AuthorizationRequest {
         removeExpiredAuthorizations()
-        val state = newState(refresh)
+        val state = newState()
         val codeVerifier = newCodeVerifier()
         pendingAuthorizations[state] =
-            PendingAuthorization(refresh, clock.instant().plus(STATE_LIFETIME), codeVerifier, returnTo)
+            PendingAuthorization(clock.instant().plus(STATE_LIFETIME), codeVerifier, returnTo)
         val parameters =
             mapOf(
                 "response_type" to "code",
@@ -83,7 +78,7 @@ class SpotifyAuthClient(
         val pending = pendingAuthorizations.remove(state) ?: return null
         return pending
             .takeIf { it.expiresAt.isAfter(clock.instant()) }
-            ?.let { CallbackAuthorization(it.refresh, it.codeVerifier, it.returnTo) }
+            ?.let { CallbackAuthorization(it.codeVerifier, it.returnTo) }
     }
 
     fun exchangeAuthorizationCode(
@@ -147,10 +142,10 @@ class SpotifyAuthClient(
         )
     }
 
-    private fun newState(refresh: Boolean): String =
+    private fun newState(): String =
         ByteArray(STATE_NONCE_BYTES).also(random::nextBytes).let { nonce ->
             val encodedNonce = Base64.getUrlEncoder().withoutPadding().encodeToString(nonce)
-            val stateJson = "{\"nonce\":\"$encodedNonce\",\"refresh\":$refresh}"
+            val stateJson = "{\"nonce\":\"$encodedNonce\"}"
             Base64.getUrlEncoder().withoutPadding().encodeToString(stateJson.toByteArray(StandardCharsets.UTF_8))
         }
 

@@ -16,7 +16,22 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 
 interface SpotifyCacheFetcher {
+    val supportsIndependentSources: Boolean get() = false
+
     fun fetchCache(accessToken: String): SpotifyCacheSnapshot
+
+    fun fetchSavedTracks(accessToken: String): List<SavedTrack> = fetchCache(accessToken).savedTracks
+
+    fun fetchTopTracks(accessToken: String): List<SpotifyTrack> = fetchCache(accessToken).topTracks
+
+    fun fetchTopArtists(accessToken: String): List<SpotifyArtist> = fetchCache(accessToken).topArtists
+
+    fun fetchPlaylists(accessToken: String): List<SpotifyPlaylist> = fetchCache(accessToken).playlists
+
+    fun fetchPlaylistItems(
+        accessToken: String,
+        playlistId: String,
+    ): List<SpotifyPlaylistItem> = fetchCache(accessToken).playlistItems.filter { it.playlistId == playlistId }
 }
 
 data class SpotifyHttpResponse(
@@ -99,6 +114,7 @@ class SpotifyApiClient(
     private val apiBaseUri: URI = URI("https://api.spotify.com/"),
     private val transport: SpotifyHttpTransport = JdkSpotifyHttpTransport(httpClient),
 ) : SpotifyCacheFetcher {
+    override val supportsIndependentSources: Boolean = true
     private val logger = KotlinLogging.logger {}
     private val captureLogger = SpotifyCaptureLogger()
 
@@ -107,20 +123,69 @@ class SpotifyApiClient(
         return parseSpotifyCurrentUser(response)
     }
 
+    fun playlistOwnedByCurrentUser(
+        accessToken: String,
+        playlistId: String,
+        ownerSpotifyUserId: String,
+    ): Boolean {
+        val response =
+            getJsonObject(apiUri("/v1/playlists/$playlistId?fields=owner(id)"), accessToken, pageSequence = 0)
+        return (response["owner"] as? JsonObject)?.optionalString("id") == ownerSpotifyUserId
+    }
+
+    override fun fetchSavedTracks(accessToken: String): List<SavedTrack> =
+        pagedItems("/v1/me/tracks", accessToken).mapNotNull { item -> parseSavedTrack(item) }
+
+    override fun fetchTopTracks(accessToken: String): List<SpotifyTrack> =
+        pagedItems("/v1/me/top/tracks", accessToken).map { parseSpotifyTrack(it, "top track") }
+
+    override fun fetchTopArtists(accessToken: String): List<SpotifyArtist> =
+        pagedItems("/v1/me/top/artists", accessToken).map(::parseSpotifyArtist)
+
+    override fun fetchPlaylists(accessToken: String): List<SpotifyPlaylist> =
+        pagedItems("/v1/me/playlists", accessToken).map(::parseSpotifyPlaylist)
+
+    override fun fetchPlaylistItems(
+        accessToken: String,
+        playlistId: String,
+    ): List<SpotifyPlaylistItem> =
+        fetchPlaylistItems(
+            SpotifyPlaylist(
+                name = playlistId,
+                id = playlistId,
+                href = apiUri("/v1/playlists/$playlistId").toString(),
+                uri = "spotify:playlist:$playlistId",
+                tracksHref = apiUri("/v1/playlists/$playlistId/items").toString(),
+            ),
+            accessToken,
+        )
+
     fun createPlaylist(
         accessToken: String,
         name: String,
-    ): String {
+    ): String = createPlaylistMetadata(accessToken, name).id
+
+    fun createPlaylistMetadata(
+        accessToken: String,
+        name: String,
+        description: String? = null,
+        public: Boolean = false,
+        collaborative: Boolean = false,
+    ): SpotifyCreatedPlaylist {
         val body =
             buildJsonObject {
                 put("name", name)
-                put("public", false)
-                put("collaborative", false)
-                put("description", "Automatically generated playlist from Spotify Butler app")
+                put("public", public)
+                put("collaborative", collaborative)
+                put("description", description ?: "Automatically generated playlist from Spotify Butler app")
             }.toString()
         val response = transport.post(apiUri("/v1/me/playlists"), accessToken, body)
-        return parseMutationResponse(response, "create playlist").optionalString("id")
-            ?: error("Spotify create playlist response did not contain id")
+        val parsed = parseMutationResponse(response, "create playlist")
+        return SpotifyCreatedPlaylist(
+            id = parsed.optionalString("id") ?: error("Spotify create playlist response did not contain id"),
+            name = parsed.optionalString("name") ?: name,
+            description = parsed.optionalString("description"),
+        )
     }
 
     fun addTracks(
@@ -163,7 +228,10 @@ class SpotifyApiClient(
         val trackIds =
             pagedItems("/v1/playlists/$playlistId/items", accessToken)
                 .mapNotNull { item -> parsePlaylistTrack(item, playlistId)?.track?.takeIf { it.available }?.id }
-        return SpotifyPlaylistCurrent(trackIds)
+        val snapshotId =
+            getJsonObject(apiUri("/v1/playlists/$playlistId?fields=snapshot_id"), accessToken, pageSequence = 0)
+                .optionalString("snapshot_id")
+        return SpotifyPlaylistCurrent(trackIds, snapshotId)
     }
 
     fun replaceTrackIds(
@@ -187,6 +255,15 @@ class SpotifyApiClient(
                 append = true,
             )
         }
+    }
+
+    fun replaceTrackIdsAuthoritative(
+        accessToken: String,
+        playlistId: String,
+        trackIds: List<String>,
+    ): SpotifyPlaylistCurrent {
+        replaceTrackIds(accessToken, playlistId, trackIds)
+        return getPlaylistCurrent(accessToken, playlistId)
     }
 
     fun removeSavedTracks(
@@ -393,4 +470,11 @@ class SpotifyApiClient(
 
 data class SpotifyPlaylistCurrent(
     val trackIds: List<String>,
+    val snapshotId: String? = null,
+)
+
+data class SpotifyCreatedPlaylist(
+    val id: String,
+    val name: String,
+    val description: String?,
 )

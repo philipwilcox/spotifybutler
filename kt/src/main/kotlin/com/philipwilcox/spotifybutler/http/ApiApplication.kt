@@ -1,34 +1,35 @@
-// This application facade intentionally keeps route policy, DTO mapping, and resource authorization together.
-@file:Suppress(
-    "TooManyFunctions",
-    "LargeClass",
-    "CyclomaticComplexMethod",
-    "TooGenericExceptionCaught",
-    "SwallowedException",
-    "MagicNumber",
-    "ThrowsCount",
-)
+@file:Suppress("TooManyFunctions", "LargeClass", "CyclomaticComplexMethod", "TooGenericExceptionCaught", "MagicNumber")
 
 package com.philipwilcox.spotifybutler.http
 
 import com.philipwilcox.spotifybutler.db.SpotifyStore
 import com.philipwilcox.spotifybutler.db.StoredPlaylistItem
-import com.philipwilcox.spotifybutler.service.PlaylistDefinition
-import com.philipwilcox.spotifybutler.service.PlaylistQueries
+import com.philipwilcox.spotifybutler.db.StoredSong
+import com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition
+import com.philipwilcox.spotifybutler.service.AuthoritativePlaylistState
+import com.philipwilcox.spotifybutler.service.DestinationConflictException
+import com.philipwilcox.spotifybutler.service.DestinationCreateRequest
+import com.philipwilcox.spotifybutler.service.MissingDestinationException
+import com.philipwilcox.spotifybutler.service.OwnerMismatchException
+import com.philipwilcox.spotifybutler.service.PlaylistDefinitionView
+import com.philipwilcox.spotifybutler.service.PlaylistDestinationGateway
+import com.philipwilcox.spotifybutler.service.PlaylistDestinationService
+import com.philipwilcox.spotifybutler.service.PlaylistPreview
+import com.philipwilcox.spotifybutler.service.PlaylistPreviewService
+import com.philipwilcox.spotifybutler.service.PlaylistRecipeCodec
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
-import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
-import java.net.HttpURLConnection
-import java.security.MessageDigest
 import java.time.Clock
-import java.time.Year
 import java.util.Base64
+import java.util.UUID
 
 data class PlaylistRemoteState(
     val trackIds: List<String>,
+    val snapshotId: String? = null,
 )
 
 interface PlaylistSyncGateway {
@@ -42,6 +43,22 @@ interface PlaylistSyncGateway {
         playlistId: String,
         trackIds: List<String>,
     )
+
+    fun createPlaylist(
+        accessToken: String,
+        request: DestinationCreateRequest,
+    ): String = error("Playlist creation is not supported")
+
+    fun ownsPlaylist(
+        accessToken: String,
+        playlistId: String,
+    ): Boolean = true
+
+    fun ownsPlaylist(
+        accessToken: String,
+        playlistId: String,
+        ownerSpotifyUserId: String,
+    ): Boolean = ownsPlaylist(accessToken, playlistId)
 }
 
 class SpotifyPlaylistSyncGateway(
@@ -50,14 +67,31 @@ class SpotifyPlaylistSyncGateway(
     override fun current(
         accessToken: String,
         playlistId: String,
-    ): PlaylistRemoteState =
-        apiClient.getPlaylistCurrent(accessToken, playlistId).let { PlaylistRemoteState(it.trackIds) }
+    ) = apiClient.getPlaylistCurrent(accessToken, playlistId).let { PlaylistRemoteState(it.trackIds, it.snapshotId) }
 
     override fun replaceTracks(
         accessToken: String,
         playlistId: String,
         trackIds: List<String>,
     ) = apiClient.replaceTrackIds(accessToken, playlistId, trackIds)
+
+    override fun createPlaylist(
+        accessToken: String,
+        request: DestinationCreateRequest,
+    ) = apiClient
+        .createPlaylistMetadata(
+            accessToken,
+            request.name ?: "Spotify Butler Playlist",
+            request.description,
+            request.public ?: false,
+            request.collaborative ?: false,
+        ).id
+
+    override fun ownsPlaylist(
+        accessToken: String,
+        playlistId: String,
+        ownerSpotifyUserId: String,
+    ) = apiClient.playlistOwnedByCurrentUser(accessToken, playlistId, ownerSpotifyUserId)
 }
 
 class ApiApplication(
@@ -73,7 +107,8 @@ class ApiApplication(
 ) {
     private val logger = KotlinLogging.logger {}
     private val refreshLocks = KeyedLock()
-
+    private val previewService = PlaylistPreviewService(store, clock)
+    private val destinationService = PlaylistDestinationService(store, gateway(), clock)
     constructor(
         cacheService: SpotifyCacheService,
         store: SpotifyStore,
@@ -96,33 +131,85 @@ class ApiApplication(
         secureCookies,
     )
 
+    private fun gateway() =
+        object : PlaylistDestinationGateway {
+            override fun create(
+                accessToken: String,
+                request: DestinationCreateRequest,
+            ) = syncGateway.createPlaylist(accessToken, request)
+
+            override fun owns(
+                accessToken: String,
+                playlistId: String,
+                ownerSpotifyUserId: String,
+            ) = syncGateway.ownsPlaylist(accessToken, playlistId, ownerSpotifyUserId)
+
+            override fun replace(
+                accessToken: String,
+                playlistId: String,
+                trackIds: List<String>,
+            ): AuthoritativePlaylistState {
+                syncGateway.replaceTracks(accessToken, playlistId, trackIds)
+                return current(accessToken, playlistId)
+            }
+
+            override fun current(
+                accessToken: String,
+                playlistId: String,
+            ) = syncGateway.current(accessToken, playlistId).let {
+                AuthoritativePlaylistState(playlistId, it.trackIds, it.snapshotId)
+            }
+        }
+
     fun handle(request: ApiRequest): ApiResponse {
         val requestId = request.headers.header("X-Request-Id")?.takeIf(::validRequestId) ?: newRequestId()
         return try {
-            require(request.path.startsWith("/api/v1/")) {
-                ApiFailure(HttpURLConnection.HTTP_NOT_FOUND, "not_found", "Route not found")
-            }
-            val session = requireSession(request)
-            route(request, session).withRequestId(requestId)
+            require(request.path.startsWith("/api/v1/")) { ApiFailure(404, "not_found", "Route not found") }
+            route(request, requireSession(request)).withRequestId(requestId)
         } catch (failure: ApiFailure) {
             errorResponse(failure, requestId).withRequestId(requestId)
+        } catch (failure: MissingDestinationException) {
+            errorResponse(
+                ApiFailure(
+                    409,
+                    "destination_missing",
+                    failure.message ?: "Destination is missing",
+                ),
+                requestId,
+            ).withRequestId(requestId)
+        } catch (failure: DestinationConflictException) {
+            errorResponse(
+                ApiFailure(
+                    409,
+                    "destination_conflict",
+                    failure.message ?: "Destination has changed",
+                ),
+                requestId,
+            ).withRequestId(requestId)
+        } catch (failure: OwnerMismatchException) {
+            errorResponse(
+                ApiFailure(
+                    403,
+                    "owner_mismatch",
+                    failure.message ?: "Playlist ownership failed",
+                ),
+                requestId,
+            ).withRequestId(requestId)
         } catch (exception: IllegalArgumentException) {
             errorResponse(
                 ApiFailure(
-                    HttpURLConnection.HTTP_BAD_REQUEST,
+                    400,
                     "malformed_request",
                     exception.message ?: "Invalid request",
                 ),
                 requestId,
             ).withRequestId(requestId)
-        } catch (exception: Exception) {
-            logger.error(exception) { "API request failed path=${request.path}" }
+        } catch (
+            exception: Exception,
+        ) {
+            logger.error(exception) { "API request failed" }
             errorResponse(
-                ApiFailure(
-                    HttpURLConnection.HTTP_INTERNAL_ERROR,
-                    "internal_error",
-                    "The request could not be completed",
-                ),
+                ApiFailure(500, "internal_error", "The request could not be completed"),
                 requestId,
             ).withRequestId(requestId)
         }
@@ -134,28 +221,8 @@ class ApiApplication(
     ): ApiResponse {
         val parts = request.path.trim('/').split('/')
         return when {
-            parts == listOf("api", "v1", "session") && request.method == "GET" -> session(request, session)
+            parts == listOf("api", "v1", "session") && request.method == "GET" -> session(session)
             parts == listOf("api", "v1", "session") && request.method == "DELETE" -> deleteSession(request, session)
-            parts == listOf("api", "v1", "playlists") && request.method == "GET" -> playlists(session)
-            parts == listOf("api", "v1", "playlists") && request.method == "POST" -> createPlaylist(request, session)
-            parts.size == 4 && parts.take(3) == listOf("api", "v1", "playlists") && request.method == "GET" ->
-                playlist(parts[3], session)
-            parts.size == 4 && parts.take(3) == listOf("api", "v1", "playlists") && request.method == "PUT" ->
-                updatePlaylist(parts[3], request, session)
-            parts.size == 5 &&
-                parts.take(3) == listOf("api", "v1", "playlists") &&
-                parts[4] == "current" &&
-                request.method == "GET" -> current(parts[3], session)
-            parts.size == 5 &&
-                parts.take(3) == listOf("api", "v1", "playlists") &&
-                parts[4] == "syncs" &&
-                request.method == "POST" -> sync(parts[3], request, session)
-            parts == listOf("api", "v1", "library") && request.method == "GET" -> library(session)
-            parts == listOf("api", "v1", "library", "refresh") && request.method == "POST" -> refresh(request, session)
-            parts == listOf("api", "v1", "songs") && request.method == "GET" -> songs(request, session)
-            parts.size == 4 && parts.take(3) == listOf("api", "v1", "songs") && request.method == "GET" ->
-                song(parts[3], session)
-            parts == listOf("api", "v1", "run") && request.method == "POST" -> run(request, session)
             parts ==
                 listOf(
                     "api",
@@ -164,20 +231,52 @@ class ApiApplication(
                     "refresh",
                 ) &&
                 request.method == "POST" -> refreshSession(request, session)
-            else -> throw ApiFailure(HttpURLConnection.HTTP_NOT_FOUND, "not_found", "Route not found")
+            parts == listOf("api", "v1", "library") && request.method == "GET" -> library(session)
+            parts == listOf("api", "v1", "library", "refresh") && request.method == "POST" -> refresh(request, session)
+            parts == listOf("api", "v1", "playlists") && request.method == "GET" -> definitions(session)
+            parts == listOf("api", "v1", "playlists") && request.method == "POST" -> createDefinition(request, session)
+            parts.size == 4 &&
+                parts.take(
+                    3,
+                ) == listOf("api", "v1", "playlists") &&
+                request.method == "GET" -> definition(parts[3], session)
+            parts.size == 4 &&
+                parts.take(
+                    3,
+                ) ==
+                listOf(
+                    "api",
+                    "v1",
+                    "playlists",
+                ) &&
+                request.method == "PUT" -> updateDefinition(parts[3], request, session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "preview" &&
+                request.method == "GET" -> preview(parts[3], request, session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "destinations" &&
+                request.method == "POST" -> createDestination(parts[3], request, session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "current" &&
+                request.method == "GET" -> current(parts[3], session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "syncs" &&
+                request.method == "POST" -> sync(parts[3], request, session)
+            parts.size == 5 &&
+                parts.take(3) == listOf("api", "v1", "playlists") &&
+                parts[4] == "one-time-updates" &&
+                request.method == "POST" -> oneTimeUpdate(parts[3], request, session)
+            parts == listOf("api", "v1", "songs") && request.method == "GET" -> songs(request, session)
+            else -> throw ApiFailure(404, "not_found", "Route not found")
         }
     }
 
-    private fun session(
-        request: ApiRequest,
-        session: ButlerSession,
-    ): ApiResponse {
-        if (request.method != "GET") requireStateChange(request, session)
-        return json(
-            HttpURLConnection.HTTP_OK,
-            SessionWire(session.ownerSpotifyUserId, session.csrfToken, session.expiresAt.toString()),
-        )
-    }
+    private fun session(session: ButlerSession) =
+        json(200, SessionWire(session.ownerSpotifyUserId, session.csrfToken, session.expiresAt.toString()))
 
     private fun deleteSession(
         request: ApiRequest,
@@ -185,41 +284,31 @@ class ApiApplication(
     ): ApiResponse {
         requireStateChange(request, session)
         sessionStore.remove(session.id)
-        return ApiResponse(
-            HttpURLConnection.HTTP_NO_CONTENT,
-            "",
-            mapOf(
-                "Content-Type" to "application/json; charset=utf-8",
-            ),
-        )
+        return ApiResponse(204, "")
     }
 
+    @Suppress("SwallowedException", "TooGenericExceptionCaught")
     private fun refreshSession(
         request: ApiRequest,
         session: ButlerSession,
     ): ApiResponse {
         requireStateChange(request, session)
-        val client =
-            authClient
-                ?: throw ApiFailure(
-                    HttpURLConnection.HTTP_NOT_IMPLEMENTED,
-                    "refresh_unavailable",
-                    "Session refresh is not configured",
-                )
+        val client = authClient ?: throw ApiFailure(501, "refresh_unavailable", "Session refresh is not configured")
         val rotated =
             try {
                 sessionStore.refresh(session) { refreshToken ->
-                    client.refreshAccessToken(refreshToken).let { it.accessToken to it.refreshToken }
+                    client.refreshAccessToken(refreshToken).let {
+                        it.accessToken to
+                            it.refreshToken
+                    }
                 }
-            } catch (exception: Exception) {
-                throw ApiFailure(
-                    HttpURLConnection.HTTP_BAD_GATEWAY,
-                    "spotify_auth_failure",
-                    "Spotify session refresh failed",
-                )
+            } catch (
+                exception: Exception,
+            ) {
+                throw ApiFailure(502, "spotify_auth_failure", "Spotify session refresh failed")
             }
         return ApiResponse(
-            HttpURLConnection.HTTP_OK,
+            200,
             apiJson.encodeToString(
                 SessionWire(rotated.ownerSpotifyUserId, rotated.csrfToken, rotated.expiresAt.toString()),
             ),
@@ -230,186 +319,152 @@ class ApiApplication(
         )
     }
 
-    private fun playlists(session: ButlerSession): ApiResponse {
-        requireCacheOwner(session)
-        val definitions = builtInDefinitions() + userDefinitions(session.ownerSpotifyUserId)
-        val response = PlaylistListWire(definitions.map { definition -> playlistReference(definition, session) })
-        return json(HttpURLConnection.HTTP_OK, response)
-    }
+    private fun library(session: ButlerSession): ApiResponse = json(200, libraryWire(session))
 
-    private fun createPlaylist(
+    @Suppress("SwallowedException", "TooGenericExceptionCaught")
+    private fun refresh(
         request: ApiRequest,
         session: ButlerSession,
     ): ApiResponse {
         requireStateChange(request, session)
-        val input = body<CreatePlaylistRequest>(request)
-        require(input.name.isNotBlank()) { "name must not be blank" }
-        require(input.name.length <= MAX_NAME_LENGTH) { "name is too long" }
-        validateTrackIds(input.trackIds)
-        val id = "user-${Base64.getUrlEncoder().withoutPadding().encodeToString(
-            MessageDigest
-                .getInstance(
-                    "SHA-256",
-                ).digest("${session.ownerSpotifyUserId}:${input.name}:${clock.millis()}".toByteArray()),
-        ).take(16)}"
+        val input = request.body?.let { body<RefreshLibraryRequest>(request) } ?: RefreshLibraryRequest()
+        return refreshLocks.withLock(session.ownerSpotifyUserId) {
+            try {
+                cacheService.refreshSources(session.ownerSpotifyUserId, session.accessToken, input.sourceKeys?.toSet())
+                json(200, libraryWire(session))
+            } catch (
+                exception: IllegalArgumentException,
+            ) {
+                throw ApiFailure(400, "invalid_source_keys", exception.message ?: "Unsupported source key")
+            } catch (exception: Exception) {
+                throw ApiFailure(502, "spotify_failure", "Library source refresh failed")
+            }
+        }
+    }
+
+    private fun definitions(session: ButlerSession): ApiResponse =
+        json(
+            200,
+            DefinitionListWire(
+                previewService.definitions(session.ownerSpotifyUserId).map {
+                    definitionWire(it, session.ownerSpotifyUserId)
+                },
+            ),
+        )
+
+    private fun createDefinition(
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val input = body<CreateDefinitionRequest>(request)
+        validateDefinitionInput(input.name, input.description)
         val definition =
-            UserPlaylistDefinition(
-                id,
+            StoredUserPlaylistDefinition(
+                "owner-" + UUID.randomUUID(),
                 session.ownerSpotifyUserId,
                 input.name,
-                input.trackIds.toList(),
+                emptyList(),
+                input.description,
+                input.enabled,
+                PlaylistRecipeCodec.canonicalize(input.recipe),
             )
-        store.saveUserPlaylistDefinition(definition.toStored())
+        store.saveUserPlaylistDefinition(definition)
         return json(
-            HttpURLConnection.HTTP_CREATED,
-            playlistReference(definition.asView(), session),
+            201,
+            definitionWire(
+                previewService.resolve(definition.id, session.ownerSpotifyUserId),
+                session.ownerSpotifyUserId,
+            ),
         )
     }
 
-    private fun playlist(
+    private fun definition(
         definitionId: String,
         session: ButlerSession,
-    ): ApiResponse {
-        val definition = definition(definitionId, session.ownerSpotifyUserId)
-        return json(HttpURLConnection.HTTP_OK, playlistReference(definition, session))
-    }
+    ): ApiResponse =
+        json(
+            200,
+            definitionWire(resolveDefinition(definitionId, session.ownerSpotifyUserId), session.ownerSpotifyUserId),
+        )
 
-    private fun updatePlaylist(
+    private fun updateDefinition(
         definitionId: String,
         request: ApiRequest,
         session: ButlerSession,
     ): ApiResponse {
         requireStateChange(request, session)
-        val existing =
+        val current =
             store.userPlaylistDefinition(definitionId, session.ownerSpotifyUserId)
-                ?: throw ApiFailure(HttpURLConnection.HTTP_NOT_FOUND, "not_found", "User playlist definition not found")
-        val input = body<CreatePlaylistRequest>(request)
-        require(input.name.isNotBlank()) { "name must not be blank" }
-        require(input.name.length <= MAX_NAME_LENGTH) { "name is too long" }
-        validateTrackIds(input.trackIds)
-        val updated =
-            existing.copy(
+                ?: throw ApiFailure(403, "definition_read_only", "Built-in definitions cannot be edited")
+        val input = body<CreateDefinitionRequest>(request)
+        validateDefinitionInput(input.name, input.description)
+        store.saveUserPlaylistDefinition(
+            current.copy(
                 name = input.name,
-                trackIds = input.trackIds.toList(),
-            )
-        store.saveUserPlaylistDefinition(updated)
-        return json(
-            HttpURLConnection.HTTP_OK,
-            playlistReference(updated.toView(), session),
+                description = input.description,
+                enabled = input.enabled,
+                recipe = PlaylistRecipeCodec.canonicalize(input.recipe),
+            ),
         )
+        return json(
+            200,
+            definitionWire(resolveDefinition(definitionId, session.ownerSpotifyUserId), session.ownerSpotifyUserId),
+        )
+    }
+
+    private fun preview(
+        definitionId: String,
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse =
+        json(200, previewService.preview(definitionId, session.ownerSpotifyUserId, request.query["seed"]).toWire())
+
+    private fun createDestination(
+        definitionId: String,
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val input = request.body?.let { body<DestinationCreateRequestWire>(request) } ?: DestinationCreateRequestWire()
+        val destination =
+            destinationService.create(
+                definitionId,
+                session.ownerSpotifyUserId,
+                session.accessToken,
+                DestinationCreateRequest(input.name, input.description, input.public, input.collaborative),
+            )
+        return json(201, destination.toWire(definitionId))
     }
 
     private fun current(
         definitionId: String,
         session: ButlerSession,
     ): ApiResponse {
-        requireCacheOwner(session)
-        val definition = definition(definitionId, session.ownerSpotifyUserId)
-        store.cacheMetadata() ?: return json(HttpURLConnection.HTTP_OK, PlaylistCurrentEnvelopeWire(null))
-        val playlistId =
-            resolvePlaylistId(definition, session)
-                ?: return json(HttpURLConnection.HTTP_OK, PlaylistCurrentEnvelopeWire(null))
+        resolveDefinition(definitionId, session.ownerSpotifyUserId)
+        val destination =
+            destinationService.current(definitionId, session.ownerSpotifyUserId)
+                ?: return json(200, CurrentEnvelopeWire(null))
         val trackIds =
             store
                 .playlistItems(
-                    playlistId,
+                    destination.spotifyPlaylistId,
+                    session.ownerSpotifyUserId,
                 ).filter(StoredPlaylistItem::isPlayableCurrentTrack)
-                .map { it.itemId!! }
+                .mapNotNull {
+                    it.itemId
+                }
         return json(
-            HttpURLConnection.HTTP_OK,
-            PlaylistCurrentEnvelopeWire(
-                PlaylistCurrentWire(playlistId, trackIds),
+            200,
+            CurrentEnvelopeWire(
+                CurrentWire(
+                    destination.spotifyPlaylistId,
+                    trackIds,
+                    destination.lastSyncedAt?.toString(),
+                    destination.lastSeenSnapshotId,
+                ),
             ),
         )
-    }
-
-    private fun library(session: ButlerSession): ApiResponse {
-        requireCacheOwner(session)
-        val metadata = store.cacheMetadata()
-        val status = metadata?.completionState ?: "empty"
-        return json(
-            HttpURLConnection.HTTP_OK,
-            LibraryWire(
-                status = status,
-                ownerId = metadata?.ownerSpotifyUserId,
-                completedAt =
-                    metadata?.syncTimestampMillis?.let {
-                        java.time.Instant
-                            .ofEpochMilli(it)
-                            .toString()
-                    },
-                counts = mapOf("songs" to store.songs().size, "playlists" to builtInDefinitions().size),
-            ),
-        )
-    }
-
-    private fun songs(
-        request: ApiRequest,
-        session: ButlerSession,
-    ): ApiResponse {
-        requireCacheOwner(session)
-        val ids =
-            request.query["ids"]
-                ?.split(',')
-                ?.map(String::trim)
-                ?.filter(String::isNotBlank)
-                .orEmpty()
-        require(ids.isNotEmpty()) { "ids must contain at least one track ID" }
-        require(ids.size <= MAX_SONG_IDS) { "ids contains too many track IDs" }
-        val tracksById = store.songEnrichment(ids).associateBy { it.id }
-        val tracks = ids.mapNotNull(tracksById::get)
-        return json(
-            HttpURLConnection.HTTP_OK,
-            SongsWire(
-                items = tracks.map { it.toSongWire() },
-                missingIds = ids.distinct().filterNot(tracksById::containsKey),
-            ),
-        )
-    }
-
-    private fun song(
-        trackId: String,
-        session: ButlerSession,
-    ): ApiResponse {
-        requireCacheOwner(session)
-        val track =
-            store.songEnrichment(trackId)
-                ?: throw ApiFailure(HttpURLConnection.HTTP_NOT_FOUND, "song_not_found", "Song not found")
-        return json(HttpURLConnection.HTTP_OK, track.toSongWire())
-    }
-
-    private fun refresh(
-        request: ApiRequest,
-        session: ButlerSession,
-    ): ApiResponse = refreshLibrary(request, session, "Library refresh failed")
-
-    private fun run(
-        request: ApiRequest,
-        session: ButlerSession,
-    ): ApiResponse = refreshLibrary(request, session, "Legacy run failed")
-
-    private fun refreshLibrary(
-        request: ApiRequest,
-        session: ButlerSession,
-        failureMessage: String,
-    ): ApiResponse {
-        requireStateChange(request, session)
-        val initialRevision = store.cacheMetadata()?.revision
-        return refreshLocks.withLock(session.ownerSpotifyUserId) {
-            if (store.cacheMetadata()?.revision != initialRevision) return@withLock library(session)
-            store.markCacheRefreshing(session.ownerSpotifyUserId)
-            try {
-                cacheService.loadIfNeeded(
-                    session.accessToken,
-                    refresh = true,
-                    ownerSpotifyUserId = session.ownerSpotifyUserId,
-                )
-            } catch (exception: Exception) {
-                store.markCacheStale()
-                throw ApiFailure(HttpURLConnection.HTTP_BAD_GATEWAY, "spotify_failure", failureMessage)
-            }
-            library(session)
-        }
     }
 
     private fun sync(
@@ -418,164 +473,169 @@ class ApiApplication(
         session: ButlerSession,
     ): ApiResponse {
         requireStateChange(request, session)
-        requireCacheOwner(session)
         val input = body<SyncPlaylistRequest>(request)
-        store.cacheMetadata()
-            ?: throw ApiFailure(HttpURLConnection.HTTP_CONFLICT, "cache_not_ready", "The library cache is not ready")
-        val definition = definition(definitionId, session.ownerSpotifyUserId)
-        val playlistId =
-            resolvePlaylistId(definition, session)
-                ?: throw ApiFailure(HttpURLConnection.HTTP_CONFLICT, "mapping_missing", "The playlist is not mapped")
-        validateTrackIds(input.trackIds)
-        spotifyCall { syncGateway.replaceTracks(session.accessToken, playlistId, input.trackIds) }
-        val authoritative = spotifyCall { syncGateway.current(session.accessToken, playlistId) }
-        store.publishPlaylistTrackIds(
-            playlistId,
-            authoritative.trackIds,
-            clock.millis(),
-        )
+        validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
+        val authoritative =
+            destinationService.sync(
+                definitionId,
+                session.ownerSpotifyUserId,
+                session.accessToken,
+                input.trackIds,
+                input.expectedDestinationSnapshotId,
+            )
+        val destination = destinationService.current(definitionId, session.ownerSpotifyUserId)!!
         return json(
-            HttpURLConnection.HTTP_OK,
-            PlaylistCurrentEnvelopeWire(PlaylistCurrentWire(playlistId, authoritative.trackIds)),
+            200,
+            CurrentEnvelopeWire(
+                CurrentWire(
+                    authoritative.spotifyPlaylistId,
+                    authoritative.trackIds,
+                    destination.lastSyncedAt?.toString(),
+                    authoritative.snapshotId,
+                ),
+            ),
         )
     }
 
-    private fun definition(
-        id: String,
-        ownerSpotifyUserId: String,
-    ): DefinitionView =
-        store.userPlaylistDefinition(id, ownerSpotifyUserId)?.toView()
-            ?: builtInDefinitions().firstOrNull { it.id == id }
-            ?: throw ApiFailure(HttpURLConnection.HTTP_NOT_FOUND, "not_found", "Playlist definition not found")
-
-    private fun userDefinitions(ownerSpotifyUserId: String): List<DefinitionView> =
-        store.userPlaylistDefinitions(ownerSpotifyUserId).map { it.toView() }
-
-    private fun com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition.toView(): DefinitionView =
-        DefinitionView(id, name, null, trackIds)
-
-    private fun builtInDefinitions(): List<DefinitionView> =
-        PlaylistQueries.definitions(Year.now(clock).value, MIN_DISCOVER_WEEKLY_YEAR).map { definition ->
-            DefinitionView(definition.id.name, definition.name, definition, emptyList())
-        }
-
-    private fun playlistReference(
-        definition: DefinitionView,
-        session: ButlerSession,
-    ): PlaylistReferenceWire {
-        val mapping = resolvePlaylistId(definition, session)
-        return PlaylistReferenceWire(
-            id = definition.id,
-            name = definition.name,
-            state = if (mapping == null) "unmapped" else "mapped",
-            spotifyPlaylistId = mapping,
-            trackIds = definition.trackIds,
-        )
-    }
-
-    private fun resolvePlaylistId(
-        definition: DefinitionView,
-        session: ButlerSession,
-    ): String? {
-        store.managedPlaylist(definition.id, session.ownerSpotifyUserId)?.let { return it.spotifyPlaylistId }
-        val matches =
-            store.playlistMatchesByName(definition.name).filter { match ->
-                store.playlistDetails(match.id)?.ownerId == session.ownerSpotifyUserId
-            }
-        if (matches.size >
-            1
-        ) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_CONFLICT,
-                "playlist_mapping_conflict",
-                "More than one owned playlist matches the definition name",
-            )
-        }
-        val cachedId = matches.singleOrNull()?.id ?: return null
-        val owner = store.playlistDetails(cachedId)?.ownerId
-        if (owner != null && owner != session.ownerSpotifyUserId) return null
-        store.saveManagedPlaylist(definition.id, cachedId, session.ownerSpotifyUserId)
-        return cachedId
-    }
-
-    private fun requireSession(request: ApiRequest): ButlerSession {
-        val session =
-            sessionStore.find(request.headers.cookie("butler_session"))
-                ?: throw ApiFailure(HttpURLConnection.HTTP_UNAUTHORIZED, "unauthorized", "A Butler session is required")
-        if (allowedSpotifyUserId != null && session.ownerSpotifyUserId != allowedSpotifyUserId) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_FORBIDDEN,
-                "user_not_allowed",
-                "This Spotify account is not allowed",
-            )
-        }
-        if (store.cacheMetadata()?.ownerSpotifyUserId != null &&
-            store.cacheMetadata()?.ownerSpotifyUserId != session.ownerSpotifyUserId
-        ) {
-            throw ApiFailure(HttpURLConnection.HTTP_FORBIDDEN, "owner_mismatch", "The session does not own this cache")
-        }
-        return session
-    }
-
-    private fun requireCacheOwner(session: ButlerSession) {
-        val owner = store.cacheMetadata()?.ownerSpotifyUserId
-        if (owner != null && owner != session.ownerSpotifyUserId) {
-            throw ApiFailure(HttpURLConnection.HTTP_FORBIDDEN, "owner_mismatch", "The session does not own this cache")
-        }
-    }
-
-    private fun requireStateChange(
+    private fun oneTimeUpdate(
+        definitionId: String,
         request: ApiRequest,
         session: ButlerSession,
-    ) {
-        if (request.headers.header("X-CSRF-Token") != session.csrfToken) {
-            throw ApiFailure(HttpURLConnection.HTTP_FORBIDDEN, "csrf_failed", "The CSRF token is invalid")
-        }
-        val origin = request.headers.header("Origin")
-        if (trustedOrigins.isEmpty() || origin !in trustedOrigins) {
-            throw ApiFailure(
-                HttpURLConnection.HTTP_FORBIDDEN,
-                "origin_not_trusted",
-                "The request origin is not trusted",
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val input = body<OneTimeUpdateRequest>(request)
+        validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
+        val result =
+            destinationService.oneTimeUpdate(
+                definitionId,
+                session.ownerSpotifyUserId,
+                session.accessToken,
+                input.spotifyPlaylistId,
+                input.trackIds,
+                input.expectedDestinationSnapshotId,
             )
-        }
-        if (request.body != null &&
-            !request.headers
-                .header("Content-Type")
+        return json(
+            200,
+            OneTimePlaylistUpdateWire(
+                result.spotifyPlaylistId,
+                result.trackIds,
+                result.lastSeenSnapshotId,
+                result.appliedAt.toString(),
+                false,
+            ),
+        )
+    }
+
+    private fun songs(
+        request: ApiRequest,
+        session: ButlerSession,
+    ): ApiResponse {
+        val ids =
+            request.query["ids"]
+                ?.split(',')
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
                 .orEmpty()
-                .lowercase()
-                .startsWith("application/json")
-        ) {
-            throw ApiFailure(415, "unsupported_media_type", "JSON content is required")
-        }
+        require(ids.isNotEmpty()) { "ids must contain at least one track ID" }
+        require(ids.size <= 50) { "ids contains too many track IDs" }
+        val tracksById = store.songEnrichment(ids, session.ownerSpotifyUserId).associateBy(StoredSong::id)
+        return json(
+            200,
+            SongsWire(
+                ids
+                    .mapNotNull {
+                        tracksById[it]
+                    }.map(StoredSong::toSongWire),
+                ids.distinct().filterNot(tracksById::containsKey),
+            ),
+        )
     }
 
-    private fun sessionCookie(sessionId: String): String =
-        buildString {
-            append("butler_session=$sessionId; Path=/; Max-Age=43200; SameSite=Lax; HttpOnly")
-            if (secureCookies) append("; Secure")
-        }
+    private fun libraryWire(session: ButlerSession): LibraryWire =
+        LibraryWire(
+            session.ownerSpotifyUserId,
+            cacheService
+                .aggregateStatus(
+                    session.ownerSpotifyUserId,
+                ).name
+                .lowercase(),
+            store.sourceSnapshots(session.ownerSpotifyUserId).map {
+                it.toWire()
+            },
+            previewService
+                .definitions(
+                    session.ownerSpotifyUserId,
+                ).map { definitionWire(it, session.ownerSpotifyUserId) },
+        )
 
-    private inline fun <reified T> body(request: ApiRequest): T {
-        val body =
-            request.body
-                ?: throw ApiFailure(HttpURLConnection.HTTP_BAD_REQUEST, "malformed_request", "A JSON body is required")
-        return try {
-            apiJson.decodeFromString<T>(body)
-        } catch (exception: Exception) {
-            throw ApiFailure(HttpURLConnection.HTTP_BAD_REQUEST, "malformed_json", "The request body is not valid JSON")
-        }
+    private fun resolveDefinition(
+        id: String,
+        owner: String,
+    ): PlaylistDefinitionView =
+        runCatching {
+            previewService.resolve(id, owner)
+        }.getOrElse { throw ApiFailure(404, "not_found", "Playlist definition not found") }
+
+    private fun definitionWire(
+        definition: PlaylistDefinitionView,
+        owner: String,
+    ): DefinitionWire =
+        DefinitionWire(
+            definition.definitionId,
+            definition.name,
+            definition.description,
+            definition.kind.name
+                .lowercase(),
+            definition.editable,
+            definition.enabled,
+            definition.recipe,
+            previewService
+                .sourceDependencies(
+                    definition,
+                    owner,
+                ).map {
+                    it.toWire()
+                },
+            store
+                .managedPlaylist(
+                    definition.definitionId,
+                    owner,
+                )?.let { mapping ->
+                    DestinationSummaryWire(
+                        definition.definitionId,
+                        mapping.spotifyPlaylistId,
+                        java.time.Instant
+                            .ofEpochMilli(mapping.createdAtMillis)
+                            .toString(),
+                        mapping.lastSyncedAtMillis?.let(java.time.Instant::ofEpochMilli)?.toString(),
+                        mapping.lastSeenSnapshotId,
+                        true,
+                    )
+                },
+        )
+
+    private fun validateDefinitionInput(
+        name: String,
+        description: String,
+    ) {
+        require(name.isNotBlank()) { "name must not be blank" }
+        require(
+            name.length <= 200,
+        ) { "name is too long" }
+        require(description.length <= 2000) { "description is too long" }
     }
 
-    private fun validateTrackIds(trackIds: List<String>) {
-        require(trackIds.size <= MAX_PLAYLIST_TRACKS) { "trackIds contains too many entries" }
+    private fun validateTrackIds(
+        trackIds: List<String>,
+        owner: String,
+    ) {
+        require(trackIds.size <= 5000) { "trackIds contains too many entries" }
         require(trackIds.all { it.matches(TRACK_ID_PATTERN) }) { "trackIds must contain Spotify track IDs" }
-        val known = store.songs().associateBy(SpotifyTrack::id)
+        val known = store.songs(owner).associateBy { it.id }
         val invalid =
             trackIds.distinct().filter {
-                known[it] == null ||
-                    known[it]?.available != true ||
-                    !known.getValue(it).uri.startsWith("spotify:track:")
+                known[it]?.available != true ||
+                    !known[it]!!.uri.startsWith("spotify:track:")
             }
         if (invalid.isNotEmpty()) {
             throw ApiFailure(
@@ -589,93 +649,174 @@ class ApiApplication(
         }
     }
 
-    private fun fingerprint(body: String): String =
-        MessageDigest.getInstance("SHA-256").digest(body.toByteArray()).joinToString("") {
-            "%02x".format(it)
+    private fun requireSession(request: ApiRequest): ButlerSession {
+        val session =
+            sessionStore.find(request.headers.cookie("butler_session"))
+                ?: throw ApiFailure(401, "unauthorized", "A Butler session is required")
+        if (allowedSpotifyUserId != null &&
+            session.ownerSpotifyUserId != allowedSpotifyUserId
+        ) {
+            throw ApiFailure(403, "user_not_allowed", "This Spotify account is not allowed")
         }
+        return session
+    }
+
+    private fun requireStateChange(
+        request: ApiRequest,
+        session: ButlerSession,
+    ) {
+        requireCsrf(request, session)
+        requireTrustedOrigin(request)
+        requireJsonBody(request)
+    }
+
+    private fun requireCsrf(
+        request: ApiRequest,
+        session: ButlerSession,
+    ) {
+        if (request.headers.header("X-CSRF-Token") != session.csrfToken) {
+            throw ApiFailure(403, "csrf_failed", "The CSRF token is invalid")
+        }
+    }
+
+    private fun requireTrustedOrigin(request: ApiRequest) {
+        if (request.headers.header("Origin") !in trustedOrigins || trustedOrigins.isEmpty()) {
+            throw ApiFailure(403, "origin_not_trusted", "The request origin is not trusted")
+        }
+    }
+
+    private fun requireJsonBody(request: ApiRequest) {
+        if (request.body != null &&
+            !request.headers
+                .header("Content-Type")
+                .orEmpty()
+                .lowercase()
+                .startsWith("application/json")
+        ) {
+            throw ApiFailure(415, "unsupported_media_type", "JSON content is required")
+        }
+    }
+
+    @Suppress("SwallowedException", "TooGenericExceptionCaught")
+    private inline fun <reified T> body(request: ApiRequest): T =
+        try {
+            apiJson.decodeFromString(
+                request.body ?: error("A JSON body is required"),
+            )
+        } catch (
+            exception: Exception,
+        ) {
+            throw ApiFailure(400, "malformed_json", "The request body is not valid JSON")
+        }
+
+    private fun sessionCookie(sessionId: String) =
+        "butler_session=$sessionId; Path=/; Max-Age=43200; SameSite=Lax; HttpOnly" +
+            if (secureCookies) "; Secure" else ""
 
     private inline fun <reified T> json(
         status: Int,
         value: T,
-    ): ApiResponse = ApiResponse(status, apiJson.encodeToString(value))
+    ) = ApiResponse(status, apiJson.encodeToString(value))
 
     private fun errorResponse(
         failure: ApiFailure,
         requestId: String,
-    ): ApiResponse =
-        ApiResponse(
-            failure.status,
-            apiJson.encodeToString(ErrorEnvelope(failure.code, failure.message, requestId, failure.details)),
-        )
-
-    private inline fun <T> spotifyCall(action: () -> T): T =
-        try {
-            action()
-        } catch (exception: Exception) {
-            logger.warn(exception) { "Spotify playlist synchronization failed" }
-            throw ApiFailure(HttpURLConnection.HTTP_BAD_GATEWAY, "spotify_failure", "Playlist synchronization failed")
-        }
-
-    private fun newRequestId(): String =
-        "req-${Base64.getUrlEncoder().withoutPadding().encodeToString(
-            ByteArray(12).also(java.security.SecureRandom()::nextBytes),
-        )}"
-
-    private fun validRequestId(value: String): Boolean =
-        value.length in 1..100 && value.all { it.isLetterOrDigit() || it in "-_" }
-
-    private fun Map<String, String>.header(name: String): String? =
-        entries.firstOrNull { it.key.equals(name, true) }?.value
-
-    private fun Map<String, String>.cookie(name: String): String? =
-        header("Cookie")
-            ?.split(';')
-            ?.map {
-                it.trim().split('=', limit = 2)
-            }?.firstOrNull { it.firstOrNull() == name }
-            ?.getOrNull(1)
-
-    private data class DefinitionView(
-        val id: String,
-        val name: String,
-        val builtin: PlaylistDefinition?,
-        val trackIds: List<String>,
+    ) = ApiResponse(
+        failure.status,
+        apiJson.encodeToString(ErrorEnvelope(failure.code, failure.message, requestId, failure.details)),
     )
 
-    private data class UserPlaylistDefinition(
-        val id: String,
-        val ownerSpotifyUserId: String,
-        val name: String,
-        val trackIds: List<String>,
-    ) {
-        fun asView(): DefinitionView = DefinitionView(id, name, null, trackIds)
+    private fun newRequestId() =
+        "req-" +
+            Base64
+                .getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(UUID.randomUUID().toString().toByteArray())
+                .take(22)
 
-        fun toStored() =
-            com.philipwilcox.spotifybutler.db.StoredUserPlaylistDefinition(
-                id,
-                ownerSpotifyUserId,
-                name,
-                trackIds,
-            )
-    }
+    private fun validRequestId(value: String) =
+        value.length in 1..100 && value.all { it.isLetterOrDigit() || it in "-_" }
 
-    private data class ApiFailure(
-        val status: Int,
-        val code: String,
-        override val message: String,
-        val details: Map<String, String> = emptyMap(),
-    ) : RuntimeException(message)
+    private fun Map<String, String>.header(name: String) = entries.firstOrNull { it.key.equals(name, true) }?.value
 
-    companion object {
-        private const val MIN_DISCOVER_WEEKLY_YEAR = 2018
-        private const val MAX_SONG_IDS = 50
-        private const val MAX_PLAYLIST_TRACKS = 5000
-        private const val MAX_NAME_LENGTH = 200
-        private val TRACK_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,200}")
+    private fun Map<String, String>.cookie(name: String) =
+        header("Cookie")
+            ?.split(';')
+            ?.map { it.trim().split('=', limit = 2) }
+            ?.firstOrNull {
+                it.firstOrNull() ==
+                    name
+            }?.getOrNull(1)
+
+    private fun ApiResponse.withRequestId(requestId: String) = copy(headers = headers + ("X-Request-Id" to requestId))
+
+    private companion object {
+        val TRACK_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,200}")
     }
 }
 
-private fun StoredPlaylistItem.isPlayableCurrentTrack(): Boolean =
+@Serializable data class RefreshLibraryRequest(
+    val sourceKeys: List<String>? = null,
+)
+
+private data class ApiFailure(
+    val status: Int,
+    val code: String,
+    override val message: String,
+    val details: Map<String, String> = emptyMap(),
+) : RuntimeException(message)
+
+private fun com.philipwilcox.spotifybutler.service.CacheSourceSnapshot.toWire() =
+    SourceSnapshotWire(
+        sourceKey,
+        resourceKind.name.lowercase(),
+        status.name.lowercase(),
+        sourceRevision,
+        lastSyncedAt?.toString(),
+        itemCount,
+        canRefresh,
+        lastErrorCode,
+        lastErrorAt?.toString(),
+    )
+
+private fun com.philipwilcox.spotifybutler.service.SourceDependency.toWire() =
+    SourceDependencyWire(
+        sourceKey,
+        resourceKind.name.lowercase(),
+        sourceRevision,
+        lastSyncedAt?.toString(),
+        itemCount,
+        usable,
+    )
+
+private fun com.philipwilcox.spotifybutler.service.DestinationState.toWire(definitionId: String) =
+    DestinationSummaryWire(
+        definitionId,
+        spotifyPlaylistId,
+        createdAt.toString(),
+        lastSyncedAt?.toString(),
+        lastSeenSnapshotId,
+        canSync,
+    )
+
+private fun PlaylistPreview.toWire() =
+    PreviewWire(
+        definitionId,
+        status.name.lowercase(),
+        generatedTrackIds,
+        generatedTrackIds.size,
+        seed,
+        recipeRevision,
+        algorithmVersion,
+        sourceDependencies
+            .map {
+                it.toWire()
+            },
+        generatedAt.toString(),
+        unavailableReason,
+    )
+
+private fun StoredPlaylistItem.isPlayableCurrentTrack() =
     isPlayable &&
         !isLocal &&
         itemType == "track" &&
@@ -683,31 +824,17 @@ private fun StoredPlaylistItem.isPlayableCurrentTrack(): Boolean =
         !itemId.isNullOrBlank() &&
         itemUri?.startsWith("spotify:track:") == true
 
-private fun SpotifyTrack.toSongWire(): SongWire =
+private fun StoredSong.toSongWire() =
     SongWire(
-        id = id,
-        name = name,
-        href = href,
-        uri = uri,
-        album = AlbumWire(albumId, albumName, albumHref, albumUri, releaseDate),
-        artists = artists.map { ArtistWire(it.id, it.name, it.href, it.uri) },
-        durationMs = durationMs,
-        explicit = explicit,
-        available = available,
+        id,
+        name,
+        href,
+        uri,
+        AlbumWire(albumId, albumName, albumHref, albumUri, releaseDate),
+        artists.map {
+            ArtistWire(it.id, it.name, it.href, it.uri)
+        },
+        durationMs,
+        explicit,
+        available,
     )
-
-private fun com.philipwilcox.spotifybutler.db.StoredSong.toSongWire(): SongWire =
-    SongWire(
-        id = id,
-        name = name,
-        href = href,
-        uri = uri,
-        album = AlbumWire(albumId, albumName, albumHref, albumUri, releaseDate),
-        artists = artists.map { ArtistWire(it.id, it.name, it.href, it.uri) },
-        durationMs = durationMs,
-        explicit = explicit,
-        available = available,
-    )
-
-private fun ApiResponse.withRequestId(requestId: String): ApiResponse =
-    copy(headers = headers + ("X-Request-Id" to requestId))

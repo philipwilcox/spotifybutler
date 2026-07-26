@@ -1,5 +1,6 @@
 package com.philipwilcox.spotifybutler.http
 
+import com.philipwilcox.spotifybutler.service.PlaylistRecipe
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -14,59 +15,137 @@ data class ApiRequest(
 data class ApiResponse(
     val status: Int,
     val body: String,
-    val headers: Map<String, String> = mapOf("Content-Type" to "application/json; charset=utf-8"),
+    val headers: Map<String, String> =
+        mapOf(
+            "Content-Type" to "application/json; charset=utf-8",
+        ),
 )
 
-@Serializable
-data class ErrorEnvelope(
+@Serializable data class ErrorEnvelope(
     val code: String,
     val message: String,
     val requestId: String,
     val details: Map<String, String> = emptyMap(),
 )
 
-@Serializable
-data class SessionWire(
+@Serializable data class SessionWire(
     val userId: String,
     val csrfToken: String,
     val expiresAt: String,
 )
 
-@Serializable
-data class PlaylistReferenceWire(
-    val id: String,
+@Serializable data class SourceDependencyWire(
+    val sourceKey: String,
+    val resourceKind: String,
+    val sourceRevision: String?,
+    val lastSyncedAt: String?,
+    val itemCount: Int?,
+    val usable: Boolean,
+)
+
+@Serializable data class SourceSnapshotWire(
+    val sourceKey: String,
+    val resourceKind: String,
+    val status: String,
+    val sourceRevision: String?,
+    val lastSyncedAt: String?,
+    val itemCount: Int?,
+    val canRefresh: Boolean,
+    val lastErrorCode: String?,
+    val lastErrorAt: String?,
+)
+
+@Serializable data class DestinationSummaryWire(
+    val definitionId: String,
+    val spotifyPlaylistId: String,
+    val createdAt: String,
+    val lastSyncedAt: String?,
+    val lastSeenSnapshotId: String?,
+    val canSync: Boolean,
+    val managementStatus: String = "butler_created",
+)
+
+@Serializable data class DefinitionWire(
+    val definitionId: String,
     val name: String,
-    val state: String,
-    val spotifyPlaylistId: String?,
-    val trackIds: List<String> = emptyList(),
+    val description: String,
+    val kind: String,
+    val editable: Boolean,
+    val enabled: Boolean,
+    val recipe: PlaylistRecipe,
+    val sourceDependencies: List<SourceDependencyWire>,
+    val destination: DestinationSummaryWire?,
 )
 
-@Serializable
-data class PlaylistListWire(
-    val items: List<PlaylistReferenceWire>,
+@Serializable data class DefinitionListWire(
+    val items: List<DefinitionWire>,
 )
 
-@Serializable
-data class PlaylistCurrentWire(
+@Serializable data class LibraryWire(
+    val ownerSpotifyUserId: String,
+    val status: String,
+    val sources: List<SourceSnapshotWire>,
+    val definitions: List<DefinitionWire>,
+)
+
+@Serializable data class PreviewWire(
+    val definitionId: String,
+    val status: String,
+    val generatedTrackIds: List<String>,
+    val generatedTrackCount: Int,
+    val seed: String,
+    val recipeRevision: String,
+    val algorithmVersion: String,
+    val sourceDependencies: List<SourceDependencyWire>,
+    val generatedAt: String,
+    val unavailableReason: String?,
+)
+
+@Serializable data class CurrentWire(
     val spotifyPlaylistId: String,
     val trackIds: List<String>,
+    val lastSyncedAt: String?,
+    val lastSeenSnapshotId: String?,
 )
 
-@Serializable
-data class PlaylistCurrentEnvelopeWire(
-    val current: PlaylistCurrentWire?,
+@Serializable data class CurrentEnvelopeWire(
+    val current: CurrentWire?,
 )
 
-@Serializable
-data class LibraryWire(
-    val status: String,
-    val ownerId: String?,
-    val completedAt: String?,
-    val counts: Map<String, Int>,
+@Serializable data class OneTimePlaylistUpdateWire(
+    val spotifyPlaylistId: String,
+    val trackIds: List<String>,
+    val lastSeenSnapshotId: String?,
+    val appliedAt: String,
+    val tracked: Boolean,
 )
 
-@Serializable
-data class AlbumWire(
+@Serializable data class CreateDefinitionRequest(
+    val name: String,
+    val description: String = "",
+    val recipe: PlaylistRecipe,
+    val enabled: Boolean = true,
+)
+
+@Serializable data class DestinationCreateRequestWire(
+    val name: String? = null,
+    val description: String? = null,
+    val public: Boolean? = null,
+    val collaborative: Boolean? = null,
+)
+
+@Serializable data class SyncPlaylistRequest(
+    val trackIds: List<String>,
+    val expectedDestinationSnapshotId: String? = null,
+)
+
+@Serializable data class OneTimeUpdateRequest(
+    val spotifyPlaylistId: String,
+    val trackIds: List<String>,
+    val expectedDestinationSnapshotId: String? = null,
+)
+
+@Serializable data class AlbumWire(
     val id: String?,
     val name: String?,
     val href: String?,
@@ -74,16 +153,14 @@ data class AlbumWire(
     val releaseDate: String?,
 )
 
-@Serializable
-data class ArtistWire(
+@Serializable data class ArtistWire(
     val id: String?,
     val name: String?,
     val href: String?,
     val uri: String?,
 )
 
-@Serializable
-data class SongWire(
+@Serializable data class SongWire(
     val id: String,
     val name: String,
     val href: String,
@@ -95,21 +172,9 @@ data class SongWire(
     val available: Boolean,
 )
 
-@Serializable
-data class SongsWire(
+@Serializable data class SongsWire(
     val items: List<SongWire>,
     val missingIds: List<String>,
-)
-
-@Serializable
-data class CreatePlaylistRequest(
-    val name: String,
-    val trackIds: List<String> = emptyList(),
-)
-
-@Serializable
-data class SyncPlaylistRequest(
-    val trackIds: List<String>,
 )
 
 val apiJson =

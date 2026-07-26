@@ -193,6 +193,7 @@ private fun reportText(
         appendLine("  top_artists=${fixture.expectedTables.topArtists.size}")
         appendLine("  playlists=${fixture.expectedTables.playlists.size}")
         appendLine("  playlist_tracks=${fixture.expectedTables.playlistTracks.size}")
+        appendLine("  cache_source_sync=${fixture.expectedTables.cacheSourceSync.size}")
         appendLine("  sync_status=${fixture.expectedTables.syncStatus.size}")
         appendLine("  cache_metadata=${fixture.expectedTables.cacheMetadata.size}")
         appendLine("  playlist_details=${fixture.expectedTables.playlistDetails.size}")

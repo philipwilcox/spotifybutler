@@ -55,6 +55,7 @@ data class ExpectedTables(
     @SerialName("managed_playlists") val managedPlaylists: List<JsonObject> = emptyList(),
     @SerialName("user_playlist_definitions") val userPlaylistDefinitions: List<JsonObject> = emptyList(),
     @SerialName("user_playlist_definition_items") val userPlaylistDefinitionItems: List<JsonObject> = emptyList(),
+    @SerialName("cache_source_sync") val cacheSourceSync: List<JsonObject> = emptyList(),
 )
 
 val spotifyFixtureJson =
@@ -82,6 +83,7 @@ fun SpotifyTableSnapshot.toExpectedTables(includeNormalizedProjections: Boolean 
             userPlaylistDefinitions.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
         userPlaylistDefinitionItems =
             userPlaylistDefinitionItems.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
+        cacheSourceSync = cacheSourceSync.takeIf { includeNormalizedProjections }.orEmpty().map(::canonicalizeRow),
     )
 
 fun ExpectedTables.limitToCapturedItems(capture: ValidatedCapture): ExpectedTables {

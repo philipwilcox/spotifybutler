@@ -23,6 +23,7 @@ data class PlaylistTrack(
     val playlistName: String,
     val addedAt: String?,
     val track: SpotifyTrack,
+    val playlistId: String? = null,
 )
 
 data class SpotifyTrack(

@@ -4,14 +4,7 @@
 package com.philipwilcox.spotifybutler.http
 
 import com.philipwilcox.spotifybutler.db.SpotifyStore
-import com.philipwilcox.spotifybutler.service.ButlerRunResult
-import com.philipwilcox.spotifybutler.service.ButlerService
-import com.philipwilcox.spotifybutler.service.CacheLoadResult
-import com.philipwilcox.spotifybutler.service.PlaylistMutationService
-import com.philipwilcox.spotifybutler.service.PlaylistPlanningService
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
-import com.philipwilcox.spotifybutler.service.SpotifyDuplicateCleanupService
-import com.philipwilcox.spotifybutler.service.SpotifyPlaylistMutationClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
 import com.sun.net.httpserver.HttpExchange
@@ -32,7 +25,6 @@ class ButlerHttpServer(
     private val apiClient: SpotifyApiClient,
     private val cacheService: SpotifyCacheService,
     private val store: SpotifyStore,
-    private val dryRun: Boolean = false,
     private val host: String = "127.0.0.1",
     private val port: Int = 8888,
     private val allowedSpotifyUserId: String? = null,
@@ -123,7 +115,7 @@ class ButlerHttpServer(
         val query = exchange.requestURI.queryParameters()
         val returnTo = query["returnTo"].orEmpty().ifBlank { "/" }
         requireSafeReturnTo(returnTo)
-        val authorization = authClient.beginAuthorization(query["refresh"] == "true", returnTo)
+        val authorization = authClient.beginAuthorization(returnTo)
         exchange.responseHeaders.add("Set-Cookie", stateCookie(authorization.state))
         exchange.responseHeaders.add("Location", authorization.location.toASCIIString())
         exchange.sendResponseHeaders(HttpURLConnection.HTTP_MOVED_TEMP, -1)
@@ -167,34 +159,11 @@ class ButlerHttpServer(
         val session = sessionStore.create(user.id, token.accessToken, token.refreshToken)
         exchange.responseHeaders.add("Set-Cookie", clearStateCookie())
         exchange.responseHeaders.add("Set-Cookie", sessionCookie(session.id))
-        return if (authorization.refresh) {
-            val effectiveDryRun = dryRun || parameters["dryRun"].equals("true", ignoreCase = true)
-            val result = runLegacyRefresh(token.accessToken, user.id, effectiveDryRun)
-            json(exchange, HttpURLConnection.HTTP_OK, result.legacySummary(effectiveDryRun))
-        } else {
-            exchange.responseHeaders.add("Location", authorization.returnTo)
-            exchange.sendResponseHeaders(HttpURLConnection.HTTP_SEE_OTHER, -1)
-            exchange.close()
-            HttpURLConnection.HTTP_SEE_OTHER
-        }
+        exchange.responseHeaders.add("Location", authorization.returnTo)
+        exchange.sendResponseHeaders(HttpURLConnection.HTTP_SEE_OTHER, -1)
+        exchange.close()
+        return HttpURLConnection.HTTP_SEE_OTHER
     }
-
-    private fun runLegacyRefresh(
-        accessToken: String,
-        ownerSpotifyUserId: String,
-        effectiveDryRun: Boolean,
-    ): ButlerRunResult =
-        ButlerService(
-            cacheService = cacheService,
-            planningService = PlaylistPlanningService(store),
-            mutationService = PlaylistMutationService(SpotifyPlaylistMutationClient(apiClient, accessToken)),
-            duplicateCleanupService = SpotifyDuplicateCleanupService(store, apiClient),
-            dryRun = effectiveDryRun,
-        ).run(
-            accessToken = accessToken,
-            refresh = true,
-            ownerSpotifyUserId = ownerSpotifyUserId,
-        )
 
     private fun api(exchange: HttpExchange): Int {
         val body = readBoundedBody(exchange)
@@ -251,39 +220,6 @@ class ButlerHttpServer(
             put("message", JsonPrimitive(message))
             put("requestId", JsonPrimitive(requestId))
             put("details", buildJsonObject {})
-        }.toString()
-
-    private fun ButlerRunResult.legacySummary(effectiveDryRun: Boolean): String =
-        buildJsonObject {
-            put("mode", JsonPrimitive("legacy"))
-            put("status", JsonPrimitive("completed"))
-            put("dryRun", JsonPrimitive(effectiveDryRun))
-            put(
-                "sync",
-                buildJsonObject {
-                    put(
-                        "status",
-                        JsonPrimitive(
-                            when (sync) {
-                                CacheLoadResult.SkippedExistingCache -> "skipped_existing_cache"
-                                is CacheLoadResult.Loaded -> "loaded"
-                            },
-                        ),
-                    )
-                    if (sync is CacheLoadResult.Loaded) {
-                        put("savedTrackCount", JsonPrimitive(sync.savedTrackCount))
-                        put("topTrackCount", JsonPrimitive(sync.topTrackCount))
-                        put("topArtistCount", JsonPrimitive(sync.topArtistCount))
-                        put("playlistCount", JsonPrimitive(sync.playlistCount))
-                        put("playlistItemCount", JsonPrimitive(sync.playlistTrackCount))
-                    }
-                },
-            )
-            put("duplicateTracksRemoved", JsonPrimitive(duplicateCleanup.removedTrackCount))
-            put("playlistPlanCount", JsonPrimitive(playlistPlans.size))
-            put("playlistOutcomeCount", JsonPrimitive(playlistOutcomes.size))
-            put("playlistCreatedCount", JsonPrimitive(playlistOutcomes.count { it.playlistId == null }))
-            put("playlistReplacedCount", JsonPrimitive(playlistOutcomes.count { it.playlistId != null }))
         }.toString()
 
     private fun stateCookie(state: String): String = cookie(SpotifyAuthClient.STATE_COOKIE, state, 600, httpOnly = true)

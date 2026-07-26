@@ -18,6 +18,41 @@ data class PlaylistRecipe(
     val ordering: OrderingPolicy,
 )
 
+data class PlaylistDefinitionView(
+    val definitionId: String,
+    val ownerSpotifyUserId: String?,
+    val name: String,
+    val description: String,
+    val kind: DefinitionKind,
+    val editable: Boolean,
+    val enabled: Boolean,
+    val recipe: PlaylistRecipe,
+)
+
+enum class DefinitionKind {
+    BUILT_IN,
+    OWNER,
+}
+
+data class PlaylistPreview(
+    val definitionId: String,
+    val status: PreviewStatus,
+    val generatedTrackIds: List<String>,
+    val seed: String,
+    val recipeRevision: String,
+    val algorithmVersion: String,
+    val sourceDependencies: List<SourceDependency>,
+    val generatedAt: Instant,
+    val unavailableReason: String? = null,
+)
+
+enum class PreviewStatus {
+    READY,
+    EMPTY,
+    PARTIAL,
+    UNAVAILABLE,
+}
+
 @Serializable
 sealed interface CandidateSource {
     @Serializable

@@ -149,6 +149,18 @@ private val stableRowColumns =
                 "added_at",
                 "track_json",
             ),
+        "cache_source_sync" to
+            listOf(
+                "owner_spotify_user_id",
+                "source_key",
+                "resource_kind",
+                "status",
+                "source_revision",
+                "last_synced_at_millis",
+                "item_count",
+                "last_error_code",
+                "last_error_at_millis",
+            ),
         "sync_status" to listOf("sync_timestamp_millis"),
         "cache_metadata" to
             listOf(
