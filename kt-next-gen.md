@@ -2,6 +2,12 @@
 
 The notes here should be IGNORED for any current work, and only represent ideas for future directions to explore.
 
+## Further Library Full-Sync Optimizations
+
+Look at how prototype did it, allow more concurrent calls?
+
+Also, websocket or polling to view ongoing sync status?
+
 ## Replace Docker Workflow
 
 Remove the secrets file / mounted file fallback stuff in favor of env vars that we added? though how to use that for local mode.
