@@ -13,6 +13,7 @@ data class ServiceConfig(
     val callbackHttpsRequired: Boolean,
     val trustedHosts: Set<String>,
     val trustedProxyAddresses: Set<String>,
+    val trustedProxyToken: String?,
 ) {
     companion object {
         private const val CONFIG_FILE_ENV = "SPOTIFY_BUTLER_CONFIG_FILE"
@@ -32,6 +33,8 @@ data class ServiceConfig(
         private const val TRUSTED_HOSTS_PROPERTY = "spotify.trustedHosts"
         private const val TRUSTED_PROXIES_ENV = "SPOTIFY_BUTLER_TRUSTED_PROXIES"
         private const val TRUSTED_PROXIES_PROPERTY = "spotify.trustedProxies"
+        private const val TRUSTED_PROXY_TOKEN_ENV = "SPOTIFY_BUTLER_TRUSTED_PROXY_TOKEN"
+        private const val TRUSTED_PROXY_TOKEN_PROPERTY = "spotify.trustedProxyToken"
 
         fun load(): ServiceConfig {
             val configFile = configuredFile()
@@ -53,7 +56,19 @@ data class ServiceConfig(
                 secureCookies = configuredBoolean(SECURE_COOKIES_ENV, SECURE_COOKIES_PROPERTY, properties),
                 callbackHttpsRequired = configuredBoolean(CALLBACK_HTTPS_ENV, CALLBACK_HTTPS_PROPERTY, properties),
                 trustedHosts = configuredSet(TRUSTED_HOSTS_ENV, TRUSTED_HOSTS_PROPERTY, properties, DEFAULT_HOSTS),
-                trustedProxyAddresses = configuredSet(TRUSTED_PROXIES_ENV, TRUSTED_PROXIES_PROPERTY, properties),
+                trustedProxyAddresses =
+                    configuredSet(
+                        TRUSTED_PROXIES_ENV,
+                        TRUSTED_PROXIES_PROPERTY,
+                        properties,
+                        DEFAULT_TRUSTED_PROXIES,
+                    ),
+                trustedProxyToken =
+                    configuredOptional(
+                        TRUSTED_PROXY_TOKEN_ENV,
+                        TRUSTED_PROXY_TOKEN_PROPERTY,
+                        properties,
+                    ),
             )
         }
 
@@ -85,6 +100,14 @@ data class ServiceConfig(
             (System.getenv(environment)?.trim() ?: properties.getProperty(property)?.trim())
                 ?.toBooleanStrictOrNull()
                 ?: false
+
+        private fun configuredOptional(
+            environment: String,
+            property: String,
+            properties: Properties,
+        ): String? =
+            (System.getenv(environment)?.trim() ?: properties.getProperty(property)?.trim())
+                ?.takeIf(String::isNotEmpty)
 
         private fun configuredSet(
             environment: String,
@@ -148,5 +171,6 @@ data class ServiceConfig(
             }
 
         private val DEFAULT_HOSTS = setOf("127.0.0.1:8888", "localhost:8888")
+        private val DEFAULT_TRUSTED_PROXIES = setOf("172.17.0.1")
     }
 }

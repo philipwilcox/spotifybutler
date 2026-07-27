@@ -29,14 +29,21 @@ data class Secrets(
         private fun loadProperties(environment: Map<String, String>): Properties {
             val configuredPath = environment[SECRETS_FILE_ENV]?.trim()?.takeIf(String::isNotEmpty)?.let(Path::of)
             val secretsFile = configuredPath ?: defaultSecretsPath().takeIf(Files::isRegularFile)
-            require(configuredPath == null || Files.isRegularFile(configuredPath)) {
+            val missingConfiguredFile = configuredPath != null && !Files.isRegularFile(configuredPath)
+            require(!missingConfiguredFile || hasCompleteEnvironment(environment)) {
                 "Spotify secrets file not found at $configuredPath. Set the secret environment variables or " +
                     "${SECRETS_FILE_ENV}."
             }
             return Properties().also { properties ->
-                secretsFile?.let { path -> Files.newInputStream(path).use(properties::load) }
+                if (!missingConfiguredFile) {
+                    secretsFile?.let { path -> Files.newInputStream(path).use(properties::load) }
+                }
             }
         }
+
+        private fun hasCompleteEnvironment(environment: Map<String, String>): Boolean =
+            listOf(CLIENT_ID_ENV, CLIENT_SECRET_ENV, REDIRECT_URI_ENV)
+                .all { key -> environment[key]?.trim()?.isNotEmpty() == true }
 
         private fun configuredRequired(
             environmentKey: String,

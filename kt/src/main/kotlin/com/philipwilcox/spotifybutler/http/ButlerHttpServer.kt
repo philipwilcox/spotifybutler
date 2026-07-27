@@ -13,11 +13,13 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -34,6 +36,7 @@ class ButlerHttpServer(
     private val callbackHttpsRequired: Boolean = false,
     private val trustedHosts: Set<String> = setOf("127.0.0.1:8888", "localhost:8888"),
     private val trustedProxyAddresses: Set<String> = emptySet(),
+    private val trustedProxyToken: String? = null,
     private val frontendDirectory: Path = Path.of("vue", "dist"),
 ) {
     private val logger = KotlinLogging.logger {}
@@ -68,6 +71,11 @@ class ButlerHttpServer(
         try {
             validateHost(exchange)
             if (path == "/callback" && callbackHttpsRequired && effectiveScheme(exchange) != "https") {
+                logger.warn {
+                    "HTTPS callback rejected: effectiveScheme=${effectiveScheme(exchange)} " +
+                        "forwardedProto=${exchange.requestHeaders.getFirst("X-Forwarded-Proto")} " +
+                        "forwarded=${exchange.requestHeaders.getFirst("Forwarded")}"
+                }
                 throw RequestFailure(HttpURLConnection.HTTP_BAD_REQUEST, "HTTPS is required for the OAuth callback")
             }
             status =
@@ -323,6 +331,7 @@ class ButlerHttpServer(
     companion object {
         private const val MAX_REQUEST_BYTES = 1_048_576
         private const val SESSION_COOKIE_MAX_AGE_SECONDS = 15_552_000
+        private const val PROXY_TOKEN_HEADER = "X-Butler-Proxy-Token"
     }
 
     private fun newRequestId(): String = "req-${UUID.randomUUID()}"
@@ -336,6 +345,12 @@ class ButlerHttpServer(
     private fun validateHost(exchange: HttpExchange) {
         val host = effectiveHost(exchange)
         if (host == null || host !in trustedHosts.map(String::lowercase).toSet()) {
+            logger.warn {
+                "Request host rejected: remoteAddress=${exchange.remoteAddress.address.hostAddress} " +
+                    "directHost=${exchange.requestHeaders.getFirst("Host")} " +
+                    "forwardedHost=${exchange.requestHeaders.getFirst("X-Forwarded-Host")} " +
+                    "effectiveHost=$host trustedHosts=$trustedHosts"
+            }
             throw RequestFailure(HttpURLConnection.HTTP_BAD_REQUEST, "The request Host is not trusted")
         }
     }
@@ -383,6 +398,37 @@ class ButlerHttpServer(
             ?.lowercase()
             ?.takeIf { it == "http" || it == "https" }
 
-    private fun isTrustedProxy(exchange: HttpExchange): Boolean =
-        exchange.remoteAddress.address.hostAddress in trustedProxyAddresses
+    private fun isTrustedProxy(exchange: HttpExchange): Boolean {
+        val remoteAddress = exchange.remoteAddress.address
+        val proxyToken = exchange.requestHeaders.getFirst(PROXY_TOKEN_HEADER)
+        val sourceIpTrusted = remoteAddress.hostAddress in trustedProxyAddresses
+        val tokenConfigured = trustedProxyToken != null
+        val tokenPresent = proxyToken != null
+        val tokenMatches = tokensMatch(proxyToken, trustedProxyToken)
+        val trusted = sourceIpTrusted || tokenMatches
+        logger.info {
+            "Proxy trust evaluation: remoteAddress=${remoteAddress.hostAddress} " +
+                "sourceIpTrusted=$sourceIpTrusted tokenConfigured=$tokenConfigured " +
+                "tokenPresent=$tokenPresent tokenMatches=$tokenMatches trusted=$trusted"
+        }
+        return trusted
+    }
 }
+
+private fun tokensMatch(
+    proxyToken: String?,
+    trustedProxyToken: String?,
+): Boolean =
+    trustedProxyToken != null &&
+        proxyToken != null &&
+        MessageDigest.isEqual(
+            trustedProxyToken.toByteArray(StandardCharsets.UTF_8),
+            proxyToken.toByteArray(StandardCharsets.UTF_8),
+        )
+
+internal fun isTrustedProxy(
+    remoteAddress: InetAddress,
+    proxyToken: String?,
+    trustedProxyAddresses: Set<String>,
+    trustedProxyToken: String?,
+): Boolean = remoteAddress.hostAddress in trustedProxyAddresses || tokensMatch(proxyToken, trustedProxyToken)

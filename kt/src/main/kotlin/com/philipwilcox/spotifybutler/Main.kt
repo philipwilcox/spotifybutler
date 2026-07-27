@@ -33,5 +33,6 @@ fun main() {
         callbackHttpsRequired = config.callbackHttpsRequired,
         trustedHosts = config.trustedHosts,
         trustedProxyAddresses = config.trustedProxyAddresses,
+        trustedProxyToken = config.trustedProxyToken,
     ).start()
 }
