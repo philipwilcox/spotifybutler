@@ -23,6 +23,10 @@ const formatTime = (value: string | null | undefined) => {
   return Number.isNaN(date.getTime()) ? 'invalid date' : date.toLocaleString()
 }
 const buildTimestamp = __BUTLER_BUILD_TIMESTAMP__
+const buildDisplayTimestamp = (() => {
+  const date = new Date(buildTimestamp)
+  return Number.isNaN(date.getTime()) ? buildTimestamp : date.toLocaleString()
+})()
 
 async function boot() {
   const currentSession = await session.load()
@@ -62,7 +66,7 @@ onMounted(boot)
     <header class="hud panel">
       <div><p class="eyebrow">SPOTIFY // BUTLER</p><h1>PLAYLIST STUDIO</h1></div>
       <div class="hud-identity">
-        <span class="build-stamp" :title="`Frontend bundle built at ${buildTimestamp}`">BUILD {{ buildTimestamp }}</span>
+        <span class="build-stamp" :title="`Frontend bundle built at ${buildTimestamp} UTC`">BUILD {{ buildDisplayTimestamp }}</span>
         <div class="hud-status" aria-live="polite"><span class="status-light" :class="session.state.session ? 'online' : 'offline'" />{{ session.state.session ? `OPERATOR ${session.state.session.userId}` : 'AUTHENTICATION REQUIRED' }} <button v-if="session.state.session" class="button quiet" @click="session.signOut">SIGN OUT</button><button v-else class="button gold" @click="session.startOAuth">CONNECT SPOTIFY</button></div>
       </div>
     </header>

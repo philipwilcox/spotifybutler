@@ -3,3 +3,6 @@
 # A deployed application can place application.properties in its working directory and keep spotify.db there.
 spotify.databasePath=spotify.db
 spotify.frontendDirectory=../vue/dist
+spotify.spotifyRetryMaxRetries=4
+spotify.spotifyRetryInitialDelaySeconds=1
+spotify.spotifyRetryBackoffMultiplier=2

@@ -14,7 +14,9 @@ data class ServiceConfig(
     val trustedHosts: Set<String>,
     val trustedProxyAddresses: Set<String>,
     val trustedProxyToken: String?,
+    val spotifyRetryConfig: SpotifyRetryConfig,
 ) {
+    @Suppress("TooManyFunctions")
     companion object {
         private const val CONFIG_FILE_ENV = "SPOTIFY_BUTLER_CONFIG_FILE"
         private const val DATABASE_PATH_ENV = "SPOTIFY_BUTLER_DATABASE_PATH"
@@ -35,15 +37,21 @@ data class ServiceConfig(
         private const val TRUSTED_PROXIES_PROPERTY = "spotify.trustedProxies"
         private const val TRUSTED_PROXY_TOKEN_ENV = "SPOTIFY_BUTLER_TRUSTED_PROXY_TOKEN"
         private const val TRUSTED_PROXY_TOKEN_PROPERTY = "spotify.trustedProxyToken"
+        private const val SPOTIFY_RETRY_MAX_RETRIES_ENV = "SPOTIFY_BUTLER_SPOTIFY_RETRY_MAX_RETRIES"
+        private const val SPOTIFY_RETRY_MAX_RETRIES_PROPERTY = "spotify.spotifyRetryMaxRetries"
+        private const val SPOTIFY_RETRY_INITIAL_DELAY_ENV = "SPOTIFY_BUTLER_SPOTIFY_RETRY_INITIAL_DELAY_SECONDS"
+        private const val SPOTIFY_RETRY_INITIAL_DELAY_PROPERTY = "spotify.spotifyRetryInitialDelaySeconds"
+        private const val SPOTIFY_RETRY_MULTIPLIER_ENV = "SPOTIFY_BUTLER_SPOTIFY_RETRY_BACKOFF_MULTIPLIER"
+        private const val SPOTIFY_RETRY_MULTIPLIER_PROPERTY = "spotify.spotifyRetryBackoffMultiplier"
 
-        fun load(): ServiceConfig {
-            val configFile = configuredFile()
+        fun load(environment: Map<String, String> = System.getenv()): ServiceConfig {
+            val configFile = configuredFile(environment)
             val properties = configFile?.let(::loadProperties) ?: Properties()
             val configuredPath =
-                System.getenv(DATABASE_PATH_ENV)?.trim()?.takeIf(String::isNotEmpty)
+                environment[DATABASE_PATH_ENV]?.trim()?.takeIf(String::isNotEmpty)
                     ?: properties.getProperty(DATABASE_PATH_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
             val configuredFrontendDirectory =
-                System.getenv(FRONTEND_DIRECTORY_ENV)?.trim()?.takeIf(String::isNotEmpty)
+                environment[FRONTEND_DIRECTORY_ENV]?.trim()?.takeIf(String::isNotEmpty)
                     ?: properties.getProperty(FRONTEND_DIRECTORY_PROPERTY)?.trim()?.takeIf(String::isNotEmpty)
             return ServiceConfig(
                 databasePath =
@@ -51,37 +59,59 @@ data class ServiceConfig(
                 frontendDirectory =
                     configuredFrontendDirectory?.let { path -> resolveConfiguredPath(path, configFile) }
                         ?: defaultFrontendDirectory(),
-                bindHost = configuredHost(properties),
-                trustedOrigins = trustedOrigins(properties),
-                secureCookies = configuredBoolean(SECURE_COOKIES_ENV, SECURE_COOKIES_PROPERTY, properties),
-                callbackHttpsRequired = configuredBoolean(CALLBACK_HTTPS_ENV, CALLBACK_HTTPS_PROPERTY, properties),
-                trustedHosts = configuredSet(TRUSTED_HOSTS_ENV, TRUSTED_HOSTS_PROPERTY, properties, DEFAULT_HOSTS),
+                bindHost = configuredHost(properties, environment),
+                trustedOrigins = trustedOrigins(properties, environment),
+                secureCookies = configuredBoolean(SECURE_COOKIES_ENV, SECURE_COOKIES_PROPERTY, properties, environment),
+                callbackHttpsRequired =
+                    configuredBoolean(
+                        CALLBACK_HTTPS_ENV,
+                        CALLBACK_HTTPS_PROPERTY,
+                        properties,
+                        environment,
+                    ),
+                trustedHosts =
+                    configuredSet(
+                        TRUSTED_HOSTS_ENV,
+                        TRUSTED_HOSTS_PROPERTY,
+                        properties,
+                        DEFAULT_HOSTS,
+                        environment,
+                    ),
                 trustedProxyAddresses =
                     configuredSet(
                         TRUSTED_PROXIES_ENV,
                         TRUSTED_PROXIES_PROPERTY,
                         properties,
                         DEFAULT_TRUSTED_PROXIES,
+                        environment,
                     ),
                 trustedProxyToken =
                     configuredOptional(
                         TRUSTED_PROXY_TOKEN_ENV,
                         TRUSTED_PROXY_TOKEN_PROPERTY,
                         properties,
+                        environment,
                     ),
+                spotifyRetryConfig = spotifyRetryConfig(properties, environment),
             )
         }
 
-        private fun configuredHost(properties: Properties): String {
-            val configured = System.getenv(BIND_HOST_ENV) ?: properties.getProperty(BIND_HOST_PROPERTY)
+        private fun configuredHost(
+            properties: Properties,
+            environment: Map<String, String>,
+        ): String {
+            val configured = environment[BIND_HOST_ENV] ?: properties.getProperty(BIND_HOST_PROPERTY)
             return configured?.trim()?.also { host ->
                 require(host.isNotEmpty()) { "$BIND_HOST_ENV must not be blank" }
             } ?: "0.0.0.0"
         }
 
-        private fun trustedOrigins(properties: Properties): Set<String> {
+        private fun trustedOrigins(
+            properties: Properties,
+            environment: Map<String, String>,
+        ): Set<String> {
             val configured =
-                System.getenv(TRUSTED_ORIGINS_ENV)?.trim()
+                environment[TRUSTED_ORIGINS_ENV]?.trim()
                     ?: properties.getProperty(TRUSTED_ORIGINS_PROPERTY)?.trim()
                     ?: "http://127.0.0.1:8888,http://localhost:8888"
             return configured.split(',').map(String::trim).filter(String::isNotEmpty).toSet().also {
@@ -92,30 +122,100 @@ data class ServiceConfig(
             }
         }
 
-        private fun configuredBoolean(
-            environment: String,
+        private fun spotifyRetryConfig(
+            properties: Properties,
+            environment: Map<String, String>,
+        ): SpotifyRetryConfig =
+            SpotifyRetryConfig(
+                maxRetries =
+                    configuredInt(
+                        SPOTIFY_RETRY_MAX_RETRIES_ENV,
+                        SPOTIFY_RETRY_MAX_RETRIES_PROPERTY,
+                        properties,
+                        environment,
+                        default = SpotifyRetryConfig.DEFAULT_MAX_RETRIES,
+                    ).also {
+                        require(
+                            it in 0..MAX_RETRIES_UPPER_BOUND,
+                        ) {
+                            "$SPOTIFY_RETRY_MAX_RETRIES_ENV must be an integer from 0 to $MAX_RETRIES_UPPER_BOUND"
+                        }
+                    },
+                initialDelaySeconds =
+                    configuredInt(
+                        SPOTIFY_RETRY_INITIAL_DELAY_ENV,
+                        SPOTIFY_RETRY_INITIAL_DELAY_PROPERTY,
+                        properties,
+                        environment,
+                        default = SpotifyRetryConfig.DEFAULT_INITIAL_DELAY_SECONDS,
+                    ).also { require(it > 0) { "$SPOTIFY_RETRY_INITIAL_DELAY_ENV must be a positive integer" } },
+                backoffMultiplier =
+                    configuredDouble(
+                        SPOTIFY_RETRY_MULTIPLIER_ENV,
+                        SPOTIFY_RETRY_MULTIPLIER_PROPERTY,
+                        properties,
+                        environment,
+                        default = SpotifyRetryConfig.DEFAULT_BACKOFF_MULTIPLIER,
+                    ).also {
+                        require(it.isFinite() && it >= 1.0) {
+                            "$SPOTIFY_RETRY_MULTIPLIER_ENV must be a finite number greater than or equal to 1.0"
+                        }
+                    },
+            )
+
+        private fun configuredInt(
+            environmentName: String,
             property: String,
             properties: Properties,
+            environment: Map<String, String>,
+            default: Int,
+        ): Int {
+            val configured = environment[environmentName]?.trim() ?: properties.getProperty(property)?.trim()
+            return configured?.toIntOrNull()
+                ?: configured?.let { error("$environmentName must be a valid integer, but was '$it'") }
+                ?: default
+        }
+
+        private fun configuredDouble(
+            environmentName: String,
+            property: String,
+            properties: Properties,
+            environment: Map<String, String>,
+            default: Double,
+        ): Double {
+            val configured = environment[environmentName]?.trim() ?: properties.getProperty(property)?.trim()
+            return configured?.toDoubleOrNull()
+                ?: configured?.let { error("$environmentName must be a valid number, but was '$it'") }
+                ?: default
+        }
+
+        private fun configuredBoolean(
+            environmentName: String,
+            property: String,
+            properties: Properties,
+            environmentValues: Map<String, String>,
         ): Boolean =
-            (System.getenv(environment)?.trim() ?: properties.getProperty(property)?.trim())
+            (environmentValues[environmentName]?.trim() ?: properties.getProperty(property)?.trim())
                 ?.toBooleanStrictOrNull()
                 ?: false
 
         private fun configuredOptional(
-            environment: String,
+            environmentName: String,
             property: String,
             properties: Properties,
+            environmentValues: Map<String, String>,
         ): String? =
-            (System.getenv(environment)?.trim() ?: properties.getProperty(property)?.trim())
+            (environmentValues[environmentName]?.trim() ?: properties.getProperty(property)?.trim())
                 ?.takeIf(String::isNotEmpty)
 
         private fun configuredSet(
-            environment: String,
+            environmentName: String,
             property: String,
             properties: Properties,
             default: Set<String> = emptySet(),
+            environmentValues: Map<String, String>,
         ): Set<String> {
-            val configured = System.getenv(environment)?.trim() ?: properties.getProperty(property)?.trim()
+            val configured = environmentValues[environmentName]?.trim() ?: properties.getProperty(property)?.trim()
             return (configured ?: default.joinToString(","))
                 .split(',')
                 .map(String::trim)
@@ -125,15 +225,14 @@ data class ServiceConfig(
                     if (default.isNotEmpty()) {
                         require(
                             it.isNotEmpty(),
-                        ) { "$environment must contain at least one value" }
+                        ) { "$environmentName must contain at least one value" }
                     }
                 }
         }
 
-        private fun configuredFile(): Path? {
+        private fun configuredFile(environment: Map<String, String>): Path? {
             val explicitPath =
-                System
-                    .getenv(CONFIG_FILE_ENV)
+                environment[CONFIG_FILE_ENV]
                     ?.trim()
                     ?.takeIf(String::isNotEmpty)
                     ?.let(Path::of)
@@ -172,5 +271,6 @@ data class ServiceConfig(
 
         private val DEFAULT_HOSTS = setOf("127.0.0.1:8888", "localhost:8888")
         private val DEFAULT_TRUSTED_PROXIES = setOf("172.17.0.1")
+        private const val MAX_RETRIES_UPPER_BOUND = 10
     }
 }

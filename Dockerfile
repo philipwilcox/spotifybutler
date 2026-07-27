@@ -7,7 +7,8 @@ RUN npm ci
 
 WORKDIR /workspace
 COPY vue ./vue
-RUN npm run build --prefix vue
+ARG BUTLER_BUILD_TIMESTAMP
+RUN BUTLER_BUILD_TIMESTAMP="$BUTLER_BUILD_TIMESTAMP" npm run build --prefix vue
 
 FROM eclipse-temurin:25-jdk AS kotlin-build
 

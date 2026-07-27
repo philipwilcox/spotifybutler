@@ -17,7 +17,7 @@ fun main() {
     val captureRunId = System.getenv("SPOTIFY_BUTLER_CAPTURE_RUN_ID") ?: "generated-by-client"
     val databasePath = config.databasePath.toAbsolutePath().normalize()
     logger.info { "Spotify startup paths: database=$databasePath captureLog=$captureLog captureRunId=$captureRunId" }
-    val apiClient = SpotifyApiClient()
+    val apiClient = SpotifyApiClient(retryConfig = config.spotifyRetryConfig)
     val store = SpotifyStore.open(config.databasePath, refreshTokenProtectionKey = secrets.clientSecret)
     Runtime.getRuntime().addShutdownHook(Thread(store::close))
     ButlerHttpServer(

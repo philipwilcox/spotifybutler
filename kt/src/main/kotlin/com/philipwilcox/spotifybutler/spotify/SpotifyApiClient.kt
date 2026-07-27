@@ -1,5 +1,6 @@
 package com.philipwilcox.spotifybutler.spotify
 
+import com.philipwilcox.spotifybutler.config.SpotifyRetryConfig
 import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.PublishStepTiming
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -17,6 +18,7 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
+import kotlin.math.pow
 
 interface SpotifyCacheFetcher {
     val supportsIndependentSources: Boolean get() = false
@@ -40,7 +42,12 @@ interface SpotifyCacheFetcher {
 data class SpotifyHttpResponse(
     val statusCode: Int,
     val body: String,
+    val retryAfterSeconds: Long? = null,
 )
+
+fun interface SpotifyRetrySleeper {
+    fun sleep(seconds: Double)
+}
 
 fun interface SpotifyHttpTransport {
     fun get(
@@ -106,7 +113,17 @@ private class JdkSpotifyHttpTransport(
         if (body != null) builder.header("Content-Type", "application/json")
         val request = builder.build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        return SpotifyHttpResponse(response.statusCode(), response.body())
+        return SpotifyHttpResponse(
+            statusCode = response.statusCode(),
+            body = response.body(),
+            retryAfterSeconds =
+                response
+                    .headers()
+                    .firstValue("Retry-After")
+                    .orElse(null)
+                    ?.toLongOrNull()
+                    ?.takeIf { it >= 0 },
+        )
     }
 }
 
@@ -116,6 +133,13 @@ class SpotifyApiClient(
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
     private val apiBaseUri: URI = URI("https://api.spotify.com/"),
     private val transport: SpotifyHttpTransport = JdkSpotifyHttpTransport(httpClient),
+    private val retryConfig: SpotifyRetryConfig =
+        SpotifyRetryConfig(
+            maxRetries = SpotifyRetryConfig.DEFAULT_MAX_RETRIES,
+            initialDelaySeconds = SpotifyRetryConfig.DEFAULT_INITIAL_DELAY_SECONDS,
+            backoffMultiplier = SpotifyRetryConfig.DEFAULT_BACKOFF_MULTIPLIER,
+        ),
+    private val retrySleeper: SpotifyRetrySleeper = SpotifyRetrySleeper { seconds -> sleep(seconds) },
 ) : SpotifyCacheFetcher {
     override val supportsIndependentSources: Boolean = true
     private val logger = KotlinLogging.logger {}
@@ -359,7 +383,7 @@ class SpotifyApiClient(
         val call = progress?.beginExternalCall()
         var timing: PublishStepTiming? = null
         try {
-            val response = transport.get(uri, accessToken)
+            val response = getWithRetries(uri, accessToken)
             require(response.statusCode in HttpURLConnection.HTTP_OK until HTTP_SUCCESS_LIMIT) {
                 "Spotify API request failed with HTTP ${response.statusCode} for $uri"
             }
@@ -386,6 +410,37 @@ class SpotifyApiClient(
             if (call != null && timing == null) progress.finishExternalCall(call)
         }
     }
+
+    private fun getWithRetries(
+        uri: URI,
+        accessToken: String,
+    ): SpotifyHttpResponse {
+        var retryNumber = 0
+        while (true) {
+            val response = transport.get(uri, accessToken)
+            if (response.statusCode != HTTP_TOO_MANY_REQUESTS ||
+                isQuotaExceeded(response) ||
+                retryNumber >= retryConfig.maxRetries
+            ) {
+                return response
+            }
+            retryNumber++
+            val configuredDelay = retryConfig.initialDelaySeconds * retryConfig.backoffMultiplier.pow(retryNumber - 1)
+            val delay = maxOf(configuredDelay, response.retryAfterSeconds?.toDouble() ?: 0.0)
+            logger.warn {
+                "Spotify GET rate limited: path=${uri.rawPath} retry=$retryNumber delaySeconds=$delay " +
+                    "status=${response.statusCode}"
+            }
+            retrySleeper.sleep(delay)
+        }
+    }
+
+    private fun isQuotaExceeded(response: SpotifyHttpResponse): Boolean =
+        runCatching {
+            (parseSpotifyResponse(response.body)["error"] as? JsonObject)
+                ?.optionalString("reason")
+                ?.equals("QUOTA_EXCEEDED", ignoreCase = true) == true
+        }.getOrDefault(false)
 
     private fun responseSummary(response: JsonObject): String {
         val itemCount = (response["items"] as? JsonArray)?.size
@@ -509,6 +564,19 @@ class SpotifyApiClient(
     }
 
     companion object {
+        private const val HTTP_TOO_MANY_REQUESTS = 429
+
+        private fun sleep(seconds: Double) {
+            val millis = (seconds * 1_000).toLong()
+            val nanos = ((seconds * 1_000_000_000).toLong() % 1_000_000).toInt()
+            try {
+                Thread.sleep(millis, nanos)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw interrupted
+            }
+        }
+
         private const val PAGE_SIZE = 50
         private const val PLAYLIST_FETCH_CONCURRENCY = 2
         private const val PLAYLIST_WRITE_BATCH_SIZE = 100
