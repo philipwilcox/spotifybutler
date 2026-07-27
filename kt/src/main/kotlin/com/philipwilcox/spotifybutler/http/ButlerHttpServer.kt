@@ -361,7 +361,7 @@ class ButlerHttpServer(
                 .getFirst("Host")
                 ?.trim()
                 ?.lowercase()
-        if (!isTrustedProxy(exchange)) return directHost
+        if (!isTrustedProxy(exchange, logTrustEvaluation = false)) return directHost
         return exchange.requestHeaders
             .getFirst("X-Forwarded-Host")
             ?.split(',')
@@ -373,7 +373,7 @@ class ButlerHttpServer(
     }
 
     private fun effectiveScheme(exchange: HttpExchange): String {
-        if (!isTrustedProxy(exchange)) return "http"
+        if (!isTrustedProxy(exchange, logTrustEvaluation = true)) return "http"
         return exchange.requestHeaders
             .getFirst("X-Forwarded-Proto")
             ?.split(',')
@@ -398,7 +398,10 @@ class ButlerHttpServer(
             ?.lowercase()
             ?.takeIf { it == "http" || it == "https" }
 
-    private fun isTrustedProxy(exchange: HttpExchange): Boolean {
+    private fun isTrustedProxy(
+        exchange: HttpExchange,
+        logTrustEvaluation: Boolean,
+    ): Boolean {
         val remoteAddress = exchange.remoteAddress.address
         val proxyToken = exchange.requestHeaders.getFirst(PROXY_TOKEN_HEADER)
         val sourceIpTrusted = remoteAddress.hostAddress in trustedProxyAddresses
@@ -406,10 +409,12 @@ class ButlerHttpServer(
         val tokenPresent = proxyToken != null
         val tokenMatches = tokensMatch(proxyToken, trustedProxyToken)
         val trusted = sourceIpTrusted || tokenMatches
-        logger.info {
-            "Proxy trust evaluation: remoteAddress=${remoteAddress.hostAddress} " +
-                "sourceIpTrusted=$sourceIpTrusted tokenConfigured=$tokenConfigured " +
-                "tokenPresent=$tokenPresent tokenMatches=$tokenMatches trusted=$trusted"
+        if (logTrustEvaluation) {
+            logger.info {
+                "Proxy trust evaluation: remoteAddress=${remoteAddress.hostAddress} " +
+                    "sourceIpTrusted=$sourceIpTrusted tokenConfigured=$tokenConfigured " +
+                    "tokenPresent=$tokenPresent tokenMatches=$tokenMatches trusted=$trusted"
+            }
         }
         return trusted
     }
