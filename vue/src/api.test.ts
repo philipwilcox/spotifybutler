@@ -4,7 +4,7 @@ import { parseDestination, parseLibrary, parsePreview, parseSongs, parseSourceSn
 
 const response = (body: unknown, status = 200) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const session = { userId: 'operator', csrfToken: 'csrf-a', expiresAt: '2026-01-01T00:00:00Z' }
-const song = (id: string) => ({ id, name: id, href: `https://spotify.test/${id}`, uri: `spotify:track:${id}`, album: { id: null, name: null, href: null, uri: null, releaseDate: null }, artists: [], durationMs: null, explicit: null, available: true })
+const song = (id: string, imageUrl?: string) => ({ id, name: id, href: `https://spotify.test/${id}`, uri: `spotify:track:${id}`, album: { id: null, name: null, href: null, uri: null, releaseDate: null, ...(imageUrl === undefined ? {} : { imageUrl }) }, artists: [], durationMs: null, explicit: null, available: true })
 const recipe = { schemaVersion: 1, shuffleAfterGeneration: false, source: { type: 'saved_tracks' }, predicate: { type: 'all' }, distinctness: { type: 'by', identity: 'SpotifyUri' }, selection: { target: null, quotas: [], rankBy: { type: 'seeded_random' } }, ordering: { type: 'seeded_random' } }
 const definition = { definitionId: 'RECENT_LIKED_100', name: 'Recent liked', description: 'test', kind: 'built_in', editable: false, enabled: true, recipe, sourceDependencies: [], destination: null }
 const destination = { definitionId: 'RECENT_LIKED_100', spotifyPlaylistId: 'managed', createdAt: '2026-01-01T00:00:00Z', lastSyncedAt: null, lastSeenSnapshotId: null, canSync: true, managementStatus: 'butler_created' }
@@ -133,5 +133,13 @@ describe('runtime contracts', () => {
     expect(() => parseDestination({ ...destination, managementStatus: 'owner_managed' })).toThrow(ContractValidationError)
     expect(() => parseSongs({ items: [song('a',)], missingIds: [] })).not.toThrow()
     expect(() => parsePreview({ definitionId: 'x', status: 'ready', generatedTrackIds: [], generatedTrackCount: -1, seed: 's', recipeRevision: 'r', algorithmVersion: 'a', sourceDependencies: [], generatedAt: 'now', unavailableReason: null })).toThrow(ContractValidationError)
+  })
+
+  it('normalizes optional album art and rejects non-string art', () => {
+    expect(parseSongs({ items: [song('art', 'https://example.invalid/art')], missingIds: [] }).items[0].album.imageUrl)
+      .toBe('https://example.invalid/art')
+    expect(parseSongs({ items: [song('legacy')], missingIds: [] }).items[0].album.imageUrl).toBeNull()
+    expect(() => parseSongs({ items: [{ ...song('bad'), album: { ...song('bad').album, imageUrl: 42 } }], missingIds: [] }))
+      .toThrow(ContractValidationError)
   })
 })

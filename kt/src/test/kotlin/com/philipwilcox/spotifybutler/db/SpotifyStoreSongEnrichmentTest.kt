@@ -8,6 +8,28 @@ import kotlin.test.assertEquals
 
 class SpotifyStoreSongEnrichmentTest {
     @Test
+    fun `song enrichment reconstructs album image from stored track json after reopen`() {
+        val path = Files.createTempDirectory("spotify-song-art-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    emptyList(),
+                    listOf(track("track-art", "https://example.invalid/art")),
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                ),
+                syncTimestampMillis = 10L,
+                ownerSpotifyUserId = "owner-one",
+            )
+        }
+
+        SpotifyStore.open(path).use { store ->
+            assertEquals("https://example.invalid/art", store.songEnrichment("track-art")?.albumImageUrl)
+        }
+    }
+
+    @Test
     fun `bounded enrichment returns unique requested songs in first-seen order`() {
         val path = Files.createTempDirectory("spotify-song-enrichment-").resolve("cache.db")
 
@@ -33,16 +55,18 @@ class SpotifyStoreSongEnrichmentTest {
         }
     }
 
-    private fun track(id: String) =
-        SpotifyTrack(
-            name = id,
-            id = id,
-            href = "https://api.example.test/tracks/$id",
-            uri = "spotify:track:$id",
-            releaseDate = "2024-01-01",
-            primaryArtistId = null,
-            rawJson =
-                "{\"id\":\"$id\",\"name\":\"$id\",\"href\":\"https://api.example.test/tracks/$id\"," +
-                    "\"uri\":\"spotify:track:$id\"}",
-        )
+    private fun track(
+        id: String,
+        imageUrl: String? = null,
+    ) = SpotifyTrack(
+        name = id,
+        id = id,
+        href = "https://api.example.test/tracks/$id",
+        uri = "spotify:track:$id",
+        releaseDate = "2024-01-01",
+        primaryArtistId = null,
+        rawJson =
+            "{\"id\":\"$id\",\"name\":\"$id\",\"href\":\"https://api.example.test/tracks/$id\"," +
+                "\"uri\":\"spotify:track:$id\",\"album\":{\"images\":${if (imageUrl == null) "[]" else "[{\"url\":\"$imageUrl\"}]"}}}",
+    )
 }

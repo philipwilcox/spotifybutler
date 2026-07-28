@@ -2,6 +2,7 @@ package com.philipwilcox.spotifybutler.spotify
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -46,6 +47,7 @@ internal fun parseSpotifyTrack(
         albumName = album?.optionalString("name"),
         albumHref = album?.optionalString("href"),
         albumUri = album?.optionalString("uri"),
+        albumImageUrl = firstSpotifyImageUrl(album?.get("images")),
         available = item.explicitPlayable() ?: item.optionalString("id") != null,
         artists =
             artists
@@ -59,6 +61,16 @@ internal fun parseSpotifyTrack(
                 }.filter { artist -> artist.name != null || artist.href != null || artist.uri != null },
     )
 }
+
+internal fun firstSpotifyImageUrl(images: JsonElement?): String? =
+    (images as? JsonArray)
+        ?.mapNotNull { image ->
+            val url =
+                (image as? JsonObject)?.get("url")?.let { value ->
+                    runCatching { value.jsonPrimitive.contentOrNull }.getOrNull()
+                }
+            url?.takeIf(String::isNotBlank)
+        }?.firstOrNull()
 
 internal fun decodeStoredTrack(
     trackJson: String,

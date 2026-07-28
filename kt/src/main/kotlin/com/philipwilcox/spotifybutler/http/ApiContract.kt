@@ -183,6 +183,7 @@ data class ApiResponse(
     val href: String?,
     val uri: String?,
     val releaseDate: String?,
+    val imageUrl: String?,
 )
 
 @Serializable data class ArtistWire(

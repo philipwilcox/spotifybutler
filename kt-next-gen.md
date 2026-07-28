@@ -23,17 +23,23 @@ Show who's used it! And possibly expand the "known users only restriction" after
 
 Improve and add this
 
+## Styling
+
+Revisit all UX elements. Make tab and angled button styles like my original proposal where still needed. Fix headers, remove uneeded stuff, etc.
+ 
+Figure out some ways to incorporate album art and dominant colors from it in a more dynamic way. Like "key color" slow "chill" "lofi" row background
+animations.
+
 ## Bulk Sync
 
 Come up with a good flow around "republish all generated playlists" or multi-select of them to enable backend parallization of the sync.
+
+When bulk syncing whole library to re-fetch stuff, show individual status of each step as it comes in or we re-poll.
 
 ## Editable Playlists
 
 Let's make this able to edit non-generated playlists in the library too, and do things like shuffle their ordering with our shuffle logic.
 
-## Styling
-
-Revisit all UX elements. Make tab and angled button styles like my original proposal.
 
 ## Perf - Full Library Sync
 

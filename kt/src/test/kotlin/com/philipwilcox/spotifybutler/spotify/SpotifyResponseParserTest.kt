@@ -9,6 +9,32 @@ import kotlin.test.assertTrue
 
 class SpotifyResponseParserTest {
     @Test
+    fun `track selects first non-blank album image in source order`() {
+        val track =
+            parseSpotifyTrack(
+                parseSpotifyResponse(
+                    """{"name":"Track","id":"track-id","href":"https://api.example.test/tracks/track-id","uri":"spotify:track:track-id","artists":[],"album":{"images":[{"url":"  "},{"url":"https://example.invalid/first"},{"url":"https://example.invalid/second"}]}}""",
+                ),
+                "test track",
+            )
+
+        assertEquals("https://example.invalid/first", track.albumImageUrl)
+    }
+
+    @Test
+    fun `track without album images has no album image`() {
+        val track =
+            parseSpotifyTrack(
+                parseSpotifyResponse(
+                    """{"name":"Track","id":"track-id","href":"https://api.example.test/tracks/track-id","uri":"spotify:track:track-id","artists":[],"album":{}}""",
+                ),
+                "test track",
+            )
+
+        assertNull(track.albumImageUrl)
+    }
+
+    @Test
     fun `current playlist items shape is parsed without changing cached track identity`() {
         val playlist =
             parseSpotifyPlaylist(

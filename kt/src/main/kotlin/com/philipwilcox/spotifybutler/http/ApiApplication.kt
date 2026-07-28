@@ -1105,7 +1105,7 @@ private fun StoredSong.toSongWire() =
         name,
         href,
         uri,
-        AlbumWire(albumId, albumName, albumHref, albumUri, releaseDate),
+        AlbumWire(albumId, albumName, albumHref, albumUri, releaseDate, albumImageUrl),
         artists.map {
             ArtistWire(it.id, it.name, it.href, it.uri)
         },

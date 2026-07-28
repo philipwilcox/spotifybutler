@@ -113,7 +113,7 @@ export interface Song {
   readonly name: string
   readonly href: string
   readonly uri: string
-  readonly album: { readonly id: string | null; readonly name: string | null; readonly href: string | null; readonly uri: string | null; readonly releaseDate: string | null }
+  readonly album: { readonly id: string | null; readonly name: string | null; readonly href: string | null; readonly uri: string | null; readonly releaseDate: string | null; readonly imageUrl: string | null }
   readonly artists: readonly { readonly id: string | null; readonly name: string | null; readonly href: string | null; readonly uri: string | null }[]
   readonly durationMs: number | null
   readonly explicit: boolean | null

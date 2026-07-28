@@ -98,11 +98,13 @@ class ApiApplicationTargetContractTest {
                         "POST",
                         "/api/v1/songs/bulk",
                         session,
-                        "{\"trackIds\":[\"missing\",\"one\",\"one\"]}",
+                        "{\"trackIds\":[\"missing\",\"one\",\"one\",\"two\"]}",
                     ),
                 )
             assertEquals(200, response.status, response.body)
-            assertTrue(response.body.contains("\"items\":[{\"id\":\"one\""))
+            assertTrue(response.body.contains("\"imageUrl\":\"https://example.invalid/art\""))
+            assertTrue(response.body.contains("\"id\":\"two\""))
+            assertTrue(response.body.contains("\"imageUrl\":null"))
             assertTrue(response.body.contains("\"missingIds\":[\"missing\"]"))
         }
     }
@@ -112,7 +114,10 @@ class ApiApplicationTargetContractTest {
         SpotifyStore.open(path).use { store ->
             store.replaceCache(
                 SpotifyCacheSnapshot(
-                    listOf(SavedTrack("2026-01-01T00:00:00Z", track("one"))),
+                    listOf(
+                        SavedTrack("2026-01-01T00:00:00Z", track("one", "https://example.invalid/art")),
+                        SavedTrack("2026-01-01T00:00:00Z", track("two")),
+                    ),
                     emptyList(),
                     emptyList(),
                     emptyList(),
@@ -187,17 +192,19 @@ class ApiApplicationTargetContractTest {
         const val OWNER = "owner"
         const val ORIGIN = "https://app.example.test"
 
-        fun track(id: String) =
-            SpotifyTrack(
-                id,
-                id,
-                "href:" + id,
-                "spotify:track:" + id,
-                "2026",
-                "artist",
-                "{\"name\":\"" + id + "\",\"id\":\"" + id + "\",\"href\":\"href:" + id + "\",\"uri\":\"spotify:track:" +
-                    id +
-                    "\"}",
-            )
+        fun track(
+            id: String,
+            imageUrl: String? = null,
+        ) = SpotifyTrack(
+            id,
+            id,
+            "href:" + id,
+            "spotify:track:" + id,
+            "2026",
+            "artist",
+            "{\"name\":\"" + id + "\",\"id\":\"" + id + "\",\"href\":\"href:" + id + "\",\"uri\":\"spotify:track:" +
+                id +
+                "\",\"album\":{\"images\":" + (if (imageUrl == null) "[]" else "[{\"url\":\"$imageUrl\"}]") + "}}",
+        )
     }
 }

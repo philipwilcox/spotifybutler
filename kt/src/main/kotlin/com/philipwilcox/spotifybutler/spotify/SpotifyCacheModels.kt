@@ -41,6 +41,7 @@ data class SpotifyTrack(
     val albumName: String? = null,
     val albumHref: String? = null,
     val albumUri: String? = null,
+    val albumImageUrl: String? = null,
     val available: Boolean = true,
     val artists: List<SpotifyArtistReference> = emptyList(),
 )

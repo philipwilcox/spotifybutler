@@ -12,7 +12,7 @@ const library = {
   definitions: [definition], playlists: [playlist],
 }
 const preview = { definitionId: definition.definitionId, status: 'ready', generatedTrackIds: ['known-track', 'missing-track'], generatedTrackCount: 2, seed: 'seed', recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null }
-const knownSong = { id: 'known-track', name: 'Known song', href: 'https://spotify.test/known-track', uri: 'spotify:track:known-track', album: { id: null, name: 'Known album', href: null, uri: null, releaseDate: null }, artists: [{ id: null, name: 'Known artist', href: null, uri: null }], durationMs: 1000, explicit: false, available: true }
+const knownSong = { id: 'known-track', name: 'Known song', href: 'https://spotify.test/known-track', uri: 'spotify:track:known-track', album: { id: 'known-album', name: 'Known album', href: null, uri: null, releaseDate: null, imageUrl: 'https://example.invalid/known-art' }, artists: [{ id: null, name: 'Known artist', href: null, uri: null }], durationMs: 1000, explicit: false, available: true }
 
 function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number } = {}) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -31,6 +31,19 @@ function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number 
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('App', () => {
+  it('renders album art with public Spotify links in the header and track row', async () => {
+    const fetcher = frontendFetch()
+    vi.stubGlobal('fetch', fetcher)
+    Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.find('.art-header').attributes('alt')).toBe('Selected album artwork')
+    expect(wrapper.find('.art-header').element.parentElement?.getAttribute('href')).toBe('https://open.spotify.com/album/known-album')
+    expect(wrapper.find('.art-track').attributes('alt')).toBe('Album artwork')
+    expect(wrapper.find('.art-track').element.parentElement?.getAttribute('href')).toBe('https://open.spotify.com/album/known-album')
+  })
+
   it('renders sanitized source snapshots, library counts, and missing-song fallback text', async () => {
     const fetcher = frontendFetch()
     vi.stubGlobal('fetch', fetcher)

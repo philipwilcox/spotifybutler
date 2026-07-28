@@ -258,6 +258,7 @@ const parseSong = (value: unknown, path: string): Song => {
       href: nullableString(required(album, 'href', `${path}.album`), `${path}.album.href`),
       uri: nullableString(required(album, 'uri', `${path}.album`), `${path}.album.uri`),
       releaseDate: nullableString(required(album, 'releaseDate', `${path}.album`), `${path}.album.releaseDate`),
+      imageUrl: 'imageUrl' in album ? nullableString(album.imageUrl, `${path}.album.imageUrl`) : null,
     },
     artists,
     durationMs: durationMs === null ? null : nonNegativeInteger(durationMs, `${path}.durationMs`),
