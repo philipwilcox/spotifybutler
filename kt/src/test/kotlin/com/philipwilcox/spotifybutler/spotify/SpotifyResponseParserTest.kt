@@ -13,7 +13,9 @@ class SpotifyResponseParserTest {
         val track =
             parseSpotifyTrack(
                 parseSpotifyResponse(
-                    """{"name":"Track","id":"track-id","href":"https://api.example.test/tracks/track-id","uri":"spotify:track:track-id","artists":[],"album":{"images":[{"url":"  "},{"url":"https://example.invalid/first"},{"url":"https://example.invalid/second"}]}}""",
+                    """{"name":"Track","id":"track-id","href":"https://api.example.test/""" +
+                        """tracks/track-id","uri":"spotify:track:track-id","artists":[],"album":{"images":[{"url":"  "},
+                            {"url":"https://example.invalid/first"},{"url":"https://example.invalid/second"}]}}""",
                 ),
                 "test track",
             )
@@ -26,7 +28,8 @@ class SpotifyResponseParserTest {
         val track =
             parseSpotifyTrack(
                 parseSpotifyResponse(
-                    """{"name":"Track","id":"track-id","href":"https://api.example.test/tracks/track-id","uri":"spotify:track:track-id","artists":[],"album":{}}""",
+                    """{"name":"Track","id":"track-id","href":"https://api.example.test/tracks/track:""" +
+                        """track-id","artists":[],"album":{}}""",
                 ),
                 "test track",
             )

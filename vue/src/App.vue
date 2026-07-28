@@ -14,7 +14,6 @@ const draggedIndex = ref<number | null>(null)
 const selected = computed(() => studio.state.selection)
 const selectedDefinition = computed(() => studio.state.definition)
 const selectedLibraryPlaylist = computed(() => studio.state.libraryPlaylist)
-const statusText = computed(() => studio.state.preview?.status ?? selectedLibraryPlaylist.value?.contentStatus ?? 'waiting')
 const isBusy = computed(() => session.state.loading || library.state.loading || studio.state.loading)
 const songFor = (id: string) => selected.value.enrichment[id]
 const headerArtSong = computed(() => selected.value.orderedIds.map(songFor).find(song => song?.album.imageUrl) ?? null)
@@ -68,7 +67,7 @@ onMounted(boot)
       <span class="progress-label">WORKING</span><span class="progress-track"><span class="progress-bar" /></span>
     </div>
     <header class="hud panel">
-      <div><p class="eyebrow">SPOTIFY // BUTLER</p><h1>PLAYLIST STUDIO</h1></div>
+      <h1>BUTLER // PLAYLIST STUDIO</h1>
       <div class="hud-identity">
         <span class="build-stamp" :title="`Frontend bundle built at ${buildTimestamp} UTC`">BUILD {{ buildDisplayTimestamp }}</span>
         <div class="hud-status" aria-live="polite"><span class="status-light" :class="session.state.session ? 'online' : 'offline'" />{{ session.state.session ? `OPERATOR ${session.state.session.userId}` : 'AUTHENTICATION REQUIRED' }} <button v-if="session.state.session" class="button quiet" @click="session.signOut">SIGN OUT</button><button v-else class="button gold" @click="session.startOAuth">CONNECT SPOTIFY</button></div>
@@ -81,7 +80,7 @@ onMounted(boot)
       <div v-if="session.state.error" class="alert error" role="alert">{{ session.state.error }}</div>
       <section class="layout">
         <aside class="panel sidebar">
-          <div class="section-title"><span>DEFINED PLAYLISTS</span><span class="counter">{{ library.state.definitions.length }}</span></div>
+          <div class="section-title"><span>DEFINED PLAYLISTS</span><span class="section-title-separator">//</span><span class="counter">{{ library.state.definitions.length }}</span></div>
           <button v-for="definition in library.state.definitions" :key="definition.definitionId" class="mission" :class="{ active: definition.definitionId === selectedDefinition?.definitionId }" @click="choose(definition)"><span class="mission-mark">◆</span><span><strong>{{ definition.name }}</strong><small>{{ definition.kind }} · {{ definition.definitionId }}</small></span></button>
           <p v-if="library.state.loading && !library.state.definitions.length" class="hint">Loading library…</p>
           <p v-else-if="!library.state.loading && !library.state.definitions.length" class="hint">No definitions are available.</p>
@@ -97,15 +96,40 @@ onMounted(boot)
         <section class="workspace">
           <div v-if="studio.state.error" class="alert error" role="alert">{{ studio.state.error }} <button class="icon-button" aria-label="Dismiss error" @click="studio.state.error = null">×</button></div>
           <div v-if="studio.state.conflict" class="alert conflict" role="alert"><strong>DESTINATION SNAPSHOT CONFLICT</strong><span>The remote playlist changed. Your staged order is preserved; review it and synchronize again when ready.</span></div>
-          <section class="panel mission-header">
-            <div class="mission-header-copy"><a v-if="headerArt && headerArtSong" class="art-link" :href="spotifyPageUrl(headerArtSong)" target="_blank" rel="noreferrer" aria-label="Open album on Spotify"><img class="art-frame art-header" :src="headerArt" alt="Selected album artwork" /><span class="art-label">SPOTIFY ART</span></a><div><p class="eyebrow">{{ studio.state.activeKind === 'library_playlist' ? 'LIBRARY PLAYLIST' : 'ACTIVE DEFINITION' }} // {{ selectedDefinition?.definitionId || selectedLibraryPlaylist?.spotifyPlaylistId }}</p><h2>{{ selectedDefinition?.name || selectedLibraryPlaylist?.name || 'Select a mission' }}</h2><p>{{ selectedDefinition?.description || selectedLibraryPlaylist?.description || 'Choose a playlist or definition from the sidebar.' }}</p></div></div>
-            <div class="mission-meta"><span class="tag" :class="`tag-${statusText}`">{{ statusText }}</span><span>{{ selected?.orderedIds.length }} TRACKS</span><span v-if="selected?.dirty" class="dirty">● UNSAVED ORDER</span></div>
+          <section class="panel playlist-info">
+            <div class="section-title"><span>{{ studio.state.activeKind === 'library_playlist' ? 'LIBRARY PLAYLIST' : 'ACTIVE DEFINITION' }}</span><span class="section-title-separator">//</span><span class="section-title-detail">{{ selectedDefinition?.definitionId || selectedLibraryPlaylist?.spotifyPlaylistId }}</span></div>
+            <div class="playlist-info-top">
+              <a v-if="headerArt && headerArtSong" class="art-link" :href="spotifyPageUrl(headerArtSong)" target="_blank" rel="noreferrer" aria-label="Open album on Spotify"><img class="art-frame art-header" :src="headerArt" alt="Selected album artwork" /><span class="art-label">SPOTIFY ART</span></a>
+              <div class="playlist-heading"><h2>{{ selectedDefinition?.name || selectedLibraryPlaylist?.name || 'Select a mission' }}</h2><p>{{ selectedDefinition?.description || selectedLibraryPlaylist?.description || 'Choose a playlist or definition from the sidebar.' }}</p></div>
+              <div class="playlist-info-rail">
+                <div class="mission-meta"><span>{{ selected?.orderedIds.length }} TRACKS</span><span v-if="selected?.dirty" class="dirty">● UNSAVED ORDER</span></div>
+              </div>
+            </div>
+            <div v-if="studio.state.activeKind === 'definition'" class="playlist-info-lower">
+              <div class="playlist-info-details">
+                <div class="definition-details">
+                  <div><span class="label">SEED</span><code class="seed-value" :title="studio.state.preview?.seed || '—'">{{ studio.state.preview?.seed || '—' }}</code></div>
+                  <div><span class="label">RECIPE REVISION</span><code>{{ studio.state.preview?.recipeRevision?.slice(0, 16) || '—' }}</code></div>
+                  <div><span class="label">GENERATED</span><span>{{ formatTime(studio.state.preview?.generatedAt) }}</span></div>
+                </div>
+                <div class="destination-summary">
+                  <span class="label">DESTINATION</span>
+                  <h3>{{ selectedDefinition?.destination ? selectedDefinition.destination.spotifyPlaylistId : 'NO BUTLER DESTINATION' }}</h3>
+                  <p v-if="selectedDefinition?.destination">Last sync: {{ formatTime(selectedDefinition.destination.lastSyncedAt) }} · snapshot {{ selectedDefinition.destination.lastSeenSnapshotId || 'unseen' }}</p>
+                  <p v-else>Publish the staged order to create or adopt a managed Spotify playlist.</p>
+                </div>
+              </div>
+              <div class="playlist-info-action-panel">
+                <label class="shuffle-setting"><input type="checkbox" :checked="selectedDefinition?.recipe.shuffleAfterGeneration ?? false" :disabled="studio.state.loading" @change="updateShuffleAfterGeneration" /><span>SHUFFLE AFTER GENERATION</span></label>
+                <div class="action-group playlist-info-actions">
+                  <button class="button quiet" :disabled="studio.state.loading" @click="studio.reroll">REROLL PREVIEW</button>
+                  <button v-if="!selectedDefinition?.destination" class="button gold" :disabled="studio.state.loading" @click="planPublish">PUBLISH</button>
+                  <button v-else class="button gold" :disabled="studio.state.loading" @click="showSyncConfirm = true">SYNC DESTINATION</button>
+                </div>
+              </div>
+            </div>
           </section>
-          <section v-if="studio.state.activeKind === 'definition'" class="panel telemetry">
-            <div><span class="label">SEED</span><code>{{ studio.state.preview?.seed || '—' }}</code></div><div><span class="label">RECIPE REVISION</span><code>{{ studio.state.preview?.recipeRevision?.slice(0, 16) || '—' }}</code></div><div><span class="label">GENERATED</span><span>{{ formatTime(studio.state.preview?.generatedAt) }}</span></div><label class="shuffle-setting"><input type="checkbox" :checked="selectedDefinition?.recipe.shuffleAfterGeneration ?? false" :disabled="studio.state.loading" @change="updateShuffleAfterGeneration" /><span>SHUFFLE AFTER GENERATION</span></label><button class="button quiet" :disabled="studio.state.loading" @click="studio.reroll">REROLL PREVIEW</button>
-          </section>
-          <section v-if="studio.state.activeKind === 'definition'" class="panel destination"><div><p class="eyebrow">DESTINATION CONTROL</p><h3>{{ selectedDefinition?.destination ? selectedDefinition.destination.spotifyPlaylistId : 'NO BUTLER DESTINATION' }}</h3><p v-if="selectedDefinition?.destination">Last sync: {{ formatTime(selectedDefinition.destination.lastSyncedAt) }} · snapshot {{ selectedDefinition.destination.lastSeenSnapshotId || 'unseen' }}</p><p v-else>Publish the staged order to create or adopt a managed Spotify playlist.</p></div><div class="action-group"><button v-if="!selectedDefinition?.destination" class="button gold" :disabled="studio.state.loading" @click="planPublish">PUBLISH</button><button v-else class="button gold" :disabled="studio.state.loading" @click="showSyncConfirm = true">SYNC DESTINATION</button></div></section>
-          <section class="panel selection"><div class="section-title"><span>STAGED TRACK SEQUENCE</span><span class="section-title-actions"><button v-if="studio.state.activeKind === 'definition'" class="button quiet" :disabled="studio.state.loading || (selected?.orderedIds.length || 0) < 2" aria-label="Shuffle staged track sequence" @click="studio.shuffleTrackOrder">SHUFFLE</button><span class="counter">{{ selected?.orderedIds.length || 0 }}</span></span></div><p class="hint">Preview IDs are authoritative until you edit this local sequence. Drag rows or use the keyboard controls; changes remain staged.</p><div class="track-table"><div class="track-head"><span>#</span><span>TRACK / ARTIST</span><span>ALBUM</span><span>CONTROLS</span></div><div v-for="(id, index) in selected?.orderedIds" :key="`${id}-${index}`" class="track-row" draggable="true" @dragstart="draggedIndex = index" @dragover.prevent @drop="dropTrack(index)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><a v-if="songFor(id)?.album.imageUrl && songFor(id)" class="art-link art-track-link" :href="spotifyPageUrl(songFor(id)!)" target="_blank" rel="noreferrer" :aria-label="`Open ${songFor(id)?.album.name || 'album'} on Spotify`"><img class="art-frame art-track" :src="songFor(id)?.album.imageUrl" alt="Album artwork" /></a><span class="track-name"><strong><span v-if="songFor(id)">{{ songFor(id)?.name }}</span><span v-else class="enrichment-pending" role="status" aria-label="Track ID enrichment pending" /></strong><small>{{ songFor(id)?.artists.map(artist => artist.name).filter(Boolean).join(', ') || id }}</small></span><span class="album">{{ songFor(id)?.album.name || '—' }}</span><span class="track-controls"><button class="icon-button" :aria-label="`Move track ${index + 1} up`" @click="studio.moveTrack(index, -1)" @keydown="keyMove(index, $event)">↑</button><button class="icon-button" :aria-label="`Move track ${index + 1} down`" @click="studio.moveTrack(index, 1)" @keydown="keyMove(index, $event)">↓</button><button class="icon-button danger" :aria-label="`Remove track ${index + 1}`" @click="studio.removeTrack(index)">×</button></span></div><div v-if="!selected?.orderedIds.length" class="empty-table">No tracks in this preview.</div></div></section>
+          <section class="panel selection"><div class="section-title"><span>STAGED TRACK SEQUENCE</span><span class="section-title-separator">//</span><span class="counter">{{ selected?.orderedIds.length || 0 }}</span></div><div class="selection-toolbar"><p class="hint">Drag rows or use the keyboard controls; changes remain staged.</p><button v-if="studio.state.activeKind === 'definition'" class="button quiet" :disabled="studio.state.loading || (selected?.orderedIds.length || 0) < 2" aria-label="Shuffle staged track sequence" @click="studio.shuffleTrackOrder">SHUFFLE</button></div><div class="track-table"><div class="track-head"><span>#</span><span class="track-heading-name">TRACK / ARTIST</span><span>ALBUM</span><span>CONTROLS</span></div><div v-for="(id, index) in selected?.orderedIds" :key="`${id}-${index}`" class="track-row" draggable="true" @dragstart="draggedIndex = index" @dragover.prevent @drop="dropTrack(index)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><a v-if="songFor(id)?.album.imageUrl && songFor(id)" class="art-link art-track-link" :href="spotifyPageUrl(songFor(id)!)" target="_blank" rel="noreferrer" :aria-label="`Open ${songFor(id)?.album.name || 'album'} on Spotify`"><img class="art-frame art-track" :src="songFor(id)?.album.imageUrl" alt="Album artwork" /></a><span class="track-name"><strong><span v-if="songFor(id)">{{ songFor(id)?.name }}</span><span v-else class="enrichment-pending" role="status" aria-label="Track ID enrichment pending" /></strong><small>{{ songFor(id)?.artists.map(artist => artist.name).filter(Boolean).join(', ') || id }}</small></span><span class="album">{{ songFor(id)?.album.name || '—' }}</span><span class="track-controls"><button class="icon-button" :aria-label="`Move track ${index + 1} up`" @click="studio.moveTrack(index, -1)" @keydown="keyMove(index, $event)">↑</button><button class="icon-button" :aria-label="`Move track ${index + 1} down`" @click="studio.moveTrack(index, 1)" @keydown="keyMove(index, $event)">↓</button><button class="icon-button danger" :aria-label="`Remove track ${index + 1}`" @click="studio.removeTrack(index)">×</button></span></div><div v-if="!selected?.orderedIds.length" class="empty-table">No tracks in this preview.</div></div></section>
         </section>
       </section>
     </template>

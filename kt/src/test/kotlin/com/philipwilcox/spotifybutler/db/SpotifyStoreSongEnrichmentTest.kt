@@ -67,6 +67,8 @@ class SpotifyStoreSongEnrichmentTest {
         primaryArtistId = null,
         rawJson =
             "{\"id\":\"$id\",\"name\":\"$id\",\"href\":\"https://api.example.test/tracks/$id\"," +
-                "\"uri\":\"spotify:track:$id\",\"album\":{\"images\":${if (imageUrl == null) "[]" else "[{\"url\":\"$imageUrl\"}]"}}}",
+                "\"uri\":\"spotify:track:$id\",\"album\":{\"images\":${
+                    if (imageUrl == null) "[]" else "[{\"url\":\"$imageUrl\"}]"
+                }}}",
     )
 }

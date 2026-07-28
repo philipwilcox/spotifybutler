@@ -19,16 +19,18 @@ Self-descriptive
 ## Admin Panel
 Show who's used it! And possibly expand the "known users only restriction" after all if i ever deploy publicly.
 
-## Album Art and Track Info Layout
+## Linting
 
-Improve and add this
+Let's add frontend code and CSS linting.
 
 ## Styling
 
-Revisit all UX elements. Make tab and angled button styles like my original proposal where still needed. Fix headers, remove uneeded stuff, etc.
+Revisit all UX elements. Fix headers, remove un-needed stuff, etc.
  
 Figure out some ways to incorporate album art and dominant colors from it in a more dynamic way. Like "key color" slow "chill" "lofi" row background
 animations.
+
+Let's add track length column and maybe other stuff to the track sequence preview. Listen count? Personal usage info?
 
 ## Bulk Sync
 
