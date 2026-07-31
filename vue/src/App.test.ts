@@ -91,7 +91,10 @@ describe('App', () => {
     expect(selectionActions).toContain('SHUFFLE')
     expect(selection.text()).not.toContain('Preview IDs are authoritative')
     expect(selection.find('.section-title .counter').text()).toBe('2')
-    expect(wrapper.findAll('.sidebar .mission')).toHaveLength(2)
+    const sidebarMissions = wrapper.findAll('.sidebar .mission')
+    expect(sidebarMissions).toHaveLength(2)
+    expect(sidebarMissions.find(mission => mission.text().includes(definition.name))?.classes()).toContain('definition-mission')
+    expect(sidebarMissions.find(mission => mission.text().includes(playlist.name))?.classes()).not.toContain('definition-mission')
   })
 
   it('shows the authentication-required state and visible library errors', async () => {

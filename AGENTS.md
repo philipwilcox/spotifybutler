@@ -9,6 +9,9 @@ Plan docs should include api-level/struct-or-class+function level specifications
 properly guided, but not raw actual code. This should apply either to "real" plan mode or just files I ask you to
 make.
 
+This is not an enterprise-grade project. Be extremely hesitant to suggest anything (outside of security essentials)
+that are MORE functionality or more robust than I request.
+
 ## General modifications
 
 - DO NOT run lint and unit tests on every step and modification. I like to sequence smaller changes then just run those

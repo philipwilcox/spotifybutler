@@ -81,7 +81,7 @@ onMounted(boot)
       <section class="layout">
         <aside class="panel sidebar">
           <div class="section-title"><span>DEFINED PLAYLISTS</span><span class="section-title-separator">//</span><span class="counter">{{ library.state.definitions.length }}</span></div>
-          <button v-for="definition in library.state.definitions" :key="definition.definitionId" class="mission" :class="{ active: definition.definitionId === selectedDefinition?.definitionId }" @click="choose(definition)"><span class="mission-mark">◆</span><span><strong>{{ definition.name }}</strong><small>{{ definition.kind }} · {{ definition.definitionId }}</small></span></button>
+          <button v-for="definition in library.state.definitions" :key="definition.definitionId" class="mission definition-mission" :class="{ active: definition.definitionId === selectedDefinition?.definitionId }" @click="choose(definition)"><span class="mission-mark">◆</span><span><strong>{{ definition.name }}</strong><small>{{ definition.kind }} · {{ definition.definitionId }}</small></span></button>
           <p v-if="library.state.loading && !library.state.definitions.length" class="hint">Loading library…</p>
           <p v-else-if="!library.state.loading && !library.state.definitions.length" class="hint">No definitions are available.</p>
           <div class="divider" />
