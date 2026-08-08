@@ -43,6 +43,14 @@ When bulk syncing whole library to re-fetch stuff, show individual status of eac
 Let's make this able to edit non-generated playlists in the library too, and do things like shuffle their ordering with our shuffle logic.
 
 
+## LastFM Integration, Metadata
+
+Pull personal stats and richer genre information
+
+Make a right-click interface for tagging tracks more dynamically with custom metadata that's available to future recipes.
+
+Figure out a durable store for this.
+
 ## Perf - Full Library Sync
 
 Parallelize this. Also provide ways to only fetch liked songs, not update remote playlists. But also add "update just
@@ -55,10 +63,6 @@ When we know how many paginated POSTs to make to sync playlists, expose this bac
 ## Recipe Builder UI
 
 Let's figure out a slick way to do this
-
-## LastFM Integration
-
-Pull personal stats and richer genre information
 
 ## AI
 
