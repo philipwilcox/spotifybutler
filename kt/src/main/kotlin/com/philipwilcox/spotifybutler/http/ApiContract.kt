@@ -1,6 +1,7 @@
 package com.philipwilcox.spotifybutler.http
 
 import com.philipwilcox.spotifybutler.service.PlaylistRecipe
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -19,6 +20,105 @@ data class ApiResponse(
         mapOf(
             "Content-Type" to "application/json; charset=utf-8",
         ),
+)
+
+@Serializable
+enum class OperationKind {
+    @SerialName("library_refresh")
+    LIBRARY_REFRESH,
+
+    @SerialName("publish_plan")
+    PUBLISH_PLAN,
+
+    @SerialName("publish_create")
+    PUBLISH_CREATE,
+
+    @SerialName("publish_adopt")
+    PUBLISH_ADOPT,
+
+    @SerialName("destination_sync")
+    DESTINATION_SYNC,
+
+    ;
+
+    companion object {
+        val library_refresh get() = LIBRARY_REFRESH
+        val publish_plan get() = PUBLISH_PLAN
+        val publish_create get() = PUBLISH_CREATE
+        val publish_adopt get() = PUBLISH_ADOPT
+        val destination_sync get() = DESTINATION_SYNC
+    }
+}
+
+@Serializable
+enum class OperationPhase {
+    @SerialName("queued")
+    QUEUED,
+
+    @SerialName("running")
+    RUNNING,
+
+    @SerialName("succeeded")
+    SUCCEEDED,
+
+    @SerialName("failed")
+    FAILED,
+
+    ;
+
+    companion object {
+        val queued get() = QUEUED
+        val running get() = RUNNING
+        val succeeded get() = SUCCEEDED
+        val failed get() = FAILED
+    }
+}
+
+@Serializable data class OperationAcceptedWire(
+    val operationId: String,
+    val kind: OperationKind,
+)
+
+@Serializable data class OperationFailureWire(
+    val code: String,
+    val message: String,
+)
+
+@Serializable sealed class OperationResultWire
+
+@Serializable data class LibraryRefreshResultWire(
+    val library: LibraryWire,
+) : OperationResultWire()
+
+@Serializable data class PublishPlanResultWire(
+    val plan: PublishPlanWire,
+) : OperationResultWire()
+
+@Serializable data class PublishDestinationResultWire(
+    val destination: DestinationSummaryWire,
+) : OperationResultWire()
+
+@Serializable data class DestinationSyncResultWire(
+    val current: CurrentEnvelopeWire,
+) : OperationResultWire()
+
+@Serializable data class OperationStatusWire(
+    val operationId: String,
+    val kind: OperationKind,
+    val phase: OperationPhase,
+    val action: String,
+    val completedSteps: Int,
+    val totalSteps: Int? = null,
+    val result: OperationResultWire? = null,
+    val error: OperationFailureWire? = null,
+    val libraryRefreshProgress: LibraryRefreshProgressWire? = null,
+)
+
+@Serializable data class LibraryRefreshProgressWire(
+    val completedSources: Int,
+    val totalSources: Int,
+    val activeSourceCompletedPages: Int? = null,
+    val activeSourceTotalPages: Int? = null,
 )
 
 @Serializable data class ErrorEnvelope(

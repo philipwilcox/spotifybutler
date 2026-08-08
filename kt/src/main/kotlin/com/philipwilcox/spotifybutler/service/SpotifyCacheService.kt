@@ -29,24 +29,17 @@ class SpotifyCacheService(
             )
         }
 
-        val requested = sourceKeys ?: ROOT_SOURCE_KEYS
+        if (fullRefresh) return refreshFullLibrary(ownerSpotifyUserId, accessToken)
+
+        val requested = sourceKeys.orEmpty()
         requested.forEach { CacheSourceKey.root(ownerSpotifyUserId, it) }
         val updated = mutableListOf<CacheSourceSnapshot>()
-        requested.filterNot { it.startsWith(CacheSourceKey.PLAYLIST_ITEMS_PREFIX) }.forEach { sourceKey ->
+        requested.filterNot { it.startsWith(CacheSourceKey.PLAYLIST_ITEMS_PREFIX) }.sorted().forEach { sourceKey ->
             runCatching { refreshSource(ownerSpotifyUserId, accessToken, sourceKey) }
                 .onSuccess { updated += it }
                 .onFailure { updated += store.sourceSnapshot(ownerSpotifyUserId, sourceKey) }
         }
-        val contentKeys =
-            if (fullRefresh) {
-                store
-                    .cachedPlaylistIds(
-                        ownerSpotifyUserId,
-                    ).map { CacheSourceKey.playlistItems(ownerSpotifyUserId, it).sourceKey }
-            } else {
-                requested.filter { it.startsWith(CacheSourceKey.PLAYLIST_ITEMS_PREFIX) }
-            }
-        contentKeys.forEach { sourceKey ->
+        requested.filter { it.startsWith(CacheSourceKey.PLAYLIST_ITEMS_PREFIX) }.sorted().forEach { sourceKey ->
             runCatching { refreshSource(ownerSpotifyUserId, accessToken, sourceKey) }
                 .onSuccess { updated += it }
                 .onFailure { updated += store.sourceSnapshot(ownerSpotifyUserId, sourceKey) }
@@ -57,29 +50,65 @@ class SpotifyCacheService(
         )
     }
 
+    private fun refreshFullLibrary(
+        ownerSpotifyUserId: String,
+        accessToken: String,
+    ): CacheRefreshResult {
+        val updated = mutableListOf<CacheSourceSnapshot>()
+        refreshFullSource(ownerSpotifyUserId, accessToken, CacheSourceKey.PLAYLISTS, updated)
+        val contentKeys =
+            store
+                .cachedPlaylistIds(ownerSpotifyUserId)
+                .sorted()
+                .map { CacheSourceKey.playlistItems(ownerSpotifyUserId, it).sourceKey }
+        OperationProgress.current()?.libraryRefreshSourcesDiscovered(ROOT_SOURCE_KEYS.size + contentKeys.size)
+        ROOT_SOURCE_KEYS.filterNot { it == CacheSourceKey.PLAYLISTS }.forEach { sourceKey ->
+            refreshFullSource(ownerSpotifyUserId, accessToken, sourceKey, updated)
+        }
+        contentKeys.forEach { sourceKey -> refreshFullSource(ownerSpotifyUserId, accessToken, sourceKey, updated) }
+        return CacheRefreshResult(updated, store.aggregateStatus(ownerSpotifyUserId))
+    }
+
+    private fun refreshFullSource(
+        ownerSpotifyUserId: String,
+        accessToken: String,
+        sourceKey: String,
+        updated: MutableList<CacheSourceSnapshot>,
+    ) {
+        runCatching { refreshSource(ownerSpotifyUserId, accessToken, sourceKey, trackLibraryProgress = true) }
+            .onSuccess { updated += it }
+            .onFailure { updated += store.sourceSnapshot(ownerSpotifyUserId, sourceKey) }
+    }
+
     @Suppress("TooGenericExceptionCaught")
     fun refreshSource(
         ownerSpotifyUserId: String,
         accessToken: String,
         sourceKey: String,
+        trackLibraryProgress: Boolean = false,
     ): CacheSourceSnapshot {
         CacheSourceKey.root(ownerSpotifyUserId, sourceKey)
+        if (trackLibraryProgress) OperationProgress.current()?.libraryRefreshSourceStarted()
+        OperationProgress.current()?.actionStarted("Refreshing library source")
         store.setSourceRefreshing(ownerSpotifyUserId, sourceKey)
         return try {
             val timestamp = clock.millis()
             val snapshot = fetchSource(ownerSpotifyUserId, accessToken, sourceKey)
             store.replaceSource(ownerSpotifyUserId, sourceKey, snapshot, timestamp)
+            OperationProgress.current()?.actionStarted("Storing source in local library")
             store.sourceSnapshot(ownerSpotifyUserId, sourceKey).also { stored ->
+                if (trackLibraryProgress) OperationProgress.current()?.libraryRefreshSourceFinished(succeeded = true)
                 logger.info {
                     "Spotify cache source stored: owner=$ownerSpotifyUserId sourceKey=$sourceKey " +
                         "resourceKind=${stored.resourceKind} status=${stored.status} " +
                         "itemCount=${stored.itemCount ?: 0}" +
-                        PublishOperationLog.current()?.let { " ${it.logFields()}" }.orEmpty()
+                        OperationProgress.current()?.let { " ${it.logFields()}" }.orEmpty()
                 }
             }
         } catch (exception: Exception) {
             logger.warn(exception) { "Spotify source refresh failed sourceKey=$sourceKey" }
             store.setSourceFailure(ownerSpotifyUserId, sourceKey, sanitizedErrorCode(exception), clock.millis())
+            if (trackLibraryProgress) OperationProgress.current()?.libraryRefreshSourceFinished(succeeded = false)
             throw exception
         }
     }
@@ -190,11 +219,11 @@ class SpotifyCacheService(
 
     private companion object {
         val ROOT_SOURCE_KEYS =
-            setOf(
+            listOf(
+                CacheSourceKey.PLAYLISTS,
                 CacheSourceKey.SAVED_TRACKS,
                 CacheSourceKey.TOP_TRACKS,
                 CacheSourceKey.TOP_ARTISTS,
-                CacheSourceKey.PLAYLISTS,
             )
     }
 }

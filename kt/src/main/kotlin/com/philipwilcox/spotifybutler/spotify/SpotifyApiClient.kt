@@ -1,8 +1,8 @@
 package com.philipwilcox.spotifybutler.spotify
 
 import com.philipwilcox.spotifybutler.config.SpotifyRetryConfig
-import com.philipwilcox.spotifybutler.service.PublishOperationLog
-import com.philipwilcox.spotifybutler.service.PublishStepTiming
+import com.philipwilcox.spotifybutler.service.OperationProgress
+import com.philipwilcox.spotifybutler.service.OperationStepTiming
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -379,9 +379,9 @@ class SpotifyApiClient(
         accessToken: String,
         pageSequence: Int,
     ): JsonObject {
-        val progress = PublishOperationLog.current()
+        val progress = OperationProgress.current()
         val call = progress?.beginExternalCall()
-        var timing: PublishStepTiming? = null
+        var timing: OperationStepTiming? = null
         try {
             val response = getWithRetries(uri, accessToken)
             require(response.statusCode in HttpURLConnection.HTTP_OK until HTTP_SUCCESS_LIMIT) {
@@ -399,7 +399,13 @@ class SpotifyApiClient(
                 }
             }
             val parsed = parseSpotifyResponse(response.body)
-            updateExpectedPageCount(progress, parsed, pageSequence)
+            pageCount(parsed)?.let { pageCount ->
+                if (progress?.isLibraryRefreshSourceActive == true) {
+                    progress.libraryRefreshPageTotalDiscovered(pageCount)
+                } else {
+                    progress?.setExpectedExternalCalls(pageCount)
+                }
+            }
             timing = call?.let { progress.finishExternalCall(it) }
             logger.info {
                 "Spotify response summary: method=GET path=${uri.rawPath} status=${response.statusCode} " +
@@ -431,6 +437,7 @@ class SpotifyApiClient(
                 "Spotify GET rate limited: path=${uri.rawPath} retry=$retryNumber delaySeconds=$delay " +
                     "status=${response.statusCode}"
             }
+            OperationProgress.current()?.retrying()
             retrySleeper.sleep(delay)
         }
     }
@@ -450,6 +457,17 @@ class SpotifyApiClient(
         val id = response.optionalString("id")
         return "itemCount=${itemCount ?: trackItems ?: 0} total=${total ?: "unknown"} " +
             "nextPresent=$nextPresent${id?.let { " id=$it" }.orEmpty()}"
+    }
+
+    private fun pageCount(response: JsonObject): Int? {
+        val tracks = response["tracks"] as? JsonObject
+        val total = response.optionalLong("total") ?: tracks?.optionalLong("total")
+        val limit = response.optionalLong("limit") ?: tracks?.optionalLong("limit")
+        return if (total != null && limit != null && limit > 0) {
+            ((total + limit - 1) / limit).toInt()
+        } else {
+            null
+        }
     }
 
     private fun parseMutationResponse(
@@ -495,9 +513,9 @@ class SpotifyApiClient(
         request: () -> SpotifyHttpResponse,
         transform: (JsonObject) -> T,
     ): T {
-        val progress = PublishOperationLog.current()
+        val progress = OperationProgress.current()
         val call = progress?.beginExternalCall()
-        var timing: PublishStepTiming? = null
+        var timing: OperationStepTiming? = null
         try {
             val response = request()
             requireMutationSuccess(response, operation)
@@ -513,30 +531,10 @@ class SpotifyApiClient(
         }
     }
 
-    private fun updateExpectedPageCount(
-        progress: PublishOperationLog?,
-        response: JsonObject,
-        pageSequence: Int,
-    ) {
-        if (progress == null) return
-        val nextPresent = !response.optionalString("next").isNullOrBlank()
-        val total = response.optionalLong("total") ?: (response["tracks"] as? JsonObject)?.optionalLong("total")
-        val limit = response.optionalLong("limit") ?: PAGE_SIZE.toLong()
-        val pageCount =
-            if (total != null && limit > 0) {
-                ((total + limit - 1) / limit).toInt()
-            } else if (!nextPresent) {
-                pageSequence.coerceAtLeast(1)
-            } else {
-                null
-            }
-        pageCount?.let(progress::setExpectedExternalCallsIfUnknown)
-    }
-
-    private fun timingFields(timing: PublishStepTiming?): String =
+    private fun timingFields(timing: OperationStepTiming?): String =
         timing
             ?.let {
-                " ${PublishOperationLog.current()?.logFields(it)}"
+                " ${OperationProgress.current()?.logFields(it)}"
             }.orEmpty()
 
     private fun trackUri(trackId: String): String = "spotify:track:$trackId"

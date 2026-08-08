@@ -10,12 +10,13 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ApiApplicationTargetContractTest {
     @Test
     fun removedRoutesAndGlobalFieldsAreAbsent() {
-        withApplication { app, session, _, _ ->
+        withApplication { app, session, _, _, _ ->
             val run = app.handle(request("POST", "/api/v1/run", session))
             val singular = app.handle(request("GET", "/api/v1/songs/one", session))
             val library = app.handle(request("GET", "/api/v1/library", session))
@@ -29,25 +30,25 @@ class ApiApplicationTargetContractTest {
 
     @Test
     fun publishPlansAndPublishesManagedDestination() {
-        withApplication { app, session, gateway, store ->
+        withApplication { app, session, gateway, store, registry ->
             val plan = app.handle(request("POST", "/api/v1/playlists/RECENT_LIKED_100/publish-plan", session, "{}"))
-            assertEquals(200, plan.status, plan.body)
-            assertTrue(plan.body.contains("\"action\":\"create\""))
-            assertTrue(plan.body.contains("\"publishFlowId\":\""))
-            val flowId = Regex("\\\"publishFlowId\\\":\\\"([^\\\"]+)\\\"").find(plan.body)?.groupValues?.get(1)
-            require(!flowId.isNullOrBlank())
+            assertEquals(202, plan.status, plan.body)
+            assertTrue(plan.body.contains("\"kind\":\"publish_plan\""))
+            val planOperation = acceptedOperationId(plan.body)
+            assertEquals(OperationPhase.succeeded, awaitTerminal(registry, planOperation).phase)
             val publish =
                 app.handle(
                     request(
                         "POST",
                         "/api/v1/playlists/RECENT_LIKED_100/publish",
                         session,
-                        "{\"action\":\"create\",\"trackIds\":[\"one\"],\"publishFlowId\":\"$flowId\"}",
+                        "{\"action\":\"create\",\"trackIds\":[\"one\"]}",
                     ),
                 )
-            assertEquals(200, publish.status, publish.body)
-            assertEquals(flowId, plan.headers["X-Spotify-Butler-Publish-Flow-Id"])
-            assertEquals(flowId, publish.headers["X-Spotify-Butler-Publish-Flow-Id"])
+            assertEquals(202, publish.status, publish.body)
+            assertTrue(publish.body.contains("\"kind\":\"publish_create\""))
+            val publishOperation = acceptedOperationId(publish.body)
+            assertEquals(OperationPhase.succeeded, awaitTerminal(registry, publishOperation).phase)
             assertEquals(1, store.managedPlaylists(OWNER).size)
             assertEquals("created-playlist", store.managedPlaylist("RECENT_LIKED_100", OWNER)?.spotifyPlaylistId)
             assertEquals("created-playlist", gateway.lastPlaylistId)
@@ -72,8 +73,69 @@ class ApiApplicationTargetContractTest {
     }
 
     @Test
+    fun stateChangeStartsReturnAcceptedOperationsAndLocalFailuresRemainSynchronous() {
+        withApplication { app, session, _, _, registry ->
+            val refresh = app.handle(request("POST", "/api/v1/library/refresh", session, "{}"))
+            assertEquals(202, refresh.status, refresh.body)
+            assertTrue(refresh.body.contains("\"kind\":\"library_refresh\""))
+            val refreshOperation = acceptedOperationId(refresh.body)
+            assertEquals(OperationPhase.succeeded, awaitTerminal(registry, refreshOperation).phase)
+
+            val invalidPublish =
+                app.handle(
+                    request(
+                        "POST",
+                        "/api/v1/playlists/RECENT_LIKED_100/publish",
+                        session,
+                        "{\"action\":\"invalid\",\"trackIds\":[\"one\"]}",
+                    ),
+                )
+            assertEquals(400, invalidPublish.status)
+            assertTrue(invalidPublish.body.contains("\"code\":\"invalid_publish\""))
+
+            val missingDestination =
+                app.handle(
+                    request(
+                        "POST",
+                        "/api/v1/playlists/RECENT_LIKED_100/syncs",
+                        session,
+                        "{\"trackIds\":[\"one\"]}",
+                    ),
+                )
+            assertEquals(409, missingDestination.status)
+            assertTrue(missingDestination.body.contains("\"code\":\"destination_missing\""))
+        }
+    }
+
+    @Test
+    fun operationSocketAuthorizationRequiresSessionAndTrustedOrigin() {
+        withApplication { app, session, _, _, _ ->
+            val accepted =
+                app.authorizeOperationSocket(
+                    request("GET", "/api/v1/operations/op/events", session),
+                    "req-test",
+                )
+            assertEquals(OperationSocketAuthorization.Accepted(OWNER), accepted)
+
+            val noOrigin =
+                app.authorizeOperationSocket(
+                    request("GET", "/api/v1/operations/op/events", session).copy(headers = sessionHeaders(session)),
+                    "req-test",
+                )
+            assertRejected(noOrigin, "origin_not_trusted")
+
+            val noSession =
+                app.authorizeOperationSocket(
+                    ApiRequest("GET", "/api/v1/operations/op/events", headers = mapOf("Origin" to ORIGIN)),
+                    "req-test",
+                )
+            assertRejected(noSession, "unauthorized")
+        }
+    }
+
+    @Test
     fun recipeSettingsCanUpdateBuiltInShufflePreference() {
-        withApplication { app, session, _, store ->
+        withApplication { app, session, _, store, _ ->
             val response =
                 app.handle(
                     request(
@@ -91,7 +153,7 @@ class ApiApplicationTargetContractTest {
 
     @Test
     fun bulkSongsReturnsUniqueKnownTracksAndMissingIdsInRequestOrder() {
-        withApplication { app, session, _, _ ->
+        withApplication { app, session, _, _, _ ->
             val response =
                 app.handle(
                     request(
@@ -109,7 +171,9 @@ class ApiApplicationTargetContractTest {
         }
     }
 
-    private fun withApplication(block: (ApiApplication, ButlerSession, RecordingGateway, SpotifyStore) -> Unit) {
+    private fun withApplication(
+        block: (ApiApplication, ButlerSession, RecordingGateway, SpotifyStore, OperationRegistry) -> Unit,
+    ) {
         val path = Files.createTempDirectory("api-target-").resolve("cache.db")
         SpotifyStore.open(path).use { store ->
             store.replaceCache(
@@ -129,6 +193,7 @@ class ApiApplicationTargetContractTest {
             val sessions = SessionStore()
             val session = sessions.create(OWNER, "token", "refresh")
             val gateway = RecordingGateway()
+            val registry = OperationRegistry()
             val app =
                 ApiApplication(
                     SpotifyCacheService(StaticFetcher(), store),
@@ -136,10 +201,47 @@ class ApiApplicationTargetContractTest {
                     sessions,
                     gateway,
                     trustedOrigins = setOf(ORIGIN),
+                    operationRegistry = registry,
                 )
-            block(app, session, gateway, store)
+            try {
+                block(app, session, gateway, store, registry)
+            } finally {
+                registry.close()
+            }
         }
     }
+
+    private fun acceptedOperationId(body: String): String =
+        Regex("\\\"operationId\\\":\\\"([^\\\"]+)\\\"").find(body)?.groupValues?.get(1)
+            ?: error("Expected operation ID in $body")
+
+    private fun awaitTerminal(
+        registry: OperationRegistry,
+        operationId: String,
+    ): OperationStatusWire {
+        repeat(100) {
+            val status = registry.updates(OWNER, operationId)?.value
+            if (status?.phase in setOf(OperationPhase.succeeded, OperationPhase.failed)) return assertNotNull(status)
+            Thread.sleep(10)
+        }
+        return assertNotNull(registry.updates(OWNER, operationId)?.value)
+    }
+
+    private fun assertRejected(
+        authorization: OperationSocketAuthorization,
+        code: String,
+    ) {
+        val response = (authorization as? OperationSocketAuthorization.Rejected)?.response
+        assertNotNull(response)
+        assertTrue(response.body.contains("\"code\":\"$code\""), response.body)
+    }
+
+    private fun sessionHeaders(session: ButlerSession) =
+        mapOf(
+            "Cookie" to "butler_session=" + session.id,
+            "X-CSRF-Token" to session.csrfToken,
+            "Content-Type" to "application/json",
+        )
 
     private fun request(
         method: String,
@@ -149,13 +251,7 @@ class ApiApplicationTargetContractTest {
     ) = ApiRequest(
         method,
         path,
-        headers =
-            mapOf(
-                "Cookie" to "butler_session=" + session.id,
-                "X-CSRF-Token" to session.csrfToken,
-                "Origin" to ORIGIN,
-                "Content-Type" to "application/json",
-            ),
+        headers = sessionHeaders(session) + ("Origin" to ORIGIN),
         body = body,
     )
 

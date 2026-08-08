@@ -26,11 +26,17 @@ dependencies {
     implementation("app.cash.sqldelight:sqlite-driver:2.1.0")
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("io.ktor:ktor-server-core-jvm:3.5.1")
+    implementation("io.ktor:ktor-server-netty-jvm:3.5.1")
+    implementation("io.ktor:ktor-server-websockets-jvm:3.5.1")
     runtimeOnly("org.slf4j:slf4j-simple:2.0.16")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.12.1")
     testImplementation("org.snakeyaml:snakeyaml-engine:2.10")
+    testImplementation("io.ktor:ktor-server-test-host-jvm:3.5.1")
+    testImplementation("io.ktor:ktor-client-websockets-jvm:3.5.1")
 }
 
 kotlin {

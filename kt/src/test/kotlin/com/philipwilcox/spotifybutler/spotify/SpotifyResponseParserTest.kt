@@ -29,7 +29,7 @@ class SpotifyResponseParserTest {
             parseSpotifyTrack(
                 parseSpotifyResponse(
                     """{"name":"Track","id":"track-id","href":"https://api.example.test/tracks/track:""" +
-                        """track-id","artists":[],"album":{}}""",
+                        """track-id","uri":"spotify:track:track-id","artists":[],"album":{}}""",
                 ),
                 "test track",
             )

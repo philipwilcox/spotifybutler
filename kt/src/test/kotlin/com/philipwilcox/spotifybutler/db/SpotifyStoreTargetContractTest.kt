@@ -1,9 +1,9 @@
 package com.philipwilcox.spotifybutler.db
 
 import com.philipwilcox.spotifybutler.service.CandidateSource
+import com.philipwilcox.spotifybutler.service.OperationProgress
 import com.philipwilcox.spotifybutler.service.OrderingPolicy
 import com.philipwilcox.spotifybutler.service.PlaylistRecipe
-import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.RankingStrategy
 import com.philipwilcox.spotifybutler.service.SelectionPolicy
 import com.philipwilcox.spotifybutler.spotify.SavedTrack
@@ -38,7 +38,7 @@ class SpotifyStoreTargetContractTest {
             store.saveManagedPlaylist("definition", "playlist", "owner", 10L)
             val requested = tracks.map(SpotifyTrack::id) + "track-1"
 
-            PublishOperationLog.with("publish-adopt", "flow-bulk") {
+            OperationProgress.with("publish-adopt", "flow-bulk") {
                 store.publishPlaylistTrackIds("playlist", requested, 20L, "owner", "snapshot-1")
             }
 

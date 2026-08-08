@@ -1,6 +1,6 @@
 package com.philipwilcox.spotifybutler.spotify
 
-import com.philipwilcox.spotifybutler.service.PublishOperationLog
+import com.philipwilcox.spotifybutler.service.OperationProgress
 import java.net.URI
 import java.net.URLDecoder
 import kotlin.test.Test
@@ -56,7 +56,7 @@ class SpotifyApiClientMutationTest {
         val transport = RecordingMutationTransport()
         val client = SpotifyApiClient(apiBaseUri = URI("https://api.example.test/"), transport = transport)
 
-        PublishOperationLog.with("publish-adopt", "flow-1", expectedExternalCalls = 2) { log ->
+        OperationProgress.with("publish-adopt", "flow-1", expectedExternalCalls = 2) { log ->
             client.replaceTrackIds("token", "playlist-id", (1..101).map { "track-$it" })
             assertContains(log.logFields(), "flowId=flow-1")
             assertContains(log.logFields(), "step=2 of 2")

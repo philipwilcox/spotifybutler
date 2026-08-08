@@ -27,7 +27,6 @@ import com.philipwilcox.spotifybutler.service.PlaylistPreview
 import com.philipwilcox.spotifybutler.service.PlaylistPreviewService
 import com.philipwilcox.spotifybutler.service.PlaylistRecipeCodec
 import com.philipwilcox.spotifybutler.service.PublishAction
-import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.SpotifyCacheService
 import com.philipwilcox.spotifybutler.spotify.SpotifyApiClient
 import com.philipwilcox.spotifybutler.spotify.SpotifyAuthClient
@@ -138,6 +137,7 @@ class ApiApplication(
     private val secureCookies: Boolean = false,
     private val spotifyUserIdLookup: ((String) -> String)? = null,
     private val sessionAuthenticator: SpotifySessionAuthenticator? = null,
+    private val operationRegistry: OperationRegistry = OperationRegistry(),
 ) {
     private val logger = KotlinLogging.logger {}
     private val refreshLocks = KeyedLock()
@@ -154,6 +154,7 @@ class ApiApplication(
         authClient: SpotifyAuthClient? = null,
         allowedSpotifyUserId: String? = null,
         secureCookies: Boolean = false,
+        operationRegistry: OperationRegistry = OperationRegistry(),
     ) : this(
         cacheService,
         store,
@@ -175,6 +176,7 @@ class ApiApplication(
                 override fun currentUserId(accessToken: String) = apiClient.getCurrentUser(accessToken).id
             }
         },
+        operationRegistry,
     )
 
     private fun gateway() =
@@ -212,7 +214,7 @@ class ApiApplication(
         return try {
             require(request.path.startsWith("/api/v1/")) { ApiFailure(404, "not_found", "Route not found") }
             val resolution = resolveSession(request)
-            route(request, resolution.session).withRequestId(requestId).let { response ->
+            route(request, resolution.session, requestId).withRequestId(requestId).let { response ->
                 resolution.rotatedSessionId?.let { sessionId ->
                     response.copy(headers = response.headers + ("Set-Cookie" to sessionCookie(sessionId)))
                 } ?: response
@@ -266,9 +268,27 @@ class ApiApplication(
         }
     }
 
+    fun authorizeOperationSocket(
+        request: ApiRequest,
+        requestId: String,
+    ): OperationSocketAuthorization =
+        try {
+            val resolution = resolveSession(request)
+            requireTrustedOrigin(request)
+            OperationSocketAuthorization.Accepted(resolution.session.ownerSpotifyUserId)
+        } catch (failure: ApiFailure) {
+            OperationSocketAuthorization.Rejected(errorResponse(failure, requestId).withRequestId(requestId))
+        } catch (exception: Exception) {
+            logger.error(exception) { "Operation socket authorization failed" }
+            OperationSocketAuthorization.Rejected(
+                errorResponse(ApiFailure(401, "unauthorized", "A Butler session is required"), requestId),
+            )
+        }
+
     private fun route(
         request: ApiRequest,
         session: ButlerSession,
+        requestId: String,
     ): ApiResponse {
         val parts = request.path.trim('/').split('/')
         return when {
@@ -289,7 +309,14 @@ class ApiApplication(
                 ) == listOf("api", "v1", "library", "playlists") &&
                 request.method == "GET" ->
                 libraryPlaylist(parts[4], session)
-            parts == listOf("api", "v1", "library", "refresh") && request.method == "POST" -> refresh(request, session)
+            parts ==
+                listOf(
+                    "api",
+                    "v1",
+                    "library",
+                    "refresh",
+                ) &&
+                request.method == "POST" -> refresh(request, session, requestId)
             parts == listOf("api", "v1", "playlists") && request.method == "GET" -> definitions(session)
             parts == listOf("api", "v1", "playlists") && request.method == "POST" -> createDefinition(request, session)
             parts.size == 4 &&
@@ -318,11 +345,11 @@ class ApiApplication(
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "publish-plan" &&
-                request.method == "POST" -> publishPlan(parts[3], request, session)
+                request.method == "POST" -> publishPlan(parts[3], request, session, requestId)
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "publish" &&
-                request.method == "POST" -> publish(parts[3], request, session)
+                request.method == "POST" -> publish(parts[3], request, session, requestId)
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "current" &&
@@ -330,7 +357,7 @@ class ApiApplication(
             parts.size == 5 &&
                 parts.take(3) == listOf("api", "v1", "playlists") &&
                 parts[4] == "syncs" &&
-                request.method == "POST" -> sync(parts[3], request, session)
+                request.method == "POST" -> sync(parts[3], request, session, requestId)
             parts == listOf("api", "v1", "songs", "bulk") && request.method == "POST" -> bulkSongs(request, session)
             parts == listOf("api", "v1", "songs") && request.method == "GET" -> songs(request, session)
             else -> throw ApiFailure(404, "not_found", "Route not found")
@@ -410,19 +437,24 @@ class ApiApplication(
     private fun refresh(
         request: ApiRequest,
         session: ButlerSession,
+        requestId: String,
     ): ApiResponse {
         requireStateChange(request, session)
         val input = request.body?.let { body<RefreshLibraryRequest>(request) } ?: RefreshLibraryRequest()
-        return refreshLocks.withLock(session.ownerSpotifyUserId) {
-            try {
+        try {
+            input.sourceKeys?.forEach { CacheSourceKey.root(session.ownerSpotifyUserId, it) }
+        } catch (exception: IllegalArgumentException) {
+            throw ApiFailure(400, "invalid_source_keys", exception.message ?: "Unsupported source key")
+        }
+        return accepted(
+            session,
+            OperationKind.library_refresh,
+            requestId,
+            totalSteps = null,
+        ) {
+            refreshLocks.withLock(session.ownerSpotifyUserId) {
                 cacheService.refreshSources(session.ownerSpotifyUserId, session.accessToken, input.sourceKeys?.toSet())
-                json(200, libraryWire(session))
-            } catch (
-                exception: IllegalArgumentException,
-            ) {
-                throw ApiFailure(400, "invalid_source_keys", exception.message ?: "Unsupported source key")
-            } catch (exception: Exception) {
-                throw ApiFailure(502, "spotify_failure", "Library source refresh failed")
+                LibraryRefreshResultWire(libraryWire(session))
             }
         }
     }
@@ -529,32 +561,26 @@ class ApiApplication(
         definitionId: String,
         request: ApiRequest,
         session: ButlerSession,
+        requestId: String,
     ): ApiResponse {
         requireStateChange(request, session)
         if (destinationService.current(definitionId, session.ownerSpotifyUserId) != null) {
             throw ApiFailure(409, "destination_exists", "The definition already has a destination")
         }
+        val definition = resolveDefinition(definitionId, session.ownerSpotifyUserId)
         val flowId = UUID.randomUUID().toString()
-        return PublishOperationLog.with("publish-plan", flowId) {
+        return accepted(session, OperationKind.publish_plan, requestId, totalSteps = null) {
             refreshLocks.withLock(session.ownerSpotifyUserId) {
-                try {
-                    cacheService.refreshSource(
-                        session.ownerSpotifyUserId,
-                        session.accessToken,
-                        CacheSourceKey.PLAYLISTS,
-                    )
-                    val definition = resolveDefinition(definitionId, session.ownerSpotifyUserId)
-                    val plan =
-                        destinationService
-                            .planPublish(definitionId, session.ownerSpotifyUserId, definition.name)
-                            .copy(publishFlowId = flowId)
-                    json(200, plan.toWire())
-                        .withPublishFlowId(flowId)
-                } catch (exception: IllegalArgumentException) {
-                    throw ApiFailure(400, "invalid_publish", exception.message ?: "Publish planning failed")
-                } catch (exception: Exception) {
-                    throw ApiFailure(502, "spotify_failure", "Spotify playlist lookup failed")
-                }
+                cacheService.refreshSource(
+                    session.ownerSpotifyUserId,
+                    session.accessToken,
+                    CacheSourceKey.PLAYLISTS,
+                )
+                val plan =
+                    destinationService
+                        .planPublish(definitionId, session.ownerSpotifyUserId, definition.name)
+                        .copy(publishFlowId = flowId)
+                PublishPlanResultWire(plan.toWire())
             }
         }
     }
@@ -563,18 +589,18 @@ class ApiApplication(
         definitionId: String,
         request: ApiRequest,
         session: ButlerSession,
+        requestId: String,
     ): ApiResponse {
         requireStateChange(request, session)
         val input = body<PublishDestinationRequest>(request)
         val action =
             runCatching { PublishAction.valueOf(input.action.uppercase()) }
                 .getOrElse { throw ApiFailure(400, "invalid_publish", "Publish action must be create or adopt") }
-        val flowId = input.publishFlowId ?: UUID.randomUUID().toString()
-        val operation = if (action == PublishAction.ADOPT) "publish-adopt" else "publish-create"
-        val expectedExternalCalls = 1 + ((input.trackIds.size + 99) / 100).coerceAtLeast(1)
-        return PublishOperationLog.with(operation, flowId, expectedExternalCalls) {
-            validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
-            val definition = resolveDefinition(definitionId, session.ownerSpotifyUserId)
+        validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
+        val definition = resolveDefinition(definitionId, session.ownerSpotifyUserId)
+        val kind = if (action == PublishAction.ADOPT) OperationKind.publish_adopt else OperationKind.publish_create
+        val totalSteps = 1 + ((input.trackIds.size + 99) / 100).coerceAtLeast(1)
+        return accepted(session, kind, requestId, totalSteps) {
             val destination =
                 destinationService.publish(
                     definitionId,
@@ -585,7 +611,7 @@ class ApiApplication(
                     input.spotifyPlaylistId,
                     input.trackIds,
                 )
-            json(200, destination.toWire(definitionId)).withPublishFlowId(flowId)
+            PublishDestinationResultWire(destination.toWire(definitionId))
         }
     }
 
@@ -623,31 +649,51 @@ class ApiApplication(
         definitionId: String,
         request: ApiRequest,
         session: ButlerSession,
+        requestId: String,
     ): ApiResponse {
         requireStateChange(request, session)
         val input = body<SyncPlaylistRequest>(request)
+        resolveDefinition(definitionId, session.ownerSpotifyUserId)
+        if (destinationService.current(definitionId, session.ownerSpotifyUserId) == null) {
+            throw ApiFailure(409, "destination_missing", "Destination is missing")
+        }
         validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
-        val authoritative =
-            destinationService.sync(
-                definitionId,
-                session.ownerSpotifyUserId,
-                session.accessToken,
-                input.trackIds,
-                input.expectedDestinationSnapshotId,
-            )
-        val destination = destinationService.current(definitionId, session.ownerSpotifyUserId)!!
-        return json(
-            200,
-            CurrentEnvelopeWire(
-                CurrentWire(
-                    authoritative.spotifyPlaylistId,
-                    authoritative.trackIds,
-                    destination.lastSyncedAt?.toString(),
-                    authoritative.snapshotId,
+        val totalSteps = ((input.trackIds.size + 99) / 100).coerceAtLeast(1)
+        return accepted(session, OperationKind.destination_sync, requestId, totalSteps) {
+            val authoritative =
+                destinationService.sync(
+                    definitionId,
+                    session.ownerSpotifyUserId,
+                    session.accessToken,
+                    input.trackIds,
+                    input.expectedDestinationSnapshotId,
+                )
+            val destination = destinationService.current(definitionId, session.ownerSpotifyUserId)!!
+            DestinationSyncResultWire(
+                CurrentEnvelopeWire(
+                    CurrentWire(
+                        authoritative.spotifyPlaylistId,
+                        authoritative.trackIds,
+                        destination.lastSyncedAt?.toString(),
+                        authoritative.snapshotId,
+                    ),
                 ),
-            ),
-        )
+            )
+        }
     }
+
+    private fun accepted(
+        session: ButlerSession,
+        kind: OperationKind,
+        requestId: String,
+        totalSteps: Int?,
+        task: () -> OperationResultWire,
+    ): ApiResponse =
+        try {
+            json(202, operationRegistry.start(session.ownerSpotifyUserId, kind, requestId, totalSteps, task))
+        } catch (_: OperationAlreadyRunningException) {
+            throw ApiFailure(409, "operation_in_progress", "Another operation is already in progress")
+        }
 
     private fun songs(
         request: ApiRequest,
@@ -999,6 +1045,16 @@ private data class ApiFailure(
     val details: Map<String, String> = emptyMap(),
     val clearSessionCookie: Boolean = false,
 ) : RuntimeException(message)
+
+sealed interface OperationSocketAuthorization {
+    data class Accepted(
+        val ownerSpotifyUserId: String,
+    ) : OperationSocketAuthorization
+
+    data class Rejected(
+        val response: ApiResponse,
+    ) : OperationSocketAuthorization
+}
 
 private fun com.philipwilcox.spotifybutler.service.CacheSourceSnapshot.toWire() =
     SourceSnapshotWire(

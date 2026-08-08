@@ -16,6 +16,10 @@ Remove the secrets file / mounted file fallback stuff in favor of env vars that 
 
 Self-descriptive
 
+## Fake backend and UI regression tests
+
+This would help dev speed of new frontend stuff
+
 ## Admin Panel
 Show who's used it! And possibly expand the "known users only restriction" after all if i ever deploy publicly.
 

@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ButlerApiClient } from './api'
 import { LibraryController, SessionController, StudioController } from './controllers'
+import { operationProgressLabel, operationProgressPercent, OperationProgressController } from './operation-progress'
 
 const api = new ButlerApiClient(undefined, () => session.state.session = null)
 const session = new SessionController(api)
-const library = new LibraryController(api)
-const studio = new StudioController(api)
+const progress = new OperationProgressController()
+const library = new LibraryController(api, progress)
+const studio = new StudioController(api, undefined, undefined, progress)
 const showSyncConfirm = ref(false)
 const selectedPublishCandidateId = ref<string | null>(null)
 const draggedIndex = ref<number | null>(null)
@@ -14,7 +16,10 @@ const draggedIndex = ref<number | null>(null)
 const selected = computed(() => studio.state.selection)
 const selectedDefinition = computed(() => studio.state.definition)
 const selectedLibraryPlaylist = computed(() => studio.state.libraryPlaylist)
-const isBusy = computed(() => session.state.loading || library.state.loading || studio.state.loading)
+const trackedStatus = computed(() => progress.state.active)
+const isBusy = computed(() => session.state.loading || library.state.loading || studio.state.loading || (trackedStatus.value !== null && trackedStatus.value.phase !== 'succeeded' && trackedStatus.value.phase !== 'failed'))
+const progressPercent = computed(() => operationProgressPercent(trackedStatus.value))
+const progressLabel = computed(() => operationProgressLabel(trackedStatus.value))
 const songFor = (id: string) => selected.value.enrichment[id]
 const headerArtSong = computed(() => selected.value.orderedIds.map(songFor).find(song => song?.album.imageUrl) ?? null)
 const headerArt = computed(() => headerArtSong.value?.album.imageUrl ?? null)
@@ -59,13 +64,16 @@ async function updateShuffleAfterGeneration(event: Event) { await studio.updateS
 function keyMove(index: number, event: KeyboardEvent) { if (event.key === 'ArrowUp') { event.preventDefault(); studio.moveTrack(index, -1) } if (event.key === 'ArrowDown') { event.preventDefault(); studio.moveTrack(index, 1) } }
 function dropTrack(index: number) { if (draggedIndex.value !== null) studio.moveTrackTo(draggedIndex.value, index); draggedIndex.value = null }
 onMounted(boot)
+watch(() => session.state.session, sessionValue => { if (!sessionValue) progress.dispose() })
+onUnmounted(() => progress.dispose())
 </script>
 
 <template>
   <main class="shell">
-    <div v-if="isBusy" class="top-progress" role="progressbar" aria-label="Waiting for Spotify Butler" aria-valuetext="Working">
-      <span class="progress-label">WORKING</span><span class="progress-track"><span class="progress-bar" /></span>
+    <div v-if="isBusy" class="top-progress" role="progressbar" aria-label="Waiting for Spotify Butler" :aria-valuemin="progressPercent === null ? undefined : 0" :aria-valuemax="progressPercent === null ? undefined : 100" :aria-valuenow="progressPercent ?? undefined" :aria-valuetext="progressPercent === null ? 'Working' : `${progressPercent}% complete`">
+      <span class="progress-label">{{ progressLabel }}</span><span class="progress-track"><span class="progress-bar" :class="{ determinate: progressPercent !== null }" :style="progressPercent === null ? undefined : { width: `${progressPercent}%` }" /></span>
     </div>
+    <div v-if="progress.state.connectionError" class="alert error" role="alert">{{ progress.state.connectionError }}</div>
     <header class="hud panel">
       <h1>BUTLER // PLAYLIST STUDIO</h1>
       <div class="hud-identity">

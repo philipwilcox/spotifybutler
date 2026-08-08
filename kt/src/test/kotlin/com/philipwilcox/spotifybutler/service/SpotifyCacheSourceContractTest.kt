@@ -11,6 +11,7 @@ import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class SpotifyCacheSourceContractTest {
     @Test
@@ -55,10 +56,52 @@ class SpotifyCacheSourceContractTest {
         }
     }
 
+    @Test
+    fun fullRefreshDiscoversSourcesAfterCatalogAndContinuesAfterSourceFailure() {
+        val path = Files.createTempDirectory("source-progress-").resolve("cache.db")
+        val fetcher =
+            RecordingSourceFetcher().apply {
+                paginatedPlaylistItems = true
+                failSaved = true
+            }
+        val updates = mutableListOf<OperationProgressUpdate>()
+        SpotifyStore.open(path).use { store ->
+            val service = SpotifyCacheService(fetcher, store)
+            OperationProgress.with("library_refresh", progressSink = updates::add) {
+                service.refreshSources("owner", "token")
+            }
+
+            assertEquals(
+                CacheSourceStatus.ERROR,
+                service.readSourceSnapshot("owner", CacheSourceKey.SAVED_TRACKS).status,
+            )
+            assertEquals(CacheSourceStatus.READY, service.readSourceSnapshot("owner", CacheSourceKey.TOP_TRACKS).status)
+        }
+
+        val sourceProgress = updates.mapNotNull(OperationProgressUpdate::libraryRefresh)
+        assertEquals(5, sourceProgress.first().totalSources)
+        assertEquals(1, sourceProgress.first().completedSources)
+        assertTrue(
+            sourceProgress.zipWithNext().all { (before, after) ->
+                before.completedSources <=
+                    after.completedSources
+            },
+        )
+        assertTrue(sourceProgress.all { it.completedSources <= it.totalSources })
+        assertEquals(
+            listOf(1, 2),
+            updates
+                .filter { it.action == "Spotify action completed" }
+                .mapNotNull { it.libraryRefresh?.activeSourceCompletedPages },
+        )
+        assertEquals(LibraryRefreshProgress(5, 5), sourceProgress.last())
+    }
+
     private class RecordingSourceFetcher : SpotifyCacheFetcher {
         override val supportsIndependentSources = true
         var topTracks = listOf(track("top-one"))
         var failSaved = false
+        var paginatedPlaylistItems = false
 
         override fun fetchCache(accessToken: String) =
             SpotifyCacheSnapshot(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
@@ -78,7 +121,16 @@ class SpotifyCacheSourceContractTest {
         override fun fetchPlaylistItems(
             accessToken: String,
             playlistId: String,
-        ): List<SpotifyPlaylistItem> = emptyList()
+        ): List<SpotifyPlaylistItem> {
+            if (paginatedPlaylistItems) {
+                repeat(2) {
+                    val call = OperationProgress.current()?.beginExternalCall()
+                    OperationProgress.current()?.libraryRefreshPageTotalDiscovered(2)
+                    if (call != null) OperationProgress.current()?.finishExternalCall(call)
+                }
+            }
+            return emptyList()
+        }
     }
 
     private companion object {

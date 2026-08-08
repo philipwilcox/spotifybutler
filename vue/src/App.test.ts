@@ -13,6 +13,32 @@ const library = {
 }
 const preview = { definitionId: definition.definitionId, status: 'ready', generatedTrackIds: ['known-track', 'missing-track'], generatedTrackCount: 2, seed: 'seed', recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null }
 const knownSong = { id: 'known-track', name: 'Known song', href: 'https://spotify.test/known-track', uri: 'spotify:track:known-track', album: { id: 'known-album', name: 'Known album', href: null, uri: null, releaseDate: null, imageUrl: 'https://example.invalid/known-art' }, artists: [{ id: null, name: 'Known artist', href: null, uri: null }], durationMs: 1000, explicit: false, available: true }
+const publishPlan = { definitionId: definition.definitionId, playlistName: definition.name, action: 'create', candidates: [], message: null, publishFlowId: 'flow-1' }
+const destination = { definitionId: definition.definitionId, spotifyPlaylistId: 'managed', createdAt: '2026-01-01T00:00:00Z', lastSyncedAt: '2026-01-01T00:00:00Z', lastSeenSnapshotId: 'snap-1', canSync: true, managementStatus: 'butler_created' }
+
+const operationSucceeded = (operationId: string, kind: string, result: unknown, completedSteps = 0, totalSteps: number | null = null) => ({
+  operationId, kind, phase: 'succeeded', action: 'Completed', completedSteps, totalSteps, result, error: null,
+})
+
+function installOperationSockets() {
+  const sockets = new Map<string, TestWebSocket>()
+  class TestWebSocket {
+    onopen: (() => void) | null = null
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onerror: (() => void) | null = null
+    onclose: (() => void) | null = null
+
+    constructor(url: string) { sockets.set(url.split('/').at(-2)!, this) }
+    close(): void {}
+  }
+  vi.stubGlobal('WebSocket', TestWebSocket)
+  Object.defineProperty(window, 'WebSocket', { configurable: true, value: TestWebSocket })
+  return {
+    succeed(operationId: string, kind: string, result: unknown, completedSteps = 0, totalSteps: number | null = null): void {
+      sockets.get(operationId)?.onmessage?.({ data: JSON.stringify(operationSucceeded(operationId, kind, result, completedSteps, totalSteps)) } as MessageEvent)
+    },
+  }
+}
 
 function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number } = {}) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -20,8 +46,8 @@ function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number 
     if (path === '/api/v1/session') return response(options.sessionStatus === undefined ? { userId: 'operator', csrfToken: 'csrf', expiresAt: '2026-01-01T00:00:00Z' } : { code: 'unauthorized', message: 'Please connect Spotify', requestId: 'req-1', details: {} }, options.sessionStatus ?? 200)
     if (path === '/api/v1/library') return response(options.libraryBody ?? library, options.libraryBody instanceof Error ? 500 : 200)
     if (path.includes('/preview')) return response(preview)
-    if (path.includes('/publish-plan')) return response({ definitionId: definition.definitionId, playlistName: definition.name, action: 'create', candidates: [], message: null, publishFlowId: 'flow-1' })
-    if (path.includes('/publish')) return response({ definitionId: definition.definitionId, spotifyPlaylistId: 'managed', createdAt: '2026-01-01T00:00:00Z', lastSyncedAt: '2026-01-01T00:00:00Z', lastSeenSnapshotId: 'snap-1', canSync: true, managementStatus: 'butler_created' })
+    if (path.includes('/publish-plan')) return response({ operationId: 'op-plan', kind: 'publish_plan' })
+    if (path.includes('/publish')) return response({ operationId: 'op-publish', kind: 'publish_create' })
     if (path.includes('/current')) return response({ current: null })
     if (path.includes('/songs')) return response({ items: [knownSong], missingIds: ['missing-track'] })
     return response({})
@@ -118,6 +144,7 @@ describe('App', () => {
 
   it('offers Publish without legacy one-time or editable destination controls', async () => {
     const fetcher = frontendFetch()
+    const operations = installOperationSockets()
     vi.stubGlobal('fetch', fetcher)
     Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
     const wrapper = mount(App)
@@ -127,17 +154,19 @@ describe('App', () => {
     expect(wrapper.text()).not.toContain('CREATE DESTINATION')
     await wrapper.findAll('button').find(button => button.text() === 'PUBLISH')?.trigger('click')
     await flushPromises()
+    operations.succeed('op-plan', 'publish_plan', { type: 'publish_plan', plan: publishPlan }, 1, 1)
+    await flushPromises()
     expect(wrapper.text()).toContain('Create a new playlist?')
     await wrapper.find('form[aria-labelledby="publish-title"]').trigger('submit')
+    await flushPromises()
+    operations.succeed('op-publish', 'publish_create', { type: 'publish_destination', destination })
     await flushPromises()
     expect(fetcher.mock.calls.some(([path]) => String(path).includes('/publish'))).toBe(true)
   })
 
   it('keeps the top-level progress indicator visible through pending publish and library loading', async () => {
-    let releasePublish!: (value: Response) => void
     let releaseLibraryReload!: (value: Response) => void
     let libraryCalls = 0
-    const publishResponse = new Promise<Response>(resolve => { releasePublish = resolve })
     const libraryReloadResponse = new Promise<Response>(resolve => { releaseLibraryReload = resolve })
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -145,15 +174,17 @@ describe('App', () => {
         libraryCalls += 1
         if (libraryCalls === 2) return libraryReloadResponse
       }
-      if (path.includes('/publish') && !path.includes('/publish-plan')) return publishResponse
       return frontendFetch()(input, init)
     })
+    const operations = installOperationSockets()
     vi.stubGlobal('fetch', fetcher)
     Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
     const wrapper = mount(App)
     await flushPromises()
 
     await wrapper.findAll('button').find(button => button.text() === 'PUBLISH')?.trigger('click')
+    await flushPromises()
+    operations.succeed('op-plan', 'publish_plan', { type: 'publish_plan', plan: publishPlan })
     await flushPromises()
     await wrapper.find('form[aria-labelledby="publish-title"]').trigger('submit')
     await flushPromises()
@@ -163,7 +194,7 @@ describe('App', () => {
     expect(wrapper.find('.dialog-backdrop').exists()).toBe(true)
     expect(wrapper.find('.top-progress').element.parentElement).toBe(wrapper.find('.hud').element.parentElement)
 
-    releasePublish(response({ definitionId: definition.definitionId, spotifyPlaylistId: 'managed', createdAt: '2026-01-01T00:00:00Z', lastSyncedAt: '2026-01-01T00:00:00Z', lastSeenSnapshotId: 'snap-1', canSync: true, managementStatus: 'butler_created' }))
+    operations.succeed('op-publish', 'publish_create', { type: 'publish_destination', destination })
     await flushPromises()
     expect(wrapper.find('.top-progress').exists()).toBe(true)
 

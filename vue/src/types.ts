@@ -146,6 +146,33 @@ export interface ApiErrorDto {
   readonly details: Readonly<Record<string, string>>
 }
 
+export type OperationKind = 'library_refresh' | 'publish_plan' | 'publish_create' | 'publish_adopt' | 'destination_sync'
+export type OperationPhase = 'queued' | 'running' | 'succeeded' | 'failed'
+export interface OperationAccepted { readonly operationId: string; readonly kind: OperationKind }
+export interface OperationFailure { readonly code: string; readonly message: string }
+export interface LibraryRefreshProgress {
+  readonly completedSources: number
+  readonly totalSources: number
+  readonly activeSourceCompletedPages: number | null
+  readonly activeSourceTotalPages: number | null
+}
+export type OperationResult =
+  | { readonly type: 'library_refresh'; readonly library: Library }
+  | { readonly type: 'publish_plan'; readonly plan: PublishPlan }
+  | { readonly type: 'publish_destination'; readonly destination: Destination }
+  | { readonly type: 'destination_sync'; readonly current: CurrentDestination | null }
+export interface OperationStatus {
+  readonly operationId: string
+  readonly kind: OperationKind
+  readonly phase: OperationPhase
+  readonly action: string
+  readonly completedSteps: number
+  readonly totalSteps: number | null
+  readonly result: OperationResult | null
+  readonly error: OperationFailure | null
+  readonly libraryRefreshProgress: LibraryRefreshProgress | null
+}
+
 export interface SelectionState {
   readonly source: 'preview' | 'current-fallback'
   readonly dirty: boolean

@@ -7,6 +7,12 @@ import type {
   LibraryPlaylist,
   LibraryPlaylistDetail,
   PublishPlan,
+  OperationAccepted,
+  OperationKind,
+  OperationPhase,
+  OperationResult,
+  OperationStatus,
+  LibraryRefreshProgress,
   Preview,
   Session,
   Song,
@@ -113,6 +119,72 @@ export const parseSession = (value: unknown): Session => {
     csrfToken: string(required(v, 'csrfToken', 'session'), 'session.csrfToken'),
     expiresAt: string(required(v, 'expiresAt', 'session'), 'session.expiresAt'),
   }
+}
+
+export const parseAccepted = (value: unknown): OperationAccepted => {
+  const v = object(value, 'operation')
+  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind: oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync'] as const, 'operation.kind') }
+}
+
+const resultType = (value: unknown): OperationResult['type'] => {
+  const type = string(value, 'operation.result.type')
+  if (type.includes('LibraryRefreshResultWire')) return 'library_refresh'
+  if (type.includes('PublishPlanResultWire')) return 'publish_plan'
+  if (type.includes('PublishDestinationResultWire')) return 'publish_destination'
+  if (type.includes('DestinationSyncResultWire')) return 'destination_sync'
+  return oneOf(type, ['library_refresh', 'publish_plan', 'publish_destination', 'destination_sync'] as const, 'operation.result.type')
+}
+
+const parseOperationResult = (value: unknown): OperationResult => {
+  const v = object(value, 'operation.result')
+  const type = resultType(required(v, 'type', 'operation.result'))
+  if (type === 'library_refresh') return { type, library: parseLibrary(required(v, 'library', 'operation.result')) }
+  if (type === 'publish_plan') return { type, plan: parsePublishPlan(required(v, 'plan', 'operation.result')) }
+  if (type === 'publish_destination') return { type, destination: parseDestination(required(v, 'destination', 'operation.result')) }
+  const current = required(v, 'current', 'operation.result')
+  return { type, current: current === null ? null : parseCurrent(current).current }
+}
+
+export const parseOperationStatus = (value: unknown): OperationStatus => {
+  const v = object(value, 'operation')
+  const kind = oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync'] as const, 'operation.kind')
+  const phase = oneOf(required(v, 'phase', 'operation'), ['queued', 'running', 'succeeded', 'failed'] as const, 'operation.phase')
+  const resultValue = required(v, 'result', 'operation')
+  const errorValue = required(v, 'error', 'operation')
+  const result = resultValue === null ? null : parseOperationResult(resultValue)
+  const error = errorValue === null ? null : (() => { const e = object(errorValue, 'operation.error'); return { code: string(required(e, 'code', 'operation.error'), 'operation.error.code'), message: string(required(e, 'message', 'operation.error'), 'operation.error.message') } })()
+  if (phase === 'succeeded' && (result === null || error !== null)) fail('operation', 'invalid succeeded status')
+  if (phase === 'failed' && (result !== null || error === null)) fail('operation', 'invalid failed status')
+  if ((phase === 'queued' || phase === 'running') && (result !== null || error !== null)) fail('operation', 'non-terminal status has result or error')
+  if (result && ((kind === 'library_refresh' && result.type !== 'library_refresh') || (kind === 'publish_plan' && result.type !== 'publish_plan') || ((kind === 'publish_create' || kind === 'publish_adopt') && result.type !== 'publish_destination') || (kind === 'destination_sync' && result.type !== 'destination_sync'))) fail('operation', 'result does not match operation kind')
+  const total = required(v, 'totalSteps', 'operation')
+  const totalSteps = total === null ? null : nonNegativeInteger(total, 'operation.totalSteps')
+  const completedSteps = nonNegativeInteger(required(v, 'completedSteps', 'operation'), 'operation.completedSteps')
+  if (totalSteps !== null && completedSteps > totalSteps) fail('operation.completedSteps', 'cannot exceed totalSteps')
+  if (phase === 'succeeded' && totalSteps !== null && completedSteps !== totalSteps) fail('operation.completedSteps', 'success must complete all steps')
+  const libraryRefreshProgress = parseLibraryRefreshProgress(v.libraryRefreshProgress)
+  if (libraryRefreshProgress !== null && kind !== 'library_refresh') fail('operation.libraryRefreshProgress', 'is only valid for library refreshes')
+  if (phase === 'succeeded' && libraryRefreshProgress !== null && libraryRefreshProgress.completedSources !== libraryRefreshProgress.totalSources) {
+    fail('operation.libraryRefreshProgress.completedSources', 'success must complete all sources')
+  }
+  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind, phase, action: string(required(v, 'action', 'operation'), 'operation.action'), completedSteps, totalSteps, result, error, libraryRefreshProgress }
+}
+
+const parseLibraryRefreshProgress = (value: unknown): LibraryRefreshProgress | null => {
+  if (value === undefined || value === null) return null
+  const progress = object(value, 'operation.libraryRefreshProgress')
+  const completedSources = nonNegativeInteger(required(progress, 'completedSources', 'operation.libraryRefreshProgress'), 'operation.libraryRefreshProgress.completedSources')
+  const totalSources = nonNegativeInteger(required(progress, 'totalSources', 'operation.libraryRefreshProgress'), 'operation.libraryRefreshProgress.totalSources')
+  if (totalSources === 0) fail('operation.libraryRefreshProgress.totalSources', 'must be positive')
+  if (completedSources > totalSources) fail('operation.libraryRefreshProgress.completedSources', 'cannot exceed totalSources')
+  const completedPages = progress.activeSourceCompletedPages === undefined || progress.activeSourceCompletedPages === null
+    ? null : nonNegativeInteger(progress.activeSourceCompletedPages, 'operation.libraryRefreshProgress.activeSourceCompletedPages')
+  const totalPages = progress.activeSourceTotalPages === undefined || progress.activeSourceTotalPages === null
+    ? null : nonNegativeInteger(progress.activeSourceTotalPages, 'operation.libraryRefreshProgress.activeSourceTotalPages')
+  if ((completedPages === null) !== (totalPages === null)) fail('operation.libraryRefreshProgress', 'page progress must include both counts')
+  if (totalPages !== null && totalPages === 0) fail('operation.libraryRefreshProgress.activeSourceTotalPages', 'must be positive')
+  if (completedPages !== null && totalPages !== null && completedPages > totalPages) fail('operation.libraryRefreshProgress.activeSourceCompletedPages', 'cannot exceed activeSourceTotalPages')
+  return { completedSources, totalSources, activeSourceCompletedPages: completedPages, activeSourceTotalPages: totalPages }
 }
 
 export const parseSourceSnapshot = (value: unknown, path = 'source'): SourceSnapshot => {

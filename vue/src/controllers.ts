@@ -1,6 +1,7 @@
 import type { ButlerApi } from './api'
 import { reactive } from 'vue'
-import type { CurrentDestination, Definition, Library, LibraryPlaylist, Preview, PublishPlan, SelectionState, Session, Song } from './types'
+import { OperationProgressController } from './operation-progress'
+import type { CurrentDestination, Definition, Library, LibraryPlaylist, OperationAccepted, OperationResult, Preview, PublishPlan, SelectionState, Session, Song } from './types'
 
 type ErrorLike = { status?: number }
 
@@ -23,7 +24,7 @@ export class SessionController {
   private requestSerial = 0
   private activeRequests = 0
 
-  constructor(private readonly api: ButlerApi) {}
+  constructor(private readonly api: ButlerApi, private readonly progress?: OperationProgressController) {}
 
   async load(): Promise<Session | null> { return this.run(() => this.api.getSession()) }
   async refresh(): Promise<Session | null> { return this.run(() => this.api.refreshSession()) }
@@ -75,11 +76,20 @@ export class LibraryController {
   private requestSerial = 0
   private activeRequests = 0
 
-  constructor(private readonly api: ButlerApi) {}
+  constructor(private readonly api: ButlerApi, private readonly progress?: OperationProgressController) {}
 
   async load(): Promise<Library | null> { return this.replace(() => this.api.getLibrary(), 'Library request failed') }
-  async refreshAll(): Promise<Library | null> { return this.replace(() => this.api.refreshLibrary(), 'Library refresh failed') }
-  async refreshSources(sourceKeys: readonly string[]): Promise<Library | null> { return this.replace(() => this.api.refreshLibrary(sourceKeys), 'Library refresh failed') }
+  async refreshAll(): Promise<Library | null> { return this.replace(() => this.trackedLibrary(this.api.refreshLibrary()), 'Library refresh failed') }
+  async refreshSources(sourceKeys: readonly string[]): Promise<Library | null> { return this.replace(() => this.trackedLibrary(this.api.refreshLibrary(sourceKeys)), 'Library refresh failed') }
+
+  private async trackedLibrary(accepted: Promise<OperationAccepted>): Promise<Library> {
+    const value = await accepted
+    if ('ownerSpotifyUserId' in value) return value as unknown as Library
+    if (!this.progress) throw new Error('Operation progress is unavailable')
+    const result = await this.progress.track(value)
+    if (result.type !== 'library_refresh') throw new Error('Unexpected library refresh result')
+    return result.library
+  }
 
   private async replace(operation: () => Promise<Library>, fallback: string): Promise<Library | null> {
     const serial = ++this.requestSerial
@@ -134,6 +144,7 @@ export class StudioController {
     private readonly api: ButlerApi,
     private readonly seedGenerator: () => string = () => crypto.randomUUID(),
     private readonly randomInt: (exclusiveUpperBound: number) => number = secureRandomInt,
+    private readonly progress?: OperationProgressController,
   ) {}
 
   async load(definition: Definition): Promise<void> { await this.selectDefinition(definition) }
@@ -273,7 +284,8 @@ export class StudioController {
     const definitionId = this.state.definition.definitionId
     this.state.error = null
     try {
-      const plan = await this.api.planPublish(definitionId)
+      const planResult = await this.tracked(this.api.planPublish(definitionId))
+      const plan = (planResult as PublishPlan)
       if (this.isCurrent(serial)) {
         this.state.publishPlan = plan
         return plan
@@ -292,7 +304,8 @@ export class StudioController {
     const definition = this.state.definition
     this.state.error = null
     try {
-      const destination = await this.api.publishDestination(definition.definitionId, action, this.state.selection.orderedIds, spotifyPlaylistId, this.state.publishPlan?.publishFlowId)
+      const destinationResult = await this.tracked(this.api.publishDestination(definition.definitionId, action, this.state.selection.orderedIds, spotifyPlaylistId, this.state.publishPlan?.publishFlowId))
+      const destination = destinationResult as Definition['destination']
       if (!this.isCurrent(serial)) return false
       this.state.definition = { ...definition, destination }
       this.state.current = null
@@ -319,7 +332,8 @@ export class StudioController {
     this.state.error = null
     this.state.conflict = false
     try {
-      const current = await this.api.syncDestination(definition.definitionId, this.state.selection.orderedIds, expectedSnapshotId)
+      const currentResult = await this.tracked(this.api.syncDestination(definition.definitionId, this.state.selection.orderedIds, expectedSnapshotId))
+      const current = currentResult as CurrentDestination | null
       if (!this.isCurrent(serial)) return false
       this.state.current = current
       this.updateDestinationFromCurrent(current)
@@ -358,4 +372,14 @@ export class StudioController {
   private beginOperation(): number { this.operationSerial += 1; this.activeOperations += 1; this.state.loading = true; return this.operationSerial }
   private finishOperation(): void { this.activeOperations -= 1; this.state.loading = this.activeOperations > 0 }
   private isCurrent(serial: number): boolean { return serial === this.operationSerial }
+
+  private async tracked<T>(accepted: Promise<T>): Promise<T> {
+    const value = await accepted
+    if (!this.progress || !value || typeof value !== 'object' || !('operationId' in value)) return value
+    const result = await this.progress.track(value as { operationId: string; kind: never })
+    if ('plan' in result) return result.plan as T
+    if ('destination' in result) return result.destination as T
+    if ('current' in result) return result.current as T
+    return result as T
+  }
 }

@@ -26,7 +26,8 @@ describe('ButlerApiClient', () => {
     const playlist = { summary: { spotifyPlaylistId: 'playlist/1', name: 'Library', description: null, href: 'https://spotify.test/p', uri: 'spotify:playlist:p', displayUrl: null, declaredItemCount: 2, cachedPlayableTrackCount: 2, contentSourceKey: 'playlist:p', contentStatus: 'ready', sourceRevision: null, lastSyncedAt: null }, trackIds: ['a', 'b'] }
     const preview = { definitionId: definition.definitionId, status: 'ready', generatedTrackIds: ['a'], generatedTrackCount: 1, seed: 'seed', recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null }
     const publishPlan = { definitionId: definition.definitionId, playlistName: definition.name, action: 'create', candidates: [], message: null, publishFlowId: 'flow-1' }
-    const bodies = [session, session, library, library, playlist, { items: [definition] }, definition, preview, publishPlan, destination, current, current, { items: [song('a')], missingIds: [] }, undefined]
+    const accepted = { operationId: 'op-1', kind: 'library_refresh' }
+    const bodies = [session, session, library, accepted, playlist, { items: [definition] }, definition, preview, { operationId: 'op-2', kind: 'publish_plan' }, { operationId: 'op-3', kind: 'publish_create' }, current, { operationId: 'op-4', kind: 'destination_sync' }, { items: [song('a')], missingIds: [] }, undefined]
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => { const body = bodies.shift(); return body === undefined ? response(undefined, 204) : response(body) })
     const client = new ButlerApiClient(fetcher)
     await client.getSession()
@@ -59,7 +60,7 @@ describe('ButlerApiClient', () => {
   })
 
   it('rotates CSRF tokens and sends credentials on mutations', async () => {
-    const fetcher = vi.fn().mockResolvedValueOnce(response(session)).mockResolvedValueOnce(response({ ownerSpotifyUserId: 'operator', status: 'ready', sources: [], definitions: [], playlists: [] }))
+    const fetcher = vi.fn().mockResolvedValueOnce(response(session)).mockResolvedValueOnce(response({ operationId: 'op-1', kind: 'library_refresh' }))
     const client = new ButlerApiClient(fetcher)
     await client.getSession()
     await client.refreshLibrary()

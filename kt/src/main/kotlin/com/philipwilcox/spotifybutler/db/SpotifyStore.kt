@@ -8,10 +8,10 @@ import com.philipwilcox.spotifybutler.service.CacheSourceSnapshot
 import com.philipwilcox.spotifybutler.service.CacheSourceStatus
 import com.philipwilcox.spotifybutler.service.CandidateSource
 import com.philipwilcox.spotifybutler.service.CandidateTrack
+import com.philipwilcox.spotifybutler.service.OperationProgress
 import com.philipwilcox.spotifybutler.service.PlaylistRecipe
 import com.philipwilcox.spotifybutler.service.PlaylistRecipeCodec
 import com.philipwilcox.spotifybutler.service.PlaylistRecipeEngine
-import com.philipwilcox.spotifybutler.service.PublishOperationLog
 import com.philipwilcox.spotifybutler.service.RecipeExecutionContext
 import com.philipwilcox.spotifybutler.spotify.PlaylistTrack
 import com.philipwilcox.spotifybutler.spotify.SavedTrack
@@ -1096,7 +1096,7 @@ class SpotifyStore private constructor(
     }
 
     private fun persistenceLogFields(): String =
-        PublishOperationLog
+        OperationProgress
             .current()
             ?.logFields()
             ?.let { " $it" }

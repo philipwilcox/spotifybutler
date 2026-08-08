@@ -1,5 +1,5 @@
-import type { ApiErrorDto, CurrentDestination, Definition, Library, LibraryPlaylistDetail, Preview, PublishPlan, Session, Song } from './types'
-import { parseCurrent, parseDefinition, parseDefinitionList, parseDestination, parseError, parseLibrary, parseLibraryPlaylistDetail, parsePreview, parsePublishPlan, parseSession, parseSongs } from './validation'
+import type { ApiErrorDto, CurrentDestination, Definition, Library, LibraryPlaylistDetail, OperationAccepted, Preview, PublishPlan, Session, Song } from './types'
+import { parseAccepted, parseCurrent, parseDefinition, parseDefinitionList, parseDestination, parseError, parseLibrary, parseLibraryPlaylistDetail, parsePreview, parsePublishPlan, parseSession, parseSongs } from './validation'
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -15,16 +15,16 @@ export interface ButlerApi {
   refreshSession(): Promise<Session>
   deleteSession(): Promise<void>
   getLibrary(): Promise<Library>
-  refreshLibrary(sourceKeys?: readonly string[]): Promise<Library>
+  refreshLibrary(sourceKeys?: readonly string[]): Promise<OperationAccepted>
   getLibraryPlaylist(id: string): Promise<LibraryPlaylistDetail>
   listDefinitions(): Promise<Definition[]>
   getDefinition(id: string): Promise<Definition>
   previewDefinition(id: string, seed?: string): Promise<Preview>
   updateRecipeSettings(id: string, shuffleAfterGeneration: boolean): Promise<Definition>
-  planPublish(id: string): Promise<PublishPlan>
-  publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<Definition['destination']>
+  planPublish(id: string): Promise<OperationAccepted>
+  publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<OperationAccepted>
   getCurrentDestination(id: string): Promise<CurrentDestination | null>
-  syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<CurrentDestination | null>
+  syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<OperationAccepted>
   getSongs(ids: readonly string[]): Promise<Song[]>
 }
 
@@ -43,8 +43,8 @@ export class ButlerApiClient implements ButlerApi {
 
   async getLibrary(): Promise<Library> { return this.request('/api/v1/library', 'GET', undefined, parseLibrary) }
 
-  async refreshLibrary(sourceKeys?: readonly string[]): Promise<Library> {
-    return this.request('/api/v1/library/refresh', 'POST', sourceKeys === undefined ? undefined : { sourceKeys }, parseLibrary)
+  async refreshLibrary(sourceKeys?: readonly string[]): Promise<OperationAccepted> {
+    return this.request('/api/v1/library/refresh', 'POST', sourceKeys === undefined ? undefined : { sourceKeys }, parseAccepted)
   }
   async getLibraryPlaylist(id: string): Promise<LibraryPlaylistDetail> { return this.request(`/api/v1/library/playlists/${encodeURIComponent(id)}`, 'GET', undefined, parseLibraryPlaylistDetail) }
 
@@ -58,15 +58,15 @@ export class ButlerApiClient implements ButlerApi {
     return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/recipe-settings`, 'PUT', { shuffleAfterGeneration }, parseDefinition)
   }
 
-  async planPublish(id: string): Promise<PublishPlan> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/publish-plan`, 'POST', {}, parsePublishPlan) }
+  async planPublish(id: string): Promise<OperationAccepted> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/publish-plan`, 'POST', {}, parseAccepted) }
 
-  async publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<Definition['destination']> {
-    return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/publish`, 'POST', { action, spotifyPlaylistId: spotifyPlaylistId ?? null, trackIds, publishFlowId: publishFlowId ?? null }, parseDestination)
+  async publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<OperationAccepted> {
+    return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/publish`, 'POST', { action, spotifyPlaylistId: spotifyPlaylistId ?? null, trackIds, publishFlowId: publishFlowId ?? null }, parseAccepted)
   }
 
   async getCurrentDestination(id: string): Promise<CurrentDestination | null> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/current`, 'GET', undefined, parseCurrent) }
 
-  async syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<CurrentDestination | null> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/syncs`, 'POST', { trackIds, expectedDestinationSnapshotId: expectedDestinationSnapshotId ?? null }, parseCurrent) }
+  async syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<OperationAccepted> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/syncs`, 'POST', { trackIds, expectedDestinationSnapshotId: expectedDestinationSnapshotId ?? null }, parseAccepted) }
 
   async getSongs(ids: readonly string[]): Promise<Song[]> {
     const requestedIds = [...new Set(ids.map(id => id.trim()).filter(id => id.length > 0))]

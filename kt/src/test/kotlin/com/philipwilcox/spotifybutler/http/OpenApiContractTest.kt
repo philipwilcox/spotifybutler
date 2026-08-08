@@ -31,6 +31,7 @@ class OpenApiContractTest {
                 "/api/v1/playlists/{definitionId}/syncs",
                 "/api/v1/songs",
                 "/api/v1/songs/bulk",
+                "/api/v1/operations/{operationId}/events",
             )
         assertEquals(expected, paths.keys.map { it.toString() }.toSet())
         assertEquals(

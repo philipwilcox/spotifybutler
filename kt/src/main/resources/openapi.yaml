@@ -65,7 +65,7 @@ paths:
         required: false
         content: {application/json: {schema: {$ref: '#/components/schemas/RefreshLibraryRequest'}}}
       responses:
-        '200': {description: Refreshed library, content: {application/json: {schema: {$ref: '#/components/schemas/Library'}}}}
+        '202': {description: Library refresh accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/library/playlists/{playlistId}:
     parameters: [{$ref: '#/components/parameters/PlaylistId'}]
@@ -142,7 +142,7 @@ paths:
         required: true
         content: {application/json: {schema: {type: object}}}
       responses:
-        '200': {description: Publish plan, content: {application/json: {schema: {$ref: '#/components/schemas/PublishPlan'}}}}
+        '202': {description: Publish plan accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/playlists/{definitionId}/publish:
     parameters: [{$ref: '#/components/parameters/DefinitionId'}]
@@ -154,7 +154,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/PublishDestinationRequest'}}}
       responses:
-        '200': {description: Published destination, content: {application/json: {schema: {$ref: '#/components/schemas/Destination'}}}}
+        '202': {description: Destination publish accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/playlists/{definitionId}/current:
     parameters: [{$ref: '#/components/parameters/DefinitionId'}]
@@ -163,6 +163,14 @@ paths:
       security: [{butlerSession: []}]
       responses:
         '200': {description: Current destination, content: {application/json: {schema: {$ref: '#/components/schemas/CurrentEnvelope'}}}}
+      default: {$ref: '#/components/responses/ErrorResponse'}
+  /api/v1/operations/{operationId}/events:
+    get:
+      operationId: operationEvents
+      security: [{butlerSession: []}]
+      parameters: [{name: operationId, in: path, required: true, schema: {type: string}}, {$ref: '#/components/parameters/Origin'}]
+      responses:
+        '101': {description: WebSocket upgrade, x-websocket: Full OperationStatus snapshots until a terminal status.}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/playlists/{definitionId}/syncs:
     parameters: [{$ref: '#/components/parameters/DefinitionId'}]
@@ -174,7 +182,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/SyncRequest'}}}
       responses:
-        '200': {description: Current destination, content: {application/json: {schema: {$ref: '#/components/schemas/CurrentEnvelope'}}}}
+        '202': {description: Destination sync accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/songs:
     get:
@@ -210,6 +218,10 @@ components:
       description: Sanitized error
       content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   schemas:
+    OperationAccepted: {type: object, required: [operationId, kind], properties: {operationId: {type: string}, kind: {type: string, enum: [library_refresh, publish_plan, publish_create, publish_adopt, destination_sync]}}}
+    OperationFailure: {type: object, required: [code, message], properties: {code: {type: string}, message: {type: string}}}
+    OperationStatus: {type: object, required: [operationId, kind, phase, action, completedSteps, totalSteps, result, error], properties: {operationId: {type: string}, kind: {type: string}, phase: {type: string, enum: [queued, running, succeeded, failed]}, action: {type: string}, completedSteps: {type: integer, minimum: 0}, totalSteps: {type: [integer, 'null'], minimum: 0, description: Null until known; a running operation may later report its discovered total.}, result: {type: [object, 'null']}, error: {$ref: '#/components/schemas/OperationFailure'}, libraryRefreshProgress: {oneOf: [{$ref: '#/components/schemas/LibraryRefreshProgress'}, {type: 'null'}]}}}
+    LibraryRefreshProgress: {type: object, required: [completedSources, totalSources], properties: {completedSources: {type: integer, minimum: 0}, totalSources: {type: integer, minimum: 1}, activeSourceCompletedPages: {type: [integer, 'null'], minimum: 0}, activeSourceTotalPages: {type: [integer, 'null'], minimum: 1}}}
     Health: {type: object, required: [status], properties: {status: {type: string, enum: [ready]}}}
     Session: {type: object, required: [userId, csrfToken, expiresAt], properties: {userId: {type: string}, csrfToken: {type: string}, expiresAt: {type: string, format: date-time}}}
     SourceDependency: {type: object, required: [sourceKey, resourceKind, sourceRevision, lastSyncedAt, itemCount, usable], properties: {sourceKey: {type: string}, resourceKind: {type: string}, sourceRevision: {type: [string, 'null']}, lastSyncedAt: {type: [string, 'null'], format: date-time}, itemCount: {type: [integer, 'null'], minimum: 0}, usable: {type: boolean}}}
