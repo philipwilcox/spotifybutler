@@ -5,6 +5,7 @@ enum class PlaylistDefinitionId {
     RANDOM_LIKED_100,
     COLLECTED_DISCOVER_WEEKLY,
     LIKED_PER_ARTIST,
+    THREE_SAVED_SONGS_PER_ARTIST,
     ROLLING_RECENT_20,
     ROLLING_PRIOR_20,
     ROLLING_PRE_40,
@@ -84,6 +85,7 @@ object PlaylistQueries {
     private const val DECADE_2020_START = 2020L
     private const val DECADE_LENGTH = 10L
     const val ARTIST_LIMIT = 12L
+    const val THREE_SAVED_SONGS_ARTIST_LIMIT = 3L
     const val RECENT_LIKED_LIMIT = 100L
     const val RANDOM_LIKED_LIMIT = 100L
     const val RECENT_ARTIST_LIMIT = 8L
@@ -128,6 +130,11 @@ object PlaylistQueries {
                 PlaylistDefinitionId.LIKED_PER_ARTIST,
                 "Liked Tracks, Twelve Per Artist",
                 PlaylistQuery.SavedPerArtist(ARTIST_LIMIT),
+            ),
+            PlaylistDefinition(
+                PlaylistDefinitionId.THREE_SAVED_SONGS_PER_ARTIST,
+                "3 Saved Songs Per Artist",
+                PlaylistQuery.SavedPerArtist(THREE_SAVED_SONGS_ARTIST_LIMIT),
             ),
             PlaylistDefinition(
                 PlaylistDefinitionId.ROLLING_RECENT_20,

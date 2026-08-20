@@ -61,7 +61,7 @@ class PlaylistRecipeGoldenTest {
                 assertEquals(goldenResult.orderedUris, result.selected.map { it.track.uri }, definition.id.name)
             }
         }
-        assertEquals(15, expected.size)
+        assertEquals(16, expected.size)
     }
 }
 

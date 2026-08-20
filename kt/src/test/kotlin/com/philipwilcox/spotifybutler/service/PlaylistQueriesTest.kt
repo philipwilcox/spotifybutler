@@ -10,13 +10,14 @@ class PlaylistQueriesTest {
     fun `catalog preserves the TypeScript order and names`() {
         val definitions = PlaylistQueries.definitions(2026, 2016)
 
-        assertEquals(15, definitions.size)
+        assertEquals(16, definitions.size)
         assertEquals(
             listOf(
                 "100 Most Recent Liked Songs",
                 "100 Random Liked Songs",
                 "Collected Discover Weekly 2016 And On - Butler",
                 "Liked Tracks, Twelve Per Artist",
+                "3 Saved Songs Per Artist",
                 "2007-2026, 12 Per Artist",
                 "1987-2006, 12 Per Artist",
                 "Pre-1987, 12 Per Artist",
@@ -33,10 +34,10 @@ class PlaylistQueriesTest {
         )
         assertEquals(
             PlaylistQuery.SavedInYearRangePerArtist(2007, 2026, 12),
-            definitions[4].query,
+            definitions[5].query,
         )
         assertEquals(PlaylistQuery.SavedSinceYearPerArtist(2022, 8), definitions.last().query)
-        assertEquals(15, definitions.map(PlaylistDefinition::id).toSet().size)
+        assertEquals(16, definitions.map(PlaylistDefinition::id).toSet().size)
         assertTrue(definitions.map(PlaylistDefinition::name).toSet().size == definitions.size)
     }
 
@@ -44,10 +45,10 @@ class PlaylistQueriesTest {
     fun `catalog moves rolling names and bounds together`() {
         val definitions = PlaylistQueries.definitions(2031, 2018)
 
-        assertEquals("2012-2031, 12 Per Artist", definitions[4].name)
-        assertEquals(PlaylistQuery.SavedInYearRangePerArtist(2012, 2031, 12), definitions[4].query)
-        assertEquals("1992-2011, 12 Per Artist", definitions[5].name)
-        assertEquals(PlaylistQuery.SavedThroughYearPerArtist(1991, 12), definitions[6].query)
+        assertEquals("2012-2031, 12 Per Artist", definitions[5].name)
+        assertEquals(PlaylistQuery.SavedInYearRangePerArtist(2012, 2031, 12), definitions[5].query)
+        assertEquals("1992-2011, 12 Per Artist", definitions[6].name)
+        assertEquals(PlaylistQuery.SavedThroughYearPerArtist(1991, 12), definitions[7].query)
         assertEquals(PlaylistQuery.SavedSinceYearPerArtist(2027, 8), definitions.last().query)
         assertEquals(
             PlaylistQuery.CollectedDiscoverWeekly(
@@ -57,6 +58,6 @@ class PlaylistQueriesTest {
             ),
             definitions[2].query,
         )
-        assertIs<PlaylistQuery.SavedInYearRange>(definitions[9].query)
+        assertIs<PlaylistQuery.SavedInYearRange>(definitions[10].query)
     }
 }

@@ -180,6 +180,7 @@ class PlaylistRecipeFixtureTest {
             setOf(
                 PlaylistDefinitionId.RANDOM_LIKED_100,
                 PlaylistDefinitionId.LIKED_PER_ARTIST,
+                PlaylistDefinitionId.THREE_SAVED_SONGS_PER_ARTIST,
                 PlaylistDefinitionId.ROLLING_RECENT_20,
                 PlaylistDefinitionId.ROLLING_PRIOR_20,
                 PlaylistDefinitionId.ROLLING_PRE_40,

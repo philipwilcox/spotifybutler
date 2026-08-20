@@ -9,7 +9,6 @@ const session = new SessionController(api)
 const progress = new OperationProgressController()
 const library = new LibraryController(api, progress)
 const studio = new StudioController(api, undefined, undefined, progress)
-const showSyncConfirm = ref(false)
 const selectedPublishCandidateId = ref<string | null>(null)
 const draggedIndex = ref<number | null>(null)
 
@@ -59,7 +58,7 @@ async function publish() {
     await library.load()
   }
 }
-async function sync() { if (await studio.sync()) showSyncConfirm.value = false }
+async function sync() { await studio.sync() }
 async function updateShuffleAfterGeneration(event: Event) { await studio.updateShuffleAfterGeneration((event.currentTarget as HTMLInputElement).checked) }
 function keyMove(index: number, event: KeyboardEvent) { if (event.key === 'ArrowUp') { event.preventDefault(); studio.moveTrack(index, -1) } if (event.key === 'ArrowDown') { event.preventDefault(); studio.moveTrack(index, 1) } }
 function dropTrack(index: number) { if (draggedIndex.value !== null) studio.moveTrackTo(draggedIndex.value, index); draggedIndex.value = null }
@@ -132,7 +131,7 @@ onUnmounted(() => progress.dispose())
                 <div class="action-group playlist-info-actions">
                   <button class="button quiet" :disabled="studio.state.loading" @click="studio.reroll">REROLL PREVIEW</button>
                   <button v-if="!selectedDefinition?.destination" class="button gold" :disabled="studio.state.loading" @click="planPublish">PUBLISH</button>
-                  <button v-else class="button gold" :disabled="studio.state.loading" @click="showSyncConfirm = true">SYNC DESTINATION</button>
+                  <button v-else class="button gold" :disabled="studio.state.loading" @click="sync">SYNC DESTINATION</button>
                 </div>
               </div>
             </div>
@@ -143,6 +142,5 @@ onUnmounted(() => progress.dispose())
     </template>
 
     <div v-if="studio.state.publishPlan" class="dialog-backdrop" role="presentation"><form class="dialog panel" role="dialog" aria-modal="true" aria-labelledby="publish-title" @submit.prevent="publish"><p class="eyebrow">PUBLISH DESTINATION</p><h2 id="publish-title">{{ studio.state.publishPlan.action === 'create' ? 'Create a new playlist?' : studio.state.publishPlan.action === 'blocked' ? 'Playlist cannot be adopted' : studio.state.publishPlan.action === 'choose' ? 'Choose a playlist to adopt' : 'Adopt this playlist?' }}</h2><p v-if="studio.state.publishPlan.action === 'create'">This creates and publishes <strong>{{ studio.state.publishPlan.playlistName }}</strong> as a managed Spotify playlist.</p><p v-else-if="studio.state.publishPlan.action === 'blocked'">{{ studio.state.publishPlan.message }}</p><p v-else-if="studio.state.publishPlan.action === 'choose'">Multiple owned playlists match <strong>{{ studio.state.publishPlan.playlistName }}</strong>. Select the destination to adopt.</p><p v-else>Adopt <strong>{{ studio.state.publishPlan.playlistName }}</strong> as the managed destination and publish the staged order.</p><div v-if="studio.state.publishPlan.action === 'choose'" class="candidate-list"><label v-for="candidate in studio.state.publishPlan.candidates" :key="candidate.spotifyPlaylistId"><input type="radio" name="publish-candidate" :value="candidate.spotifyPlaylistId" v-model="selectedPublishCandidateId" /><span><strong>{{ candidate.name }}</strong><small>{{ candidate.description || 'No description' }} · {{ candidate.itemCount ?? '—' }} tracks</small></span></label></div><div class="dialog-actions"><button type="button" class="button quiet" @click="studio.state.publishPlan = null; selectedPublishCandidateId = null">CANCEL</button><button v-if="studio.state.publishPlan.action !== 'blocked'" type="submit" class="button gold" :disabled="studio.state.publishPlan.action !== 'create' && !selectedPublishCandidateId">PUBLISH</button></div></form></div>
-    <div v-if="showSyncConfirm" class="dialog-backdrop" role="presentation"><div class="dialog panel" role="dialog" aria-modal="true" aria-labelledby="sync-title"><p class="eyebrow">RECURRING SYNC</p><h2 id="sync-title">Replace the managed playlist?</h2><p>This sends the exact staged order to {{ selectedDefinition?.destination?.spotifyPlaylistId }}. The current destination snapshot will be checked.</p><div class="dialog-actions"><button type="button" class="button quiet" @click="showSyncConfirm = false">CANCEL</button><button type="button" class="button gold" @click="sync">CONFIRM SYNC</button></div></div></div>
   </main>
 </template>

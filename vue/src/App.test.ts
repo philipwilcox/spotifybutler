@@ -48,6 +48,7 @@ function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number 
     if (path.includes('/preview')) return response(preview)
     if (path.includes('/publish-plan')) return response({ operationId: 'op-plan', kind: 'publish_plan' })
     if (path.includes('/publish')) return response({ operationId: 'op-publish', kind: 'publish_create' })
+    if (path.includes('/syncs')) return response({ operationId: 'op-sync', kind: 'destination_sync' })
     if (path.includes('/current')) return response({ current: null })
     if (path.includes('/songs')) return response({ items: [knownSong], missingIds: ['missing-track'] })
     return response({})
@@ -162,6 +163,25 @@ describe('App', () => {
     operations.succeed('op-publish', 'publish_create', { type: 'publish_destination', destination })
     await flushPromises()
     expect(fetcher.mock.calls.some(([path]) => String(path).includes('/publish'))).toBe(true)
+  })
+
+  it('syncs a managed destination immediately without a confirmation dialog', async () => {
+    const managedLibrary = { ...library, definitions: [{ ...definition, destination }] }
+    const fetcher = frontendFetch({ libraryBody: managedLibrary })
+    installOperationSockets()
+    vi.stubGlobal('fetch', fetcher)
+    Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Replace the managed playlist?')
+    await wrapper.findAll('button').find(button => button.text() === 'SYNC DESTINATION')?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.dialog-backdrop').exists()).toBe(false)
+    expect(fetcher.mock.calls.some(([path]) => String(path).endsWith('/syncs'))).toBe(true)
+    expect(wrapper.find('.top-progress').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('keeps the top-level progress indicator visible through pending publish and library loading', async () => {
