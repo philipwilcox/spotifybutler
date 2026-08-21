@@ -20,7 +20,6 @@ data class PlaylistQueryFixture(
     val name: String,
     val source: String,
     val currentYear: Int,
-    val minYearForDiscoverWeekly: Int,
     val seedTables: QueryFixtureSeedTables,
     val expectations: List<QueryFixtureExpectation>,
 )
@@ -120,8 +119,7 @@ fun loadPlaylistQueryFixtures(resourceDirectory: Path): List<PlaylistQueryFixtur
 fun PlaylistQueryFixture.validate() {
     require(schemaVersion == 1) { "Unsupported query fixture schema version $schemaVersion" }
     require(currentYear in 1900..2200) { "Query fixture current year is invalid" }
-    require(minYearForDiscoverWeekly in 1900..currentYear) { "Query fixture Discover Weekly year is invalid" }
-    val definitions = PlaylistQueries.definitions(currentYear, minYearForDiscoverWeekly)
+    val definitions = PlaylistQueries.definitions(currentYear)
     require(expectations.map { it.definitionId }.toSet().size == expectations.size) {
         "Query fixture contains duplicate definition expectations"
     }

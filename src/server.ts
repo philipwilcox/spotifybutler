@@ -73,7 +73,7 @@ async function buildResponse(accessToken: string, refresh: boolean, res: ServerR
     console.log("about to create database")
     const db = createDatabase();
     console.log("created database")
-    const app = new App(library, db, constants.APP.MIN_YEAR_FOR_DISCOVER_WEEKLY, constants.APP.DRY_RUN)
+    const app = new App(library, db, constants.APP.DRY_RUN)
     console.log("built databases/created app");
 
     // Check if DB is empty

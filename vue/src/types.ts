@@ -139,6 +139,14 @@ export interface PublishPlan {
   readonly publishFlowId: string
 }
 
+export type BulkRepublishPlanAction = 'sync' | 'create' | 'adopt' | 'choose' | 'skipped'
+export type BulkRepublishItemPhase = 'queued' | 'generating' | 'publishing' | 'succeeded' | 'failed' | 'skipped'
+export interface BulkRepublishPlanItem { readonly definitionId: string; readonly name: string; readonly action: BulkRepublishPlanAction; readonly candidates: readonly PublishCandidate[]; readonly message: string | null }
+export interface BulkRepublishPlan { readonly items: readonly BulkRepublishPlanItem[] }
+export interface BulkRepublishChoice { readonly definitionId: string; readonly action: 'sync' | 'create' | 'adopt'; readonly spotifyPlaylistId?: string | null }
+export interface BulkRepublishItem { readonly definitionId: string; readonly name: string; readonly phase: BulkRepublishItemPhase; readonly trackCount: number | null; readonly completedSteps: number | null; readonly totalSteps: number | null; readonly message: string | null }
+export interface BulkRepublishProgress { readonly completedItems: number; readonly totalItems: number; readonly items: readonly BulkRepublishItem[] }
+
 export interface ApiErrorDto {
   readonly code: string
   readonly message: string
@@ -146,7 +154,7 @@ export interface ApiErrorDto {
   readonly details: Readonly<Record<string, string>>
 }
 
-export type OperationKind = 'library_refresh' | 'publish_plan' | 'publish_create' | 'publish_adopt' | 'destination_sync'
+export type OperationKind = 'library_refresh' | 'publish_plan' | 'publish_create' | 'publish_adopt' | 'destination_sync' | 'bulk_republish_plan' | 'bulk_republish'
 export type OperationPhase = 'queued' | 'running' | 'succeeded' | 'failed'
 export interface OperationAccepted { readonly operationId: string; readonly kind: OperationKind }
 export interface OperationFailure { readonly code: string; readonly message: string }
@@ -161,6 +169,8 @@ export type OperationResult =
   | { readonly type: 'publish_plan'; readonly plan: PublishPlan }
   | { readonly type: 'publish_destination'; readonly destination: Destination }
   | { readonly type: 'destination_sync'; readonly current: CurrentDestination | null }
+  | { readonly type: 'bulk_republish_plan'; readonly plan: BulkRepublishPlan }
+  | { readonly type: 'bulk_republish'; readonly library: Library; readonly items: readonly BulkRepublishItem[] }
 export interface OperationStatus {
   readonly operationId: string
   readonly kind: OperationKind
@@ -171,6 +181,7 @@ export interface OperationStatus {
   readonly result: OperationResult | null
   readonly error: OperationFailure | null
   readonly libraryRefreshProgress: LibraryRefreshProgress | null
+  readonly bulkRepublishProgress?: BulkRepublishProgress | null
 }
 
 export interface SelectionState {

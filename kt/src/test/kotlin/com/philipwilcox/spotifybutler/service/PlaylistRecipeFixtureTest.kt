@@ -27,7 +27,7 @@ class PlaylistRecipeFixtureTest {
         val databasePath = Files.createTempDirectory("playlist-recipe-fixture-").resolve("cache.db")
         SpotifyStore.open(databasePath).use { store ->
             fixture.loadInto(store)
-            val definitions = PlaylistQueries.definitions(fixture.currentYear, fixture.minYearForDiscoverWeekly)
+            val definitions = PlaylistQueries.definitions(fixture.currentYear)
             val expectations = fixture.expectations.associateBy { it.definitionId }
             definitions.forEach { definition ->
                 assertRecipeDefinition(fixture, store, definition, requireNotNull(expectations[definition.id.name]))
@@ -92,7 +92,7 @@ class PlaylistRecipeFixtureTest {
                 "playlist query fixture directory is missing"
             }
         loadPlaylistQueryFixtures(Path.of(resource.toURI())).forEach { fixture ->
-            val definitions = PlaylistQueries.definitions(fixture.currentYear, fixture.minYearForDiscoverWeekly)
+            val definitions = PlaylistQueries.definitions(fixture.currentYear)
             val golden = loadBuiltInGoldens()
             val variants =
                 listOf(

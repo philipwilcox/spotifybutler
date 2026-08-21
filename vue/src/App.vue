@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ButlerApiClient } from './api'
 import { LibraryController, SessionController, StudioController } from './controllers'
 import { operationProgressLabel, operationProgressPercent, OperationProgressController } from './operation-progress'
+import type { BulkRepublishChoice, BulkRepublishItem, BulkRepublishPlan } from './types'
 
 const api = new ButlerApiClient(undefined, () => session.state.session = null)
 const session = new SessionController(api)
@@ -11,6 +12,10 @@ const library = new LibraryController(api, progress)
 const studio = new StudioController(api, undefined, undefined, progress)
 const selectedPublishCandidateId = ref<string | null>(null)
 const draggedIndex = ref<number | null>(null)
+const bulkPlan = ref<BulkRepublishPlan | null>(null)
+const bulkResults = ref<readonly BulkRepublishItem[]>([])
+const bulkRunChoices = ref<readonly BulkRepublishChoice[]>([])
+const bulkStatusVisible = ref(true)
 
 const selected = computed(() => studio.state.selection)
 const selectedDefinition = computed(() => studio.state.definition)
@@ -19,6 +24,11 @@ const trackedStatus = computed(() => progress.state.active)
 const isBusy = computed(() => session.state.loading || library.state.loading || studio.state.loading || (trackedStatus.value !== null && trackedStatus.value.phase !== 'succeeded' && trackedStatus.value.phase !== 'failed'))
 const progressPercent = computed(() => operationProgressPercent(trackedStatus.value))
 const progressLabel = computed(() => operationProgressLabel(trackedStatus.value))
+const bulkProgress = computed(() => trackedStatus.value?.bulkRepublishProgress)
+const bulkRows = computed(() => bulkProgress.value?.items ?? bulkResults.value)
+const bulkComplete = computed(() => bulkProgress.value?.completedItems ?? bulkRows.value.filter(row => row.phase === 'succeeded' || row.phase === 'failed').length)
+const bulkFailed = computed(() => bulkRows.value.filter(row => row.phase === 'failed'))
+const bulkExecutableCount = computed(() => bulkPlan.value?.items.filter(item => bulkChoice(item) !== null).length ?? 0)
 const songFor = (id: string) => selected.value.enrichment[id]
 const headerArtSong = computed(() => selected.value.orderedIds.map(songFor).find(song => song?.album.imageUrl) ?? null)
 const headerArt = computed(() => headerArtSong.value?.album.imageUrl ?? null)
@@ -59,6 +69,32 @@ async function publish() {
   }
 }
 async function sync() { await studio.sync() }
+async function planBulkRepublish() {
+  const accepted = await api.planBulkRepublish!()
+  const result = await progress.track(accepted)
+  if (result.type !== 'bulk_republish_plan') return
+  bulkPlan.value = result.plan
+}
+function bulkChoice(item: BulkRepublishPlan['items'][number]): BulkRepublishChoice | null {
+  if (item.action === 'sync' || item.action === 'create') return { definitionId: item.definitionId, action: item.action }
+  if (item.action !== 'adopt' || item.candidates.length !== 1) return null
+  return { definitionId: item.definitionId, action: 'adopt', spotifyPlaylistId: item.candidates[0].spotifyPlaylistId }
+}
+async function executeBulkRepublish(items?: readonly BulkRepublishItem[]) {
+  const choices = items
+    ? bulkRunChoices.value.filter(choice => items.some(item => item.definitionId === choice.definitionId))
+    : (bulkPlan.value?.items ?? []).map(bulkChoice).filter((choice): choice is BulkRepublishChoice => choice !== null)
+  if (!choices.length) return
+  bulkStatusVisible.value = true
+  bulkPlan.value = null
+  bulkRunChoices.value = choices
+  const result = await progress.track(await api.bulkRepublish!(choices))
+  if (result.type !== 'bulk_republish') return
+  bulkResults.value = result.items
+  library.state.library = result.library
+  library.state.definitions = [...result.library.definitions]
+}
+function dismissBulkStatus() { bulkStatusVisible.value = false }
 async function updateShuffleAfterGeneration(event: Event) { await studio.updateShuffleAfterGeneration((event.currentTarget as HTMLInputElement).checked) }
 function dropTrack(index: number) { if (draggedIndex.value !== null) studio.moveTrackTo(draggedIndex.value, index); draggedIndex.value = null }
 onMounted(boot)
@@ -87,6 +123,7 @@ onUnmounted(() => progress.dispose())
       <section class="layout">
         <aside class="panel sidebar">
           <div class="section-title"><span>DEFINED PLAYLISTS</span><span class="section-title-separator">//</span><span class="counter">{{ library.state.definitions.length }}</span></div>
+          <button class="button quiet bulk-start" :disabled="isBusy || !library.state.definitions.length" aria-label="Publish all generated playlists" @click="planBulkRepublish"><span class="bulk-start-icon" aria-hidden="true">↻</span><span>PUBLISH ALL GENERATED PLAYLISTS</span></button>
           <button v-for="definition in library.state.definitions" :key="definition.definitionId" class="mission definition-mission" :class="{ active: definition.definitionId === selectedDefinition?.definitionId }" @click="choose(definition)"><span class="mission-mark">◆</span><span><strong>{{ definition.name }}</strong><small>{{ definition.kind }} · {{ definition.definitionId }}</small></span></button>
           <p v-if="library.state.loading && !library.state.definitions.length" class="hint">Loading library…</p>
           <p v-else-if="!library.state.loading && !library.state.definitions.length" class="hint">No definitions are available.</p>
@@ -102,6 +139,12 @@ onUnmounted(() => progress.dispose())
         <section class="workspace">
           <div v-if="studio.state.error" class="alert error" role="alert">{{ studio.state.error }} <button class="icon-button" aria-label="Dismiss error" @click="studio.state.error = null">×</button></div>
           <div v-if="studio.state.conflict" class="alert conflict" role="alert"><strong>DESTINATION SNAPSHOT CONFLICT</strong><span>The remote playlist changed. Your staged order is preserved; review it and synchronize again when ready.</span></div>
+          <section v-if="bulkRows.length && bulkStatusVisible" class="panel bulk-status">
+            <div class="section-title"><span>LIBRARY REPUBLISH</span><span class="section-title-separator">//</span><span class="counter">{{ bulkComplete }}/{{ bulkRows.length }}</span><button class="icon-button bulk-status-dismiss" aria-label="Dismiss library republish status" @click="dismissBulkStatus">×</button></div>
+            <p class="hint">{{ bulkProgress ? 'Regenerating from cached sources and publishing up to three playlists at a time.' : 'Most recent library republish.' }}</p>
+            <div v-for="row in bulkRows" :key="row.definitionId" class="bulk-row"><span class="bulk-phase" :class="row.phase">{{ row.phase === 'succeeded' ? '✓' : row.phase === 'failed' ? '!' : row.phase === 'publishing' || row.phase === 'generating' ? '↻' : '·' }}</span><strong>{{ row.name }}</strong><small>{{ row.message || (row.trackCount === null ? row.phase : `${row.trackCount} tracks · ${row.phase}`) }}</small></div>
+            <button v-if="!bulkProgress && bulkFailed.length" class="button quiet" @click="executeBulkRepublish(bulkFailed)">RETRY FAILED // {{ bulkFailed.length }}</button>
+          </section>
           <section class="panel playlist-info">
             <div class="section-title"><span>{{ studio.state.activeKind === 'library_playlist' ? 'LIBRARY PLAYLIST' : 'ACTIVE DEFINITION' }}</span><span class="section-title-separator">//</span><span class="section-title-detail">{{ selectedDefinition?.definitionId || selectedLibraryPlaylist?.spotifyPlaylistId }}</span></div>
             <div class="playlist-info-top">
@@ -141,5 +184,6 @@ onUnmounted(() => progress.dispose())
     </template>
 
     <div v-if="studio.state.publishPlan" class="dialog-backdrop" role="presentation"><form class="dialog panel" role="dialog" aria-modal="true" aria-labelledby="publish-title" @submit.prevent="publish"><p class="eyebrow">PUBLISH DESTINATION</p><h2 id="publish-title">{{ studio.state.publishPlan.action === 'create' ? 'Create a new playlist?' : studio.state.publishPlan.action === 'blocked' ? 'Playlist cannot be adopted' : studio.state.publishPlan.action === 'choose' ? 'Choose a playlist to adopt' : 'Adopt this playlist?' }}</h2><p v-if="studio.state.publishPlan.action === 'create'">This creates and publishes <strong>{{ studio.state.publishPlan.playlistName }}</strong> as a managed Spotify playlist.</p><p v-else-if="studio.state.publishPlan.action === 'blocked'">{{ studio.state.publishPlan.message }}</p><p v-else-if="studio.state.publishPlan.action === 'choose'">Multiple owned playlists match <strong>{{ studio.state.publishPlan.playlistName }}</strong>. Select the destination to adopt.</p><p v-else>Adopt <strong>{{ studio.state.publishPlan.playlistName }}</strong> as the managed destination and publish the staged order.</p><div v-if="studio.state.publishPlan.action === 'choose'" class="candidate-list"><label v-for="candidate in studio.state.publishPlan.candidates" :key="candidate.spotifyPlaylistId"><input type="radio" name="publish-candidate" :value="candidate.spotifyPlaylistId" v-model="selectedPublishCandidateId" /><span><strong>{{ candidate.name }}</strong><small>{{ candidate.description || 'No description' }} · {{ candidate.itemCount ?? '—' }} tracks</small></span></label></div><div class="dialog-actions"><button type="button" class="button quiet" @click="studio.state.publishPlan = null; selectedPublishCandidateId = null">CANCEL</button><button v-if="studio.state.publishPlan.action !== 'blocked'" type="submit" class="button gold" :disabled="studio.state.publishPlan.action !== 'create' && !selectedPublishCandidateId">PUBLISH</button></div></form></div>
+    <div v-if="bulkPlan" class="dialog-backdrop" role="presentation"><form class="dialog panel bulk-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-title" @submit.prevent="executeBulkRepublish()"><p class="eyebrow">CONFIRM LIBRARY REPUBLISH</p><h2 id="bulk-title">Republish {{ bulkExecutableCount }} definitions?</h2><div class="bulk-plan-list"><div v-for="item in bulkPlan.items" :key="item.definitionId" class="bulk-plan-row"><strong class="bulk-plan-name">{{ item.name }}</strong><small v-if="item.action === 'sync'" class="bulk-plan-action">SYNC EXISTING DESTINATION</small><small v-else-if="item.action === 'create'" class="bulk-plan-action">CREATE NEW SPOTIFY PLAYLIST</small><small v-else-if="item.action === 'adopt' && item.candidates.length === 1" class="bulk-plan-action">ADOPT + OVERWRITE · MATCH WITH SAME NAME</small><small v-else-if="item.action === 'choose'" class="bulk-plan-warning">CANNOT SYNC — MULTIPLE MATCHES</small><small v-else class="bulk-plan-warning">SKIPPED — {{ item.message || 'Matching destination is not available.' }}</small></div></div><div class="dialog-actions"><button type="button" class="button quiet" @click="bulkPlan = null">CANCEL</button><button type="submit" class="button gold" :disabled="bulkExecutableCount === 0">REPUBLISH</button></div></form></div>
   </main>
 </template>

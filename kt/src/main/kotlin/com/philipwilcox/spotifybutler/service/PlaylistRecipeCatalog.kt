@@ -11,19 +11,6 @@ fun PlaylistDefinition.toPlaylistRecipe(): PlaylistRecipe =
 
 private fun recipeSource(query: PlaylistQuery): CandidateSource =
     when (query) {
-        is PlaylistQuery.CollectedDiscoverWeekly ->
-            CandidateSource.Union(
-                listOf(
-                    CandidateSource.PlaylistItems(query.collectedName),
-                    CandidateSource.Difference(
-                        CandidateSource.Filtered(
-                            CandidateSource.PlaylistItems(query.sourceName),
-                            TrackPredicate.ReleaseYearRange(minInclusive = query.minReleaseYear.toInt()),
-                        ),
-                        CandidateSource.PlaylistItems(query.collectedName),
-                    ),
-                ),
-            )
         PlaylistQuery.SavedNotByTopArtists,
         PlaylistQuery.SavedNotInTopTracks,
         -> CandidateSource.SavedTracks
@@ -80,7 +67,6 @@ private fun recipeSelection(query: PlaylistQuery): SelectionPolicy =
 
 private fun recipeOrdering(query: PlaylistQuery): OrderingPolicy =
     when (query) {
-        is PlaylistQuery.CollectedDiscoverWeekly -> OrderingPolicy.AddedAtAscending
         is PlaylistQuery.RandomLiked,
         is PlaylistQuery.SavedPerArtist,
         is PlaylistQuery.SavedInYearRangePerArtist,

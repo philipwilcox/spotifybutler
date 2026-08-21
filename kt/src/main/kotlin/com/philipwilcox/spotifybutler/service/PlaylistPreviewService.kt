@@ -125,10 +125,8 @@ class PlaylistPreviewService(
 
     private fun builtIns(ownerSpotifyUserId: String): List<PlaylistDefinitionView> =
         PlaylistQueries
-            .definitions(
-                clock.instant().atZone(java.time.ZoneOffset.UTC).year,
-                BUILT_IN_MIN_YEAR,
-            ).map { definition ->
+            .definitions(clock.instant().atZone(java.time.ZoneOffset.UTC).year)
+            .map { definition ->
                 val recipe = definition.toPlaylistRecipe()
                 val shuffleAfterGeneration =
                     store.playlistRecipePreference(definition.id.name, ownerSpotifyUserId)
@@ -234,7 +232,6 @@ class PlaylistPreviewService(
         )
 
     private companion object {
-        const val BUILT_IN_MIN_YEAR = 2018
         const val EMPTY_SEED_BYTES = 8
     }
 }

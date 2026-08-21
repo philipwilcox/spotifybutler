@@ -36,16 +36,9 @@ animations.
 
 Let's add track length column and maybe other stuff to the track sequence preview. Listen count? Personal usage info?
 
-## Bulk Sync
-
-Come up with a good flow around "republish all generated playlists" or multi-select of them to enable backend parallization of the sync.
-
-When bulk syncing whole library to re-fetch stuff, show individual status of each step as it comes in or we re-poll.
-
 ## Editable Playlists
 
 Let's make this able to edit non-generated playlists in the library too, and do things like shuffle their ordering with our shuffle logic.
-
 
 ## LastFM Integration, Metadata
 

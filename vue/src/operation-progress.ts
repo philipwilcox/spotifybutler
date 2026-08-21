@@ -36,12 +36,12 @@ export class OperationProgressController {
   private socket: WebSocketLike | null = null
   private pending: { resolve: (result: OperationResult) => void; reject: (error: unknown) => void } | null = null
 
-  constructor(private readonly factory: WebSocketFactory = url => new WebSocket(url)) {}
+  constructor(private readonly factory: WebSocketFactory = url => new WebSocket(url) as unknown as WebSocketLike) {}
 
   track(accepted: OperationAccepted): Promise<OperationResult> {
     if (this.pending) return Promise.reject(new Error('An operation is already being tracked'))
     this.state.connectionError = null
-    this.state.active = { operationId: accepted.operationId, kind: accepted.kind, phase: 'queued', action: 'Waiting to start', completedSteps: 0, totalSteps: null, result: null, error: null, libraryRefreshProgress: null }
+    this.state.active = { operationId: accepted.operationId, kind: accepted.kind, phase: 'queued', action: 'Waiting to start', completedSteps: 0, totalSteps: null, result: null, error: null, libraryRefreshProgress: null, bulkRepublishProgress: null }
     return new Promise<OperationResult>((resolve, reject) => {
       this.pending = { resolve, reject }
       const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -83,7 +83,7 @@ export class OperationProgressController {
 
   private fail(error: OperationFailureError): void {
     this.state.connectionError = error.message
-    this.pending.reject(error)
+    this.pending?.reject(error)
     this.pending = null
     this.socket?.close()
     this.socket = null

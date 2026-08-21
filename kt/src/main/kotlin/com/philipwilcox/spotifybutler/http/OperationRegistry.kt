@@ -48,6 +48,7 @@ class OperationRegistry {
                         operation = kind.name,
                         expectedExternalCalls = newRecord.totalSteps,
                         progressSink = { progress ->
+                            val bulkProgress = progress.bulkRepublish as? BulkRepublishProgressWire
                             if (progress.libraryRefresh == null) {
                                 newRecord.totalSteps = progress.totalExternalCalls ?: newRecord.totalSteps
                             }
@@ -55,7 +56,7 @@ class OperationRegistry {
                                 newRecord,
                                 OperationPhase.running,
                                 progress.action,
-                                progress.completedExternalCalls,
+                                bulkProgress?.completedItems ?: progress.completedExternalCalls,
                                 libraryRefreshProgress =
                                     progress.libraryRefresh?.let {
                                         LibraryRefreshProgressWire(
@@ -65,6 +66,7 @@ class OperationRegistry {
                                             it.activeSourceTotalPages,
                                         )
                                     },
+                                bulkRepublishProgress = bulkProgress,
                             )
                         },
                     ) { task() }
@@ -76,6 +78,7 @@ class OperationRegistry {
                     newRecord.totalSteps ?: newRecord.status.value.completedSteps,
                     result = result,
                     libraryRefreshProgress = newRecord.status.value.libraryRefreshProgress,
+                    bulkRepublishProgress = newRecord.status.value.bulkRepublishProgress,
                 )
             } catch (failure: Exception) {
                 logger.error(failure) { "Operation failed: operationId=$id requestId=$requestId" }
@@ -92,6 +95,7 @@ class OperationRegistry {
                     newRecord.status.value.completedSteps,
                     error = error,
                     libraryRefreshProgress = newRecord.status.value.libraryRefreshProgress,
+                    bulkRepublishProgress = newRecord.status.value.bulkRepublishProgress,
                 )
             }
         }
@@ -118,6 +122,7 @@ class OperationRegistry {
         result: OperationResultWire? = null,
         error: OperationFailureWire? = null,
         libraryRefreshProgress: LibraryRefreshProgressWire? = null,
+        bulkRepublishProgress: BulkRepublishProgressWire? = null,
     ) {
         record.status.value =
             OperationStatusWire(
@@ -130,6 +135,7 @@ class OperationRegistry {
                 result,
                 error,
                 libraryRefreshProgress,
+                bulkRepublishProgress,
             )
     }
 
@@ -142,6 +148,8 @@ class OperationRegistry {
             OperationKind.PUBLISH_PLAN -> result is PublishPlanResultWire
             OperationKind.PUBLISH_CREATE, OperationKind.PUBLISH_ADOPT -> result is PublishDestinationResultWire
             OperationKind.DESTINATION_SYNC -> result is DestinationSyncResultWire
+            OperationKind.BULK_REPUBLISH_PLAN -> result is BulkRepublishPlanResultWire
+            OperationKind.BULK_REPUBLISH -> result is BulkRepublishResultWire
         }
 
     private data class OperationRecord(

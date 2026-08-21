@@ -13,6 +13,9 @@ import type {
   OperationResult,
   OperationStatus,
   LibraryRefreshProgress,
+  BulkRepublishItem,
+  BulkRepublishPlan,
+  BulkRepublishProgress,
   Preview,
   Session,
   Song,
@@ -123,7 +126,7 @@ export const parseSession = (value: unknown): Session => {
 
 export const parseAccepted = (value: unknown): OperationAccepted => {
   const v = object(value, 'operation')
-  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind: oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync'] as const, 'operation.kind') }
+  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind: oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.kind') }
 }
 
 const resultType = (value: unknown): OperationResult['type'] => {
@@ -132,7 +135,9 @@ const resultType = (value: unknown): OperationResult['type'] => {
   if (type.includes('PublishPlanResultWire')) return 'publish_plan'
   if (type.includes('PublishDestinationResultWire')) return 'publish_destination'
   if (type.includes('DestinationSyncResultWire')) return 'destination_sync'
-  return oneOf(type, ['library_refresh', 'publish_plan', 'publish_destination', 'destination_sync'] as const, 'operation.result.type')
+  if (type.includes('BulkRepublishPlanResultWire')) return 'bulk_republish_plan'
+  if (type.includes('BulkRepublishResultWire')) return 'bulk_republish'
+  return oneOf(type, ['library_refresh', 'publish_plan', 'publish_destination', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.result.type')
 }
 
 const parseOperationResult = (value: unknown): OperationResult => {
@@ -141,13 +146,15 @@ const parseOperationResult = (value: unknown): OperationResult => {
   if (type === 'library_refresh') return { type, library: parseLibrary(required(v, 'library', 'operation.result')) }
   if (type === 'publish_plan') return { type, plan: parsePublishPlan(required(v, 'plan', 'operation.result')) }
   if (type === 'publish_destination') return { type, destination: parseDestination(required(v, 'destination', 'operation.result')) }
+  if (type === 'bulk_republish_plan') return { type, plan: parseBulkRepublishPlan(required(v, 'plan', 'operation.result')) }
+  if (type === 'bulk_republish') return { type, library: parseLibrary(required(v, 'library', 'operation.result')), items: parseBulkRepublishItems(required(v, 'items', 'operation.result')) }
   const current = required(v, 'current', 'operation.result')
-  return { type, current: current === null ? null : parseCurrent(current).current }
+  return { type, current: current === null ? null : parseCurrent(current) }
 }
 
 export const parseOperationStatus = (value: unknown): OperationStatus => {
   const v = object(value, 'operation')
-  const kind = oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync'] as const, 'operation.kind')
+  const kind = oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.kind')
   const phase = oneOf(required(v, 'phase', 'operation'), ['queued', 'running', 'succeeded', 'failed'] as const, 'operation.phase')
   const resultValue = required(v, 'result', 'operation')
   const errorValue = required(v, 'error', 'operation')
@@ -156,18 +163,45 @@ export const parseOperationStatus = (value: unknown): OperationStatus => {
   if (phase === 'succeeded' && (result === null || error !== null)) fail('operation', 'invalid succeeded status')
   if (phase === 'failed' && (result !== null || error === null)) fail('operation', 'invalid failed status')
   if ((phase === 'queued' || phase === 'running') && (result !== null || error !== null)) fail('operation', 'non-terminal status has result or error')
-  if (result && ((kind === 'library_refresh' && result.type !== 'library_refresh') || (kind === 'publish_plan' && result.type !== 'publish_plan') || ((kind === 'publish_create' || kind === 'publish_adopt') && result.type !== 'publish_destination') || (kind === 'destination_sync' && result.type !== 'destination_sync'))) fail('operation', 'result does not match operation kind')
+  if (result && ((kind === 'library_refresh' && result.type !== 'library_refresh') || (kind === 'publish_plan' && result.type !== 'publish_plan') || ((kind === 'publish_create' || kind === 'publish_adopt') && result.type !== 'publish_destination') || (kind === 'destination_sync' && result.type !== 'destination_sync') || (kind === 'bulk_republish_plan' && result.type !== 'bulk_republish_plan') || (kind === 'bulk_republish' && result.type !== 'bulk_republish'))) fail('operation', 'result does not match operation kind')
   const total = required(v, 'totalSteps', 'operation')
   const totalSteps = total === null ? null : nonNegativeInteger(total, 'operation.totalSteps')
   const completedSteps = nonNegativeInteger(required(v, 'completedSteps', 'operation'), 'operation.completedSteps')
   if (totalSteps !== null && completedSteps > totalSteps) fail('operation.completedSteps', 'cannot exceed totalSteps')
   if (phase === 'succeeded' && totalSteps !== null && completedSteps !== totalSteps) fail('operation.completedSteps', 'success must complete all steps')
   const libraryRefreshProgress = parseLibraryRefreshProgress(v.libraryRefreshProgress)
+  const bulkRepublishProgress = parseBulkRepublishProgress(v.bulkRepublishProgress)
   if (libraryRefreshProgress !== null && kind !== 'library_refresh') fail('operation.libraryRefreshProgress', 'is only valid for library refreshes')
   if (phase === 'succeeded' && libraryRefreshProgress !== null && libraryRefreshProgress.completedSources !== libraryRefreshProgress.totalSources) {
     fail('operation.libraryRefreshProgress.completedSources', 'success must complete all sources')
   }
-  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind, phase, action: string(required(v, 'action', 'operation'), 'operation.action'), completedSteps, totalSteps, result, error, libraryRefreshProgress }
+  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind, phase, action: string(required(v, 'action', 'operation'), 'operation.action'), completedSteps, totalSteps, result, error, libraryRefreshProgress, bulkRepublishProgress }
+}
+
+const parseBulkRepublishItems = (value: unknown): BulkRepublishItem[] => array(value, 'bulk.items').map((raw, index) => {
+  const item = object(raw, `bulk.items[${index}]`)
+  const optionalCount = (key: string) => item[key] === null || item[key] === undefined ? null : nonNegativeInteger(item[key], `bulk.items[${index}].${key}`)
+  return { definitionId: string(required(item, 'definitionId', 'bulk item'), 'bulk.definitionId'), name: string(required(item, 'name', 'bulk item'), 'bulk.name'), phase: oneOf(required(item, 'phase', 'bulk item'), ['queued', 'generating', 'publishing', 'succeeded', 'failed', 'skipped'] as const, 'bulk.phase'), trackCount: optionalCount('trackCount'), completedSteps: optionalCount('completedSteps'), totalSteps: optionalCount('totalSteps'), message: item.message === null || item.message === undefined ? null : string(item.message, 'bulk.message') }
+})
+
+const parseBulkRepublishPlan = (value: unknown): BulkRepublishPlan => {
+  const plan = object(value, 'bulk plan')
+  return { items: array(required(plan, 'items', 'bulk plan'), 'bulk plan.items').map((raw, index) => {
+    const item = object(raw, `bulk plan.items[${index}]`)
+    return { definitionId: string(required(item, 'definitionId', 'bulk plan item'), 'bulk.definitionId'), name: string(required(item, 'name', 'bulk plan item'), 'bulk.name'), action: oneOf(required(item, 'action', 'bulk plan item'), ['sync', 'create', 'adopt', 'choose', 'skipped'] as const, 'bulk.action'), candidates: (item.candidates === undefined ? [] : array(item.candidates, 'bulk.candidates')).map(candidate => parsePublishCandidate(candidate)), message: item.message === null || item.message === undefined ? null : string(item.message, 'bulk.message') }
+  }) }
+}
+
+const parseBulkRepublishProgress = (value: unknown): BulkRepublishProgress | null => {
+  if (value === undefined || value === null) return null
+  const progress = object(value, 'bulk progress')
+  return { completedItems: nonNegativeInteger(required(progress, 'completedItems', 'bulk progress'), 'bulk.completedItems'), totalItems: nonNegativeInteger(required(progress, 'totalItems', 'bulk progress'), 'bulk.totalItems'), items: parseBulkRepublishItems(required(progress, 'items', 'bulk progress')) }
+}
+
+const parsePublishCandidate = (value: unknown) => {
+  const candidate = object(value, 'publish candidate')
+  const itemCount = required(candidate, 'itemCount', 'publish candidate')
+  return { spotifyPlaylistId: string(required(candidate, 'spotifyPlaylistId', 'publish candidate'), 'publishCandidate.spotifyPlaylistId'), name: string(required(candidate, 'name', 'publish candidate'), 'publishCandidate.name'), description: nullableString(required(candidate, 'description', 'publish candidate'), 'publishCandidate.description'), itemCount: itemCount === null ? null : nonNegativeInteger(itemCount, 'publishCandidate.itemCount'), displayUrl: nullableString(required(candidate, 'displayUrl', 'publish candidate'), 'publishCandidate.displayUrl') }
 }
 
 const parseLibraryRefreshProgress = (value: unknown): LibraryRefreshProgress | null => {

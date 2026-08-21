@@ -46,7 +46,7 @@ class PlaylistRecipeGoldenTest {
         val path = Files.createTempDirectory("playlist-recipe-golden-").resolve("cache.db")
         SpotifyStore.open(path).use { store ->
             fixture.loadInto(store)
-            PlaylistQueries.definitions(fixture.currentYear, fixture.minYearForDiscoverWeekly).forEach { definition ->
+            PlaylistQueries.definitions(fixture.currentYear).forEach { definition ->
                 val recipe = definition.toPlaylistRecipe()
                 val result =
                     PlaylistRecipeEngine().generate(
@@ -61,7 +61,7 @@ class PlaylistRecipeGoldenTest {
                 assertEquals(goldenResult.orderedUris, result.selected.map { it.track.uri }, definition.id.name)
             }
         }
-        assertEquals(16, expected.size)
+        assertEquals(15, expected.size)
     }
 }
 

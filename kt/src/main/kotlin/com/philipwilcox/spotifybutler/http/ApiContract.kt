@@ -39,6 +39,12 @@ enum class OperationKind {
     @SerialName("destination_sync")
     DESTINATION_SYNC,
 
+    @SerialName("bulk_republish_plan")
+    BULK_REPUBLISH_PLAN,
+
+    @SerialName("bulk_republish")
+    BULK_REPUBLISH,
+
     ;
 
     companion object {
@@ -47,6 +53,8 @@ enum class OperationKind {
         val publish_create get() = PUBLISH_CREATE
         val publish_adopt get() = PUBLISH_ADOPT
         val destination_sync get() = DESTINATION_SYNC
+        val bulk_republish_plan get() = BULK_REPUBLISH_PLAN
+        val bulk_republish get() = BULK_REPUBLISH
     }
 }
 
@@ -102,6 +110,15 @@ enum class OperationPhase {
     val current: CurrentEnvelopeWire,
 ) : OperationResultWire()
 
+@Serializable data class BulkRepublishPlanResultWire(
+    val plan: BulkRepublishPlanWire,
+) : OperationResultWire()
+
+@Serializable data class BulkRepublishResultWire(
+    val library: LibraryWire,
+    val items: List<BulkRepublishItemWire>,
+) : OperationResultWire()
+
 @Serializable data class OperationStatusWire(
     val operationId: String,
     val kind: OperationKind,
@@ -112,6 +129,7 @@ enum class OperationPhase {
     val result: OperationResultWire? = null,
     val error: OperationFailureWire? = null,
     val libraryRefreshProgress: LibraryRefreshProgressWire? = null,
+    val bulkRepublishProgress: BulkRepublishProgressWire? = null,
 )
 
 @Serializable data class LibraryRefreshProgressWire(
@@ -266,6 +284,44 @@ enum class OperationPhase {
     val spotifyPlaylistId: String? = null,
     val trackIds: List<String>,
     val publishFlowId: String? = null,
+)
+
+@Serializable data class BulkRepublishPlanWire(
+    val items: List<BulkRepublishPlanItemWire>,
+)
+
+@Serializable data class BulkRepublishPlanItemWire(
+    val definitionId: String,
+    val name: String,
+    val action: String,
+    val candidates: List<PublishPlaylistCandidateWire> = emptyList(),
+    val message: String? = null,
+)
+
+@Serializable data class BulkRepublishRequest(
+    val items: List<BulkRepublishChoiceWire>,
+)
+
+@Serializable data class BulkRepublishChoiceWire(
+    val definitionId: String,
+    val action: String,
+    val spotifyPlaylistId: String? = null,
+)
+
+@Serializable data class BulkRepublishProgressWire(
+    val completedItems: Int,
+    val totalItems: Int,
+    val items: List<BulkRepublishItemWire>,
+)
+
+@Serializable data class BulkRepublishItemWire(
+    val definitionId: String,
+    val name: String,
+    val phase: String,
+    val trackCount: Int? = null,
+    val completedSteps: Int? = null,
+    val totalSteps: Int? = null,
+    val message: String? = null,
 )
 
 @Serializable data class SyncPlaylistRequest(

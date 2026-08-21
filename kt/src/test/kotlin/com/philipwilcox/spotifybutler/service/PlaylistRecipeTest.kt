@@ -100,7 +100,7 @@ class PlaylistRecipeTest {
 
     @Test
     fun `built-in defaults enable shuffle except recent liked`() {
-        val definitions = PlaylistQueries.definitions(2026, 2016).associateBy { it.id }
+        val definitions = PlaylistQueries.definitions(2026).associateBy { it.id }
 
         assertFalse(
             definitions.getValue(PlaylistDefinitionId.RECENT_LIKED_100).toPlaylistRecipe().shuffleAfterGeneration,
@@ -145,7 +145,7 @@ class PlaylistRecipeTest {
 
     @Test
     fun `all legacy definitions have a canonical recipe`() {
-        val definitions = PlaylistQueries.definitions(2026, 2016)
+        val definitions = PlaylistQueries.definitions(2026)
 
         definitions.forEach { definition ->
             val recipe = definition.toPlaylistRecipe()

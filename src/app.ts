@@ -13,13 +13,11 @@ import utils from "./utils.js";
 export default class App {
     private library: Library
     private db: Database
-    private minYearForDiscoverWeekly: number
     private dryRun: boolean
 
-    constructor(library: Library, db: Database, minYearForDiscoverWeekly: number, dryRun: boolean = false) {
+    constructor(library: Library, db: Database, dryRun: boolean = false) {
         this.library = library
         this.db = db
-        this.minYearForDiscoverWeekly = minYearForDiscoverWeekly
         this.dryRun = dryRun
     }
 
@@ -409,20 +407,6 @@ export default class App {
             "100 Most Recent Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY added_at DESC LIMIT" +
                 " 100",
             "100 Random Liked Songs": "SELECT track_json FROM saved_tracks ORDER BY RANDOM() LIMIT 100",
-            "Collected Discover Weekly 2016 And On - Butler": `
-                SELECT track_json
-                FROM playlist_tracks
-                WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler'
-                UNION
-                SELECT track_json
-                FROM playlist_tracks
-                WHERE playlist_name = 'Discover Weekly'
-                  AND release_year >= ${this.minYearForDiscoverWeekly}
-                  AND id NOT IN
-                      (SELECT id
-                       FROM playlist_tracks
-                       WHERE playlist_name = 'Collected Discover Weekly 2016 And On - Butler')
-            `,
             "Liked Tracks, Twelve Per Artist": createArtistCountLimitedQuery("SELECT track_json, primary_artist_id" +
                 " FROM" +
                 " saved_tracks", 12),

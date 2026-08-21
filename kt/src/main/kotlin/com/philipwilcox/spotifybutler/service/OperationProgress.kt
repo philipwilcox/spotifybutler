@@ -21,6 +21,7 @@ data class OperationProgressUpdate(
     val completedExternalCalls: Int,
     val totalExternalCalls: Int?,
     val libraryRefresh: LibraryRefreshProgress? = null,
+    val bulkRepublish: Any? = null,
 )
 
 class OperationProgress private constructor(
@@ -39,8 +40,11 @@ class OperationProgress private constructor(
     private var activeSourceCompletedPages: Int? = null
     private var activeSourceTotalPages: Int? = null
 
-    fun actionStarted(action: String) {
-        report(action)
+    fun actionStarted(
+        action: String,
+        bulkRepublish: Any? = null,
+    ) {
+        report(action, bulkRepublish)
     }
 
     fun setExpectedExternalCalls(total: Int) {
@@ -103,7 +107,11 @@ class OperationProgress private constructor(
 
     fun retrying(action: String = "Rate limited; retrying current Spotify action") = actionStarted(action)
 
-    private fun report(action: String) {
+    @Synchronized
+    private fun report(
+        action: String,
+        bulkRepublish: Any? = null,
+    ) {
         progressSink?.invoke(
             OperationProgressUpdate(
                 action,
@@ -117,6 +125,7 @@ class OperationProgress private constructor(
                         activeSourceTotalPages,
                     )
                 },
+                bulkRepublish,
             ),
         )
     }

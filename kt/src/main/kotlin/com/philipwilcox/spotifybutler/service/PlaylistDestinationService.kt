@@ -199,7 +199,7 @@ class PlaylistDestinationService(
         owner: String,
     ) {
         val builtIn =
-            PlaylistQueries.definitions(clock.instant().atZone(java.time.ZoneOffset.UTC).year, 2018).any {
+            PlaylistQueries.definitions(clock.instant().atZone(java.time.ZoneOffset.UTC).year).any {
                 it.id.name ==
                     definitionId
             }

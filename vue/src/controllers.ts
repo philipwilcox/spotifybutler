@@ -285,7 +285,7 @@ export class StudioController {
     this.state.error = null
     try {
       const planResult = await this.tracked(this.api.planPublish(definitionId))
-      const plan = (planResult as PublishPlan)
+      const plan = (planResult as unknown as PublishPlan)
       if (this.isCurrent(serial)) {
         this.state.publishPlan = plan
         return plan
@@ -305,7 +305,7 @@ export class StudioController {
     this.state.error = null
     try {
       const destinationResult = await this.tracked(this.api.publishDestination(definition.definitionId, action, this.state.selection.orderedIds, spotifyPlaylistId, this.state.publishPlan?.publishFlowId))
-      const destination = destinationResult as Definition['destination']
+      const destination = destinationResult as unknown as Definition['destination']
       if (!this.isCurrent(serial)) return false
       this.state.definition = { ...definition, destination }
       this.state.current = null
@@ -333,7 +333,7 @@ export class StudioController {
     this.state.conflict = false
     try {
       const currentResult = await this.tracked(this.api.syncDestination(definition.definitionId, this.state.selection.orderedIds, expectedSnapshotId))
-      const current = currentResult as CurrentDestination | null
+      const current = currentResult as unknown as CurrentDestination | null
       if (!this.isCurrent(serial)) return false
       this.state.current = current
       this.updateDestinationFromCurrent(current)
@@ -376,7 +376,7 @@ export class StudioController {
   private async tracked<T>(accepted: Promise<T>): Promise<T> {
     const value = await accepted
     if (!this.progress || !value || typeof value !== 'object' || !('operationId' in value)) return value
-    const result = await this.progress.track(value as { operationId: string; kind: never })
+    const result = await this.progress.track(value as unknown as { operationId: string; kind: never })
     if ('plan' in result) return result.plan as T
     if ('destination' in result) return result.destination as T
     if ('current' in result) return result.current as T

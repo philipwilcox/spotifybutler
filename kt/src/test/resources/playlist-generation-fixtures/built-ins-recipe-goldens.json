@@ -15,11 +15,6 @@
       "orderedUris": ["spotify:track:a09", "spotify:track:a04", "spotify:track:b01", "spotify:track:a01", "spotify:track:a11", "spotify:track:a03", "spotify:track:n01", "spotify:track:a07", "spotify:track:a06", "spotify:track:a12", "spotify:track:a02", "spotify:track:a08", "spotify:track:a13", "spotify:track:a10", "spotify:track:b02", "spotify:track:a05"]
     },
     {
-      "definitionId": "COLLECTED_DISCOVER_WEEKLY",
-      "recipeRevision": "f296f9d5d5dc2d02a316c205560ab3b211824015d5378ef424da8f3e5ac57a27",
-      "orderedUris": ["spotify:track:dw-new", "spotify:track:dw-collected"]
-    },
-    {
       "definitionId": "LIKED_PER_ARTIST",
       "recipeRevision": "f91eaf1a18eef55567afe46ac2e655d1bf636d01018447b12e70fd2ad9a4efd7",
       "orderedUris": ["spotify:track:a11", "spotify:track:a02", "spotify:track:a07", "spotify:track:a01", "spotify:track:b01", "spotify:track:a08", "spotify:track:a06", "spotify:track:b02", "spotify:track:n01", "spotify:track:a04", "spotify:track:a05", "spotify:track:a09", "spotify:track:a12", "spotify:track:a13", "spotify:track:a03"]

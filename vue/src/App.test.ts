@@ -14,6 +14,7 @@ const library = {
 const preview = { definitionId: definition.definitionId, status: 'ready', generatedTrackIds: ['known-track', 'missing-track'], generatedTrackCount: 2, seed: 'seed', recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null }
 const knownSong = { id: 'known-track', name: 'Known song', href: 'https://spotify.test/known-track', uri: 'spotify:track:known-track', album: { id: 'known-album', name: 'Known album', href: null, uri: null, releaseDate: null, imageUrl: 'https://example.invalid/known-art' }, artists: [{ id: null, name: 'Known artist', href: null, uri: null }], durationMs: 1000, explicit: false, available: true }
 const publishPlan = { definitionId: definition.definitionId, playlistName: definition.name, action: 'create', candidates: [], message: null, publishFlowId: 'flow-1' }
+const publishCandidate = { spotifyPlaylistId: 'matching-playlist', name: definition.name, description: null, itemCount: 12, displayUrl: null }
 const destination = { definitionId: definition.definitionId, spotifyPlaylistId: 'managed', createdAt: '2026-01-01T00:00:00Z', lastSyncedAt: '2026-01-01T00:00:00Z', lastSeenSnapshotId: 'snap-1', canSync: true, managementStatus: 'butler_created' }
 
 const operationSucceeded = (operationId: string, kind: string, result: unknown, completedSteps = 0, totalSteps: number | null = null) => ({
@@ -46,6 +47,8 @@ function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number 
     if (path === '/api/v1/session') return response(options.sessionStatus === undefined ? { userId: 'operator', csrfToken: 'csrf', expiresAt: '2026-01-01T00:00:00Z' } : { code: 'unauthorized', message: 'Please connect Spotify', requestId: 'req-1', details: {} }, options.sessionStatus ?? 200)
     if (path === '/api/v1/library') return response(options.libraryBody ?? library, options.libraryBody instanceof Error ? 500 : 200)
     if (path.includes('/preview')) return response(preview)
+    if (path.includes('/bulk-republish-plan')) return response({ operationId: 'op-bulk-plan', kind: 'bulk_republish_plan' })
+    if (path.endsWith('/bulk-republish')) return response({ operationId: 'op-bulk', kind: 'bulk_republish' })
     if (path.includes('/publish-plan')) return response({ operationId: 'op-plan', kind: 'publish_plan' })
     if (path.includes('/publish')) return response({ operationId: 'op-publish', kind: 'publish_create' })
     if (path.includes('/syncs')) return response({ operationId: 'op-sync', kind: 'destination_sync' })
@@ -114,6 +117,109 @@ describe('App', () => {
     expect(sidebarMissions).toHaveLength(2)
     expect(sidebarMissions.find(mission => mission.text().includes(definition.name))?.classes()).toContain('definition-mission')
     expect(sidebarMissions.find(mission => mission.text().includes(playlist.name))?.classes()).not.toContain('definition-mission')
+  })
+
+  it('places the bulk republish command below the restored Defined Playlists header', async () => {
+    const fetcher = frontendFetch()
+    const operations = installOperationSockets()
+    vi.stubGlobal('fetch', fetcher)
+    Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const sidebar = wrapper.find('.sidebar')
+    const header = sidebar.find('.section-title')
+    const command = sidebar.find('.bulk-start')
+    expect(header.text()).toBe('DEFINED PLAYLISTS//1')
+    expect(header.find('button').exists()).toBe(false)
+    expect(command.element.previousElementSibling).toBe(header.element)
+    expect(command.text()).toContain('PUBLISH ALL GENERATED PLAYLISTS')
+    expect(command.classes()).toEqual(expect.arrayContaining(['button', 'quiet']))
+
+    await command.trigger('click')
+    await flushPromises()
+    expect(fetcher.mock.calls.some(([path]) => String(path).endsWith('/bulk-republish-plan'))).toBe(true)
+    operations.succeed('op-bulk-plan', 'bulk_republish_plan', {
+      type: 'bulk_republish_plan',
+      plan: { items: [{ definitionId: definition.definitionId, name: definition.name, action: 'create', candidates: [], message: null }] },
+    })
+    await flushPromises()
+    expect(wrapper.find('[aria-labelledby="bulk-title"]').exists()).toBe(true)
+  })
+
+  it('uses compact bulk actions and skips definitions with multiple matches', async () => {
+    const fetcher = frontendFetch()
+    const operations = installOperationSockets()
+    vi.stubGlobal('fetch', fetcher)
+    Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.find('.bulk-start').trigger('click')
+    await flushPromises()
+    operations.succeed('op-bulk-plan', 'bulk_republish_plan', {
+      type: 'bulk_republish_plan',
+      plan: {
+        items: [
+          { definitionId: 'sync', name: 'Sync playlist', action: 'sync', candidates: [], message: null },
+          { definitionId: 'create', name: 'Create playlist', action: 'create', candidates: [], message: null },
+          { definitionId: 'adopt', name: 'Adopt playlist', action: 'adopt', candidates: [publishCandidate], message: null },
+          { definitionId: 'choose', name: 'Ambiguous playlist', action: 'choose', candidates: [publishCandidate, { ...publishCandidate, spotifyPlaylistId: 'second-match' }], message: null },
+          { definitionId: 'skipped', name: 'Blocked playlist', action: 'skipped', candidates: [], message: 'Matching destination is not owned.' },
+        ],
+      },
+    })
+    await flushPromises()
+
+    const dialog = wrapper.find('[aria-labelledby="bulk-title"]')
+    expect(dialog.find('#bulk-title').text()).toBe('Republish 3 definitions?')
+    expect(dialog.findAll('.bulk-plan-row')).toHaveLength(5)
+    expect(dialog.findAll('select')).toHaveLength(0)
+    expect(dialog.text()).toContain('ADOPT + OVERWRITE · MATCH WITH SAME NAME')
+    expect(dialog.text()).toContain('CANNOT SYNC — MULTIPLE MATCHES')
+    expect(dialog.text()).toContain('SKIPPED — Matching destination is not owned.')
+
+    await dialog.trigger('submit')
+    await flushPromises()
+    const bulkCall = fetcher.mock.calls.find(([path]) => String(path).endsWith('/bulk-republish'))
+    expect(bulkCall).toBeDefined()
+    expect(JSON.parse((bulkCall?.[1] as RequestInit).body as string)).toEqual({
+      items: [
+        { definitionId: 'sync', action: 'sync' },
+        { definitionId: 'create', action: 'create' },
+        { definitionId: 'adopt', action: 'adopt', spotifyPlaylistId: 'matching-playlist' },
+      ],
+    })
+    const completedRows = [
+      { definitionId: 'sync', name: 'Sync playlist', phase: 'succeeded', trackCount: 12, message: null },
+      { definitionId: 'create', name: 'Create playlist', phase: 'succeeded', trackCount: 8, message: null },
+      { definitionId: 'adopt', name: 'Adopt playlist', phase: 'succeeded', trackCount: 10, message: null },
+    ]
+    operations.succeed('op-bulk', 'bulk_republish', { type: 'bulk_republish', library, items: completedRows }, 3, 3)
+    await flushPromises()
+
+    const status = wrapper.find('.bulk-status')
+    const dismiss = status.find('[aria-label="Dismiss library republish status"]')
+    expect(status.findAll('.bulk-row')).toHaveLength(3)
+    expect(dismiss.element.parentElement).toBe(status.find('.section-title').element)
+
+    await dismiss.trigger('click')
+    expect(wrapper.find('.bulk-status').exists()).toBe(false)
+
+    await wrapper.find('.bulk-start').trigger('click')
+    await flushPromises()
+    operations.succeed('op-bulk-plan', 'bulk_republish_plan', {
+      type: 'bulk_republish_plan',
+      plan: { items: [{ definitionId: 'sync', name: 'Sync playlist', action: 'sync', candidates: [], message: null }] },
+    })
+    await flushPromises()
+    await wrapper.find('[aria-labelledby="bulk-title"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.bulk-status').exists()).toBe(true)
+    operations.succeed('op-bulk', 'bulk_republish', { type: 'bulk_republish', library, items: completedRows.slice(0, 1) }, 1, 1)
+    await flushPromises()
+
+    wrapper.unmount()
   })
 
   it('shows the authentication-required state and visible library errors', async () => {

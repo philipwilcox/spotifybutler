@@ -19,6 +19,7 @@ import com.philipwilcox.spotifybutler.service.CacheSourceKey
 import com.philipwilcox.spotifybutler.service.DestinationConflictException
 import com.philipwilcox.spotifybutler.service.LibraryViewService
 import com.philipwilcox.spotifybutler.service.MissingDestinationException
+import com.philipwilcox.spotifybutler.service.OperationProgress
 import com.philipwilcox.spotifybutler.service.OwnerMismatchException
 import com.philipwilcox.spotifybutler.service.PlaylistDefinitionView
 import com.philipwilcox.spotifybutler.service.PlaylistDestinationGateway
@@ -37,6 +38,8 @@ import java.time.Clock
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 data class PlaylistRemoteState(
     val trackIds: List<String>,
@@ -319,6 +322,10 @@ class ApiApplication(
                 request.method == "POST" -> refresh(request, session, requestId)
             parts == listOf("api", "v1", "playlists") && request.method == "GET" -> definitions(session)
             parts == listOf("api", "v1", "playlists") && request.method == "POST" -> createDefinition(request, session)
+            parts == listOf("api", "v1", "playlists", "bulk-republish-plan") && request.method == "POST" ->
+                bulkRepublishPlan(request, session, requestId)
+            parts == listOf("api", "v1", "playlists", "bulk-republish") && request.method == "POST" ->
+                bulkRepublish(request, session, requestId)
             parts.size == 4 &&
                 parts.take(
                     3,
@@ -583,6 +590,222 @@ class ApiApplication(
                 PublishPlanResultWire(plan.toWire())
             }
         }
+    }
+
+    private fun bulkRepublishPlan(
+        request: ApiRequest,
+        session: ButlerSession,
+        requestId: String,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        return accepted(session, OperationKind.BULK_REPUBLISH_PLAN, requestId, totalSteps = null) {
+            refreshLocks.withLock(session.ownerSpotifyUserId) {
+                cacheService.refreshSource(session.ownerSpotifyUserId, session.accessToken, CacheSourceKey.PLAYLISTS)
+                val items =
+                    previewService
+                        .definitions(session.ownerSpotifyUserId)
+                        .filter(PlaylistDefinitionView::enabled)
+                        .map { definition -> bulkPlanItem(definition, session.ownerSpotifyUserId) }
+                BulkRepublishPlanResultWire(BulkRepublishPlanWire(items))
+            }
+        }
+    }
+
+    private fun bulkRepublish(
+        request: ApiRequest,
+        session: ButlerSession,
+        requestId: String,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val input = body<BulkRepublishRequest>(request)
+        val definitions = previewService.definitions(session.ownerSpotifyUserId).filter(PlaylistDefinitionView::enabled)
+        val definitionsById = definitions.associateBy(PlaylistDefinitionView::definitionId)
+        require(input.items.isNotEmpty()) { "items must contain at least one enabled definition" }
+        require(
+            input.items
+                .map(BulkRepublishChoiceWire::definitionId)
+                .distinct()
+                .size == input.items.size,
+        ) {
+            "items must not contain duplicate definitions"
+        }
+        val jobs =
+            input.items.map { choice ->
+                val definition = definitionsById[choice.definitionId] ?: error("Definition is not enabled")
+                BulkRepublishJob(definition, choice)
+            }
+        return accepted(session, OperationKind.BULK_REPUBLISH, requestId, totalSteps = jobs.size) {
+            executeBulkRepublish(jobs, session)
+        }
+    }
+
+    private fun bulkPlanItem(
+        definition: PlaylistDefinitionView,
+        ownerSpotifyUserId: String,
+    ): BulkRepublishPlanItemWire {
+        if (destinationService.current(definition.definitionId, ownerSpotifyUserId) != null) {
+            return BulkRepublishPlanItemWire(definition.definitionId, definition.name, "sync")
+        }
+        val plan = destinationService.planPublish(definition.definitionId, ownerSpotifyUserId, definition.name)
+        return when (plan.action) {
+            com.philipwilcox.spotifybutler.service.PublishPlanAction.CREATE ->
+                BulkRepublishPlanItemWire(definition.definitionId, definition.name, "create")
+            com.philipwilcox.spotifybutler.service.PublishPlanAction.ADOPT ->
+                BulkRepublishPlanItemWire(
+                    definition.definitionId,
+                    definition.name,
+                    "adopt",
+                    plan.candidates.map(::publishCandidateWire),
+                )
+            com.philipwilcox.spotifybutler.service.PublishPlanAction.CHOOSE ->
+                BulkRepublishPlanItemWire(
+                    definition.definitionId,
+                    definition.name,
+                    "choose",
+                    plan.candidates.map(::publishCandidateWire),
+                )
+            com.philipwilcox.spotifybutler.service.PublishPlanAction.BLOCKED ->
+                BulkRepublishPlanItemWire(definition.definitionId, definition.name, "skipped", message = plan.message)
+        }
+    }
+
+    private fun executeBulkRepublish(
+        jobs: List<BulkRepublishJob>,
+        session: ButlerSession,
+    ): BulkRepublishResultWire {
+        val rows =
+            jobs
+                .associate { job ->
+                    job.definition.definitionId to
+                        BulkRepublishItemWire(job.definition.definitionId, job.definition.name, "queued")
+                }.toMutableMap()
+        val lock = Any()
+        // The parent operation owns the thread-local progress context; capture it for worker threads.
+        val progress = OperationProgress.current()
+
+        fun report(
+            definitionId: String,
+            row: BulkRepublishItemWire,
+        ) {
+            synchronized(lock) {
+                rows[definitionId] = row
+                val items = jobs.map { rows.getValue(it.definition.definitionId) }
+                progress?.actionStarted(
+                    "Republishing playlists",
+                    BulkRepublishProgressWire(
+                        items.count { it.phase in setOf("succeeded", "failed") },
+                        items.size,
+                        items,
+                    ),
+                )
+            }
+        }
+
+        fun worker(job: BulkRepublishJob) {
+            val definition = job.definition
+            report(
+                definition.definitionId,
+                BulkRepublishItemWire(definition.definitionId, definition.name, "generating"),
+            )
+            try {
+                val preview = previewService.preview(definition.definitionId, session.ownerSpotifyUserId)
+                if (preview.status.name == "UNAVAILABLE") {
+                    report(
+                        definition.definitionId,
+                        BulkRepublishItemWire(
+                            definition.definitionId,
+                            definition.name,
+                            "failed",
+                            message = preview.unavailableReason,
+                        ),
+                    )
+                    return
+                }
+                val trackIds = preview.generatedTrackIds
+                val totalSteps = ((trackIds.size + 99) / 100).coerceAtLeast(1)
+                report(
+                    definition.definitionId,
+                    BulkRepublishItemWire(
+                        definition.definitionId,
+                        definition.name,
+                        "publishing",
+                        trackIds.size,
+                        0,
+                        totalSteps,
+                    ),
+                )
+                when (job.choice.action.lowercase()) {
+                    "sync" ->
+                        destinationService.sync(
+                            definition.definitionId,
+                            session.ownerSpotifyUserId,
+                            session.accessToken,
+                            trackIds,
+                        )
+                    "create" ->
+                        destinationService.publish(
+                            definition.definitionId,
+                            session.ownerSpotifyUserId,
+                            session.accessToken,
+                            definition.name,
+                            PublishAction.CREATE,
+                            null,
+                            trackIds,
+                        )
+                    "adopt" ->
+                        destinationService.publish(
+                            definition.definitionId,
+                            session.ownerSpotifyUserId,
+                            session.accessToken,
+                            definition.name,
+                            PublishAction.ADOPT,
+                            job.choice.spotifyPlaylistId,
+                            trackIds,
+                        )
+                    else -> error("Bulk republish action must be sync, create, or adopt")
+                }
+                report(
+                    definition.definitionId,
+                    BulkRepublishItemWire(
+                        definition.definitionId,
+                        definition.name,
+                        "succeeded",
+                        trackIds.size,
+                        totalSteps,
+                        totalSteps,
+                    ),
+                )
+            } catch (exception: Exception) {
+                logger.warn(exception) { "Bulk republish item failed: definitionId=${definition.definitionId}" }
+                report(
+                    definition.definitionId,
+                    BulkRepublishItemWire(
+                        definition.definitionId,
+                        definition.name,
+                        "failed",
+                        message = "Could not republish. Retry this playlist.",
+                    ),
+                )
+            }
+        }
+        val executor = Executors.newFixedThreadPool(BULK_REPUBLISH_CONCURRENCY)
+        try {
+            executor.invokeAll(jobs.map { job -> Callable { worker(job) } }).forEach { it.get() }
+        } finally {
+            executor.shutdown()
+        }
+        val resultItems = jobs.map { rows.getValue(it.definition.definitionId) }
+        progress?.actionStarted(
+            "Completed",
+            BulkRepublishProgressWire(
+                resultItems.count {
+                    it.phase in setOf("succeeded", "failed")
+                },
+                resultItems.size,
+                resultItems,
+            ),
+        )
+        return BulkRepublishResultWire(libraryWire(session), resultItems)
     }
 
     private fun publish(
@@ -1126,9 +1349,24 @@ private fun com.philipwilcox.spotifybutler.service.PublishPlan.toWire() =
         publishFlowId ?: error("Publish plan flow ID is required at the API boundary"),
     )
 
+private fun publishCandidateWire(candidate: com.philipwilcox.spotifybutler.service.PublishPlaylistCandidate) =
+    PublishPlaylistCandidateWire(
+        candidate.spotifyPlaylistId,
+        candidate.name,
+        candidate.description,
+        candidate.itemCount,
+        candidate.displayUrl,
+    )
+
+private data class BulkRepublishJob(
+    val definition: PlaylistDefinitionView,
+    val choice: BulkRepublishChoiceWire,
+)
+
 private fun ApiResponse.withPublishFlowId(flowId: String) = copy(headers = headers + (PUBLISH_FLOW_ID_HEADER to flowId))
 
 private const val PUBLISH_FLOW_ID_HEADER = "X-Spotify-Butler-Publish-Flow-Id"
+private const val BULK_REPUBLISH_CONCURRENCY = 3
 
 private fun PlaylistPreview.toWire() =
     PreviewWire(

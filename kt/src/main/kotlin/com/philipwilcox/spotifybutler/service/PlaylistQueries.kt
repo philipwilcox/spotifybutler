@@ -3,7 +3,6 @@ package com.philipwilcox.spotifybutler.service
 enum class PlaylistDefinitionId {
     RECENT_LIKED_100,
     RANDOM_LIKED_100,
-    COLLECTED_DISCOVER_WEEKLY,
     LIKED_PER_ARTIST,
     THREE_SAVED_SONGS_PER_ARTIST,
     ROLLING_RECENT_20,
@@ -26,12 +25,6 @@ sealed interface PlaylistQuery {
 
     data class RandomLiked(
         val limit: Long,
-    ) : PlaylistQuery
-
-    data class CollectedDiscoverWeekly(
-        val collectedName: String,
-        val sourceName: String,
-        val minReleaseYear: Long,
     ) : PlaylistQuery
 
     data class SavedPerArtist(
@@ -89,19 +82,11 @@ object PlaylistQueries {
     const val RECENT_LIKED_LIMIT = 100L
     const val RANDOM_LIKED_LIMIT = 100L
     const val RECENT_ARTIST_LIMIT = 8L
-    const val COLLECTED_DISCOVER_WEEKLY_NAME = "Collected Discover Weekly 2016 And On - Butler"
-    const val DISCOVER_WEEKLY_NAME = "Discover Weekly"
 
-    fun definitions(
-        currentYear: Int,
-        minYearForDiscoverWeekly: Int,
-    ): List<PlaylistDefinition> {
+    fun definitions(currentYear: Int): List<PlaylistDefinition> {
         require(
             currentYear in MIN_SUPPORTED_YEAR..MAX_SUPPORTED_YEAR,
         ) { "currentYear must be a plausible calendar year" }
-        require(minYearForDiscoverWeekly in MIN_SUPPORTED_YEAR..currentYear) {
-            "minYearForDiscoverWeekly must be between 1900 and currentYear"
-        }
         val recentStart = currentYear - RECENT_YEAR_COUNT
         val priorStart = currentYear - PRIOR_YEAR_COUNT
         val priorEnd = currentYear - PRIOR_YEAR_OFFSET
@@ -116,15 +101,6 @@ object PlaylistQueries {
                 PlaylistDefinitionId.RANDOM_LIKED_100,
                 "100 Random Liked Songs",
                 PlaylistQuery.RandomLiked(RANDOM_LIKED_LIMIT),
-            ),
-            PlaylistDefinition(
-                PlaylistDefinitionId.COLLECTED_DISCOVER_WEEKLY,
-                COLLECTED_DISCOVER_WEEKLY_NAME,
-                PlaylistQuery.CollectedDiscoverWeekly(
-                    COLLECTED_DISCOVER_WEEKLY_NAME,
-                    DISCOVER_WEEKLY_NAME,
-                    minYearForDiscoverWeekly.toLong(),
-                ),
             ),
             PlaylistDefinition(
                 PlaylistDefinitionId.LIKED_PER_ARTIST,

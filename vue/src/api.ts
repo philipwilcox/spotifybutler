@@ -1,4 +1,4 @@
-import type { ApiErrorDto, CurrentDestination, Definition, Library, LibraryPlaylistDetail, OperationAccepted, Preview, PublishPlan, Session, Song } from './types'
+import type { ApiErrorDto, BulkRepublishChoice, CurrentDestination, Definition, Library, LibraryPlaylistDetail, OperationAccepted, Preview, PublishPlan, Session, Song } from './types'
 import { parseAccepted, parseCurrent, parseDefinition, parseDefinitionList, parseDestination, parseError, parseLibrary, parseLibraryPlaylistDetail, parsePreview, parsePublishPlan, parseSession, parseSongs } from './validation'
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -25,6 +25,8 @@ export interface ButlerApi {
   publishDestination(id: string, action: 'create' | 'adopt', trackIds: readonly string[], spotifyPlaylistId?: string, publishFlowId?: string): Promise<OperationAccepted>
   getCurrentDestination(id: string): Promise<CurrentDestination | null>
   syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<OperationAccepted>
+  planBulkRepublish?(): Promise<OperationAccepted>
+  bulkRepublish?(items: readonly BulkRepublishChoice[]): Promise<OperationAccepted>
   getSongs(ids: readonly string[]): Promise<Song[]>
 }
 
@@ -67,6 +69,9 @@ export class ButlerApiClient implements ButlerApi {
   async getCurrentDestination(id: string): Promise<CurrentDestination | null> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/current`, 'GET', undefined, parseCurrent) }
 
   async syncDestination(id: string, trackIds: readonly string[], expectedDestinationSnapshotId?: string | null): Promise<OperationAccepted> { return this.request(`/api/v1/playlists/${encodeURIComponent(id)}/syncs`, 'POST', { trackIds, expectedDestinationSnapshotId: expectedDestinationSnapshotId ?? null }, parseAccepted) }
+
+  async planBulkRepublish(): Promise<OperationAccepted> { return this.request('/api/v1/playlists/bulk-republish-plan', 'POST', {}, parseAccepted) }
+  async bulkRepublish(items: readonly BulkRepublishChoice[]): Promise<OperationAccepted> { return this.request('/api/v1/playlists/bulk-republish', 'POST', { items }, parseAccepted) }
 
   async getSongs(ids: readonly string[]): Promise<Song[]> {
     const requestedIds = [...new Set(ids.map(id => id.trim()).filter(id => id.length > 0))]
