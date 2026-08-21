@@ -39,6 +39,9 @@ enum class OperationKind {
     @SerialName("destination_sync")
     DESTINATION_SYNC,
 
+    @SerialName("library_playlist_publish")
+    LIBRARY_PLAYLIST_PUBLISH,
+
     @SerialName("bulk_republish_plan")
     BULK_REPUBLISH_PLAN,
 
@@ -53,6 +56,7 @@ enum class OperationKind {
         val publish_create get() = PUBLISH_CREATE
         val publish_adopt get() = PUBLISH_ADOPT
         val destination_sync get() = DESTINATION_SYNC
+        val library_playlist_publish get() = LIBRARY_PLAYLIST_PUBLISH
         val bulk_republish_plan get() = BULK_REPUBLISH_PLAN
         val bulk_republish get() = BULK_REPUBLISH
     }
@@ -108,6 +112,10 @@ enum class OperationPhase {
 
 @Serializable data class DestinationSyncResultWire(
     val current: CurrentEnvelopeWire,
+) : OperationResultWire()
+
+@Serializable data class LibraryPlaylistPublishResultWire(
+    val playlist: LibraryPlaylistDetailWire,
 ) : OperationResultWire()
 
 @Serializable data class BulkRepublishPlanResultWire(
@@ -220,6 +228,7 @@ enum class OperationPhase {
     val contentStatus: String,
     val sourceRevision: String?,
     val lastSyncedAt: String?,
+    val editable: Boolean,
 )
 
 @Serializable data class LibraryPlaylistDetailWire(
@@ -327,6 +336,10 @@ enum class OperationPhase {
 @Serializable data class SyncPlaylistRequest(
     val trackIds: List<String>,
     val expectedDestinationSnapshotId: String? = null,
+)
+
+@Serializable data class PublishLibraryPlaylistRequest(
+    val trackIds: List<String>,
 )
 
 @Serializable data class BulkSongsRequest(

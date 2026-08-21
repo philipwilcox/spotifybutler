@@ -17,6 +17,7 @@ export interface ButlerApi {
   getLibrary(): Promise<Library>
   refreshLibrary(sourceKeys?: readonly string[]): Promise<OperationAccepted>
   getLibraryPlaylist(id: string): Promise<LibraryPlaylistDetail>
+  publishLibraryPlaylist(id: string, trackIds: readonly string[]): Promise<OperationAccepted>
   listDefinitions(): Promise<Definition[]>
   getDefinition(id: string): Promise<Definition>
   previewDefinition(id: string, seed?: string): Promise<Preview>
@@ -49,6 +50,7 @@ export class ButlerApiClient implements ButlerApi {
     return this.request('/api/v1/library/refresh', 'POST', sourceKeys === undefined ? undefined : { sourceKeys }, parseAccepted)
   }
   async getLibraryPlaylist(id: string): Promise<LibraryPlaylistDetail> { return this.request(`/api/v1/library/playlists/${encodeURIComponent(id)}`, 'GET', undefined, parseLibraryPlaylistDetail) }
+  async publishLibraryPlaylist(id: string, trackIds: readonly string[]): Promise<OperationAccepted> { return this.request(`/api/v1/library/playlists/${encodeURIComponent(id)}/publish`, 'POST', { trackIds }, parseAccepted) }
 
   async listDefinitions(): Promise<Definition[]> { return this.request('/api/v1/playlists', 'GET', undefined, parseDefinitionList) }
 

@@ -75,6 +75,18 @@ paths:
       responses:
         '200': {description: Cached library playlist, content: {application/json: {schema: {$ref: '#/components/schemas/LibraryPlaylistDetail'}}}}
       default: {$ref: '#/components/responses/ErrorResponse'}
+  /api/v1/library/playlists/{playlistId}/publish:
+    parameters: [{$ref: '#/components/parameters/PlaylistId'}]
+    post:
+      operationId: publishLibraryPlaylist
+      security: [{butlerSession: []}]
+      parameters: [{$ref: '#/components/parameters/CsrfToken'}, {$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PublishLibraryPlaylistRequest'}}}
+      responses:
+        '202': {description: Library playlist publish accepted, content: {application/json: {schema: {$ref: '#/components/schemas/OperationAccepted'}}}}
+      default: {$ref: '#/components/responses/ErrorResponse'}
   /api/v1/playlists:
     get:
       operationId: listDefinitions
@@ -218,7 +230,7 @@ components:
       description: Sanitized error
       content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   schemas:
-    OperationAccepted: {type: object, required: [operationId, kind], properties: {operationId: {type: string}, kind: {type: string, enum: [library_refresh, publish_plan, publish_create, publish_adopt, destination_sync]}}}
+    OperationAccepted: {type: object, required: [operationId, kind], properties: {operationId: {type: string}, kind: {type: string, enum: [library_refresh, library_playlist_publish, publish_plan, publish_create, publish_adopt, destination_sync, bulk_republish_plan, bulk_republish]}}}
     OperationFailure: {type: object, required: [code, message], properties: {code: {type: string}, message: {type: string}}}
     OperationStatus: {type: object, required: [operationId, kind, phase, action, completedSteps, totalSteps, result, error], properties: {operationId: {type: string}, kind: {type: string}, phase: {type: string, enum: [queued, running, succeeded, failed]}, action: {type: string}, completedSteps: {type: integer, minimum: 0}, totalSteps: {type: [integer, 'null'], minimum: 0, description: Null until known; a running operation may later report its discovered total.}, result: {type: [object, 'null']}, error: {$ref: '#/components/schemas/OperationFailure'}, libraryRefreshProgress: {oneOf: [{$ref: '#/components/schemas/LibraryRefreshProgress'}, {type: 'null'}]}}}
     LibraryRefreshProgress: {type: object, required: [completedSources, totalSources], properties: {completedSources: {type: integer, minimum: 0}, totalSources: {type: integer, minimum: 1}, activeSourceCompletedPages: {type: [integer, 'null'], minimum: 0}, activeSourceTotalPages: {type: [integer, 'null'], minimum: 1}}}
@@ -230,7 +242,7 @@ components:
     Definition: {type: object, required: [definitionId, name, description, kind, editable, enabled, recipe, sourceDependencies, destination], properties: {definitionId: {type: string}, name: {type: string}, description: {type: string}, kind: {type: string, enum: [built_in, owner]}, editable: {type: boolean}, enabled: {type: boolean}, recipe: {$ref: '#/components/schemas/PlaylistRecipe'}, sourceDependencies: {type: array, items: {$ref: '#/components/schemas/SourceDependency'}}, destination: {$ref: '#/components/schemas/Destination'}}}
     DefinitionList: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Definition'}}}}
     Destination: {type: object, required: [definitionId, spotifyPlaylistId, createdAt, lastSyncedAt, lastSeenSnapshotId, canSync, managementStatus], properties: {definitionId: {type: string}, spotifyPlaylistId: {type: string}, createdAt: {type: string, format: date-time}, lastSyncedAt: {type: [string, 'null'], format: date-time}, lastSeenSnapshotId: {type: [string, 'null']}, canSync: {type: boolean}, managementStatus: {type: string, enum: [butler_created]}}}
-    LibraryPlaylist: {type: object, required: [spotifyPlaylistId, name, description, href, uri, displayUrl, declaredItemCount, cachedPlayableTrackCount, contentSourceKey, contentStatus, sourceRevision, lastSyncedAt], properties: {spotifyPlaylistId: {type: string}, name: {type: string}, description: {type: [string, 'null']}, href: {type: string}, uri: {type: string}, displayUrl: {type: [string, 'null']}, declaredItemCount: {type: [integer, 'null']}, cachedPlayableTrackCount: {type: integer}, contentSourceKey: {type: string}, contentStatus: {type: string, enum: [empty, ready, refreshing, stale, error]}, sourceRevision: {type: [string, 'null']}, lastSyncedAt: {type: [string, 'null'], format: date-time}}}
+    LibraryPlaylist: {type: object, required: [spotifyPlaylistId, name, description, href, uri, displayUrl, declaredItemCount, cachedPlayableTrackCount, contentSourceKey, contentStatus, sourceRevision, lastSyncedAt, editable], properties: {spotifyPlaylistId: {type: string}, name: {type: string}, description: {type: [string, 'null']}, href: {type: string}, uri: {type: string}, displayUrl: {type: [string, 'null']}, declaredItemCount: {type: [integer, 'null']}, cachedPlayableTrackCount: {type: integer}, contentSourceKey: {type: string}, contentStatus: {type: string, enum: [empty, ready, refreshing, stale, error]}, sourceRevision: {type: [string, 'null']}, lastSyncedAt: {type: [string, 'null'], format: date-time}, editable: {type: boolean}}}
     LibraryPlaylistDetail: {type: object, required: [summary, trackIds], properties: {summary: {$ref: '#/components/schemas/LibraryPlaylist'}, trackIds: {type: array, items: {type: string}}}}
     Library: {type: object, required: [ownerSpotifyUserId, status, sources, definitions, playlists], properties: {ownerSpotifyUserId: {type: string}, status: {type: string, enum: [empty, ready, partial, refreshing, stale]}, sources: {type: array, items: {$ref: '#/components/schemas/SourceSnapshot'}}, definitions: {type: array, items: {$ref: '#/components/schemas/Definition'}}, playlists: {type: array, items: {$ref: '#/components/schemas/LibraryPlaylist'}}}}
     Preview: {type: object, required: [definitionId, status, generatedTrackIds, generatedTrackCount, seed, recipeRevision, algorithmVersion, sourceDependencies, generatedAt, unavailableReason], properties: {definitionId: {type: string}, status: {type: string, enum: [ready, empty, partial, unavailable]}, generatedTrackIds: {type: array, items: {type: string}}, generatedTrackCount: {type: integer}, seed: {type: string}, recipeRevision: {type: string}, algorithmVersion: {type: string}, sourceDependencies: {type: array, items: {$ref: '#/components/schemas/SourceDependency'}}, generatedAt: {type: string, format: date-time}, unavailableReason: {type: [string, 'null']}}}
@@ -242,6 +254,8 @@ components:
     PublishPlaylistCandidate: {type: object, required: [spotifyPlaylistId, name, description, itemCount, displayUrl], properties: {spotifyPlaylistId: {type: string}, name: {type: string}, description: {type: [string, 'null']}, itemCount: {type: [integer, 'null']}, displayUrl: {type: [string, 'null']}}}
     PublishPlan: {type: object, required: [definitionId, playlistName, action, candidates, message, publishFlowId], properties: {definitionId: {type: string}, playlistName: {type: string}, action: {type: string, enum: [create, adopt, choose, blocked]}, candidates: {type: array, items: {$ref: '#/components/schemas/PublishPlaylistCandidate'}}, message: {type: [string, 'null']}, publishFlowId: {type: string}}}
     PublishDestinationRequest: {type: object, required: [action, trackIds], properties: {action: {type: string, enum: [create, adopt]}, spotifyPlaylistId: {type: [string, 'null']}, trackIds: {type: array, maxItems: 5000, items: {type: string}}, publishFlowId: {type: [string, 'null']}}}
+    PublishLibraryPlaylistRequest: {type: object, required: [trackIds], properties: {trackIds: {type: array, maxItems: 5000, items: {type: string}}}}
+    LibraryPlaylistPublishResult: {type: object, required: [playlist], properties: {playlist: {$ref: '#/components/schemas/LibraryPlaylistDetail'}}}
     SyncRequest: {type: object, required: [trackIds], properties: {trackIds: {type: array, maxItems: 5000, items: {type: string}}, expectedDestinationSnapshotId: {type: [string, 'null']}}}
     BulkSongsRequest: {type: object, required: [trackIds], properties: {trackIds: {type: array, minItems: 1, maxItems: 10000, items: {type: string}}}}
     Album: {type: object, required: [id, name, href, uri, releaseDate, imageUrl], properties: {id: {type: [string, 'null']}, name: {type: [string, 'null']}, href: {type: [string, 'null']}, uri: {type: [string, 'null']}, releaseDate: {type: [string, 'null']}, imageUrl: {type: [string, 'null']}}}

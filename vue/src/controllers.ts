@@ -131,7 +131,7 @@ export class StudioController {
     libraryPlaylist: null,
     preview: null,
     current: null,
-    selection: { source: 'preview', dirty: false, orderedIds: [], enrichment: {} },
+    selection: { source: 'preview', dirty: false, baselineIds: [], orderedIds: [], enrichment: {} },
     loading: false,
     error: null,
     conflict: false,
@@ -167,9 +167,9 @@ export class StudioController {
       this.state.libraryPlaylist = null
       this.state.preview = preview
       this.state.current = current
-      this.state.selection = { source: usePreview ? 'preview' : 'current-fallback', dirty: false, orderedIds: ids, enrichment: {} }
+      this.state.selection = { source: usePreview ? 'preview' : 'current-fallback', dirty: false, baselineIds: ids, orderedIds: ids, enrichment: {} }
       const enrichment = await this.enrich(ids)
-      if (this.isCurrent(serial)) this.state.selection = { source: usePreview ? 'preview' : 'current-fallback', dirty: false, orderedIds: ids, enrichment }
+      if (this.isCurrent(serial)) this.state.selection = { source: usePreview ? 'preview' : 'current-fallback', dirty: false, baselineIds: ids, orderedIds: ids, enrichment }
     } catch (error) {
       if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Studio request failed')
     } finally {
@@ -189,9 +189,9 @@ export class StudioController {
       this.state.definition = null
       this.state.preview = null
       this.state.current = null
-      this.state.selection = { source: 'preview', dirty: false, orderedIds: ids, enrichment: {} }
+      this.state.selection = { source: 'library-playlist', dirty: false, baselineIds: ids, orderedIds: ids, enrichment: {} }
       const enrichment = await this.enrich(ids)
-      if (this.isCurrent(serial)) this.state.selection = { source: 'preview', dirty: false, orderedIds: ids, enrichment }
+      if (this.isCurrent(serial)) this.state.selection = { source: 'library-playlist', dirty: false, baselineIds: ids, orderedIds: ids, enrichment }
     } catch (error) {
       if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Library playlist request failed')
     } finally {
@@ -214,9 +214,9 @@ export class StudioController {
       if (!this.isCurrent(serial)) return
       const ids = [...preview.generatedTrackIds]
       this.state.preview = preview
-      this.state.selection = { source: 'preview', dirty: false, orderedIds: ids, enrichment: {} }
+      this.state.selection = { source: 'preview', dirty: false, baselineIds: ids, orderedIds: ids, enrichment: {} }
       const enrichment = await this.enrich(ids)
-      if (this.isCurrent(serial)) this.state.selection = { source: 'preview', dirty: false, orderedIds: ids, enrichment }
+      if (this.isCurrent(serial)) this.state.selection = { source: 'preview', dirty: false, baselineIds: ids, orderedIds: ids, enrichment }
     } catch (error) {
       if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Reroll failed')
     } finally {
@@ -243,39 +243,60 @@ export class StudioController {
   }
 
   moveTrack(index: number, direction: -1 | 1): void {
-    if (this.state.activeKind !== 'definition') return
+    if (!this.selectionIsEditable()) return
     const target = index + direction
     if (index < 0 || target < 0 || target >= this.state.selection.orderedIds.length) return
     this.operationSerial += 1
     const ids = [...this.state.selection.orderedIds]
     ;[ids[index], ids[target]] = [ids[target], ids[index]]
-    this.state.selection = { ...this.state.selection, dirty: true, orderedIds: ids }
+    this.setOrderedIds(ids)
   }
 
   moveTrackTo(index: number, target: number): void {
-    if (this.state.activeKind !== 'definition' || index < 0 || target < 0 || index >= this.state.selection.orderedIds.length || target >= this.state.selection.orderedIds.length || index === target) return
+    if (!this.selectionIsEditable() || index < 0 || target < 0 || index >= this.state.selection.orderedIds.length || target >= this.state.selection.orderedIds.length || index === target) return
     this.operationSerial += 1
     const ids = [...this.state.selection.orderedIds]
     const [moved] = ids.splice(index, 1)
     ids.splice(target, 0, moved)
-    this.state.selection = { ...this.state.selection, dirty: true, orderedIds: ids }
+    this.setOrderedIds(ids)
   }
 
   shuffleTrackOrder(): void {
-    if (this.state.activeKind !== 'definition' || this.state.selection.orderedIds.length < 2) return
+    if (!this.selectionIsEditable() || this.state.selection.orderedIds.length < 2) return
     this.operationSerial += 1
     const ids = [...this.state.selection.orderedIds]
     for (let index = ids.length - 1; index > 0; index -= 1) {
       const target = this.randomInt(index + 1)
       ;[ids[index], ids[target]] = [ids[target], ids[index]]
     }
-    this.state.selection = { ...this.state.selection, dirty: true, orderedIds: ids }
+    this.setOrderedIds(ids)
   }
 
   removeTrack(index: number): void {
-    if (this.state.activeKind !== 'definition' || index < 0 || index >= this.state.selection.orderedIds.length) return
+    if (!this.selectionIsEditable() || index < 0 || index >= this.state.selection.orderedIds.length) return
     this.operationSerial += 1
-    this.state.selection = { ...this.state.selection, dirty: true, orderedIds: this.state.selection.orderedIds.filter((_, itemIndex) => itemIndex !== index) }
+    this.setOrderedIds(this.state.selection.orderedIds.filter((_, itemIndex) => itemIndex !== index))
+  }
+
+  async publishLibraryPlaylist(): Promise<boolean> {
+    if (this.state.activeKind !== 'library_playlist' || !this.state.libraryPlaylist?.editable || !this.state.selection.dirty) return false
+    const serial = this.beginOperation()
+    const playlistId = this.state.libraryPlaylist.spotifyPlaylistId
+    this.state.error = null
+    try {
+      const result = await this.tracked(this.api.publishLibraryPlaylist(playlistId, this.state.selection.orderedIds))
+      const detail = result as unknown as { summary: LibraryPlaylist; trackIds: readonly string[] }
+      if (!this.isCurrent(serial)) return false
+      const ids = [...detail.trackIds]
+      this.state.libraryPlaylist = detail.summary
+      this.state.selection = { ...this.state.selection, dirty: false, baselineIds: ids, orderedIds: ids }
+      return true
+    } catch (error) {
+      if (this.isCurrent(serial)) this.state.error = errorMessage(error, 'Library playlist publish failed')
+      return false
+    } finally {
+      this.finishOperation()
+    }
   }
 
   async planPublish(): Promise<PublishPlan | null> {
@@ -357,6 +378,17 @@ export class StudioController {
     return byId
   }
 
+  private selectionIsEditable(): boolean {
+    return this.state.activeKind === 'definition' ||
+      (this.state.activeKind === 'library_playlist' && this.state.libraryPlaylist?.editable === true)
+  }
+
+  private setOrderedIds(ids: readonly string[]): void {
+    const dirty = ids.length !== this.state.selection.baselineIds.length ||
+      ids.some((id, index) => id !== this.state.selection.baselineIds[index])
+    this.state.selection = { ...this.state.selection, dirty, orderedIds: [...ids] }
+  }
+
   private updateDestinationFromCurrent(current: CurrentDestination | null): void {
     if (!current || !this.state.definition?.destination) return
     this.state.definition = {
@@ -380,6 +412,7 @@ export class StudioController {
     if ('plan' in result) return result.plan as T
     if ('destination' in result) return result.destination as T
     if ('current' in result) return result.current as T
+    if ('playlist' in result) return result.playlist as T
     return result as T
   }
 }

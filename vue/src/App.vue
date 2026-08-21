@@ -20,6 +20,7 @@ const bulkStatusVisible = ref(true)
 const selected = computed(() => studio.state.selection)
 const selectedDefinition = computed(() => studio.state.definition)
 const selectedLibraryPlaylist = computed(() => studio.state.libraryPlaylist)
+const canEditTracks = computed(() => studio.state.activeKind === 'definition' || (studio.state.activeKind === 'library_playlist' && selectedLibraryPlaylist.value?.editable === true))
 const trackedStatus = computed(() => progress.state.active)
 const isBusy = computed(() => session.state.loading || library.state.loading || studio.state.loading || (trackedStatus.value !== null && trackedStatus.value.phase !== 'succeeded' && trackedStatus.value.phase !== 'failed'))
 const progressPercent = computed(() => operationProgressPercent(trackedStatus.value))
@@ -69,6 +70,9 @@ async function publish() {
   }
 }
 async function sync() { await studio.sync() }
+async function publishLibraryPlaylist() {
+  if (await studio.publishLibraryPlaylist()) await library.load()
+}
 async function planBulkRepublish() {
   const accepted = await api.planBulkRepublish!()
   const result = await progress.track(accepted)
@@ -96,7 +100,8 @@ async function executeBulkRepublish(items?: readonly BulkRepublishItem[]) {
 }
 function dismissBulkStatus() { bulkStatusVisible.value = false }
 async function updateShuffleAfterGeneration(event: Event) { await studio.updateShuffleAfterGeneration((event.currentTarget as HTMLInputElement).checked) }
-function dropTrack(index: number) { if (draggedIndex.value !== null) studio.moveTrackTo(draggedIndex.value, index); draggedIndex.value = null }
+function startTrackDrag(index: number) { if (canEditTracks.value) draggedIndex.value = index }
+function dropTrack(index: number) { if (canEditTracks.value && draggedIndex.value !== null) studio.moveTrackTo(draggedIndex.value, index); draggedIndex.value = null }
 onMounted(boot)
 watch(() => session.state.session, sessionValue => { if (!sessionValue) progress.dispose() })
 onUnmounted(() => progress.dispose())
@@ -129,7 +134,7 @@ onUnmounted(() => progress.dispose())
           <p v-else-if="!library.state.loading && !library.state.definitions.length" class="hint">No definitions are available.</p>
           <div class="divider" />
           <div class="section-title"><span>LIBRARY PLAYLISTS</span><span class="counter">{{ library.state.library?.playlists.length || 0 }}</span></div>
-          <button v-for="playlist in library.state.library?.playlists" :key="playlist.spotifyPlaylistId" class="mission" :class="{ active: playlist.spotifyPlaylistId === selectedLibraryPlaylist?.spotifyPlaylistId }" @click="studio.selectLibraryPlaylist(playlist)"><span class="mission-mark">♫</span><img v-if="playlist.spotifyPlaylistId === selectedLibraryPlaylist?.spotifyPlaylistId && headerArt" class="art-frame art-rail" :src="headerArt" alt="Selected playlist album art" /><span><strong>{{ playlist.name }}</strong><small>{{ playlist.cachedPlayableTrackCount }}/{{ playlist.declaredItemCount ?? '—' }} tracks · {{ playlist.contentStatus }}</small></span></button>
+          <button v-for="playlist in library.state.library?.playlists" :key="playlist.spotifyPlaylistId" class="mission" :class="{ active: playlist.spotifyPlaylistId === selectedLibraryPlaylist?.spotifyPlaylistId }" @click="studio.selectLibraryPlaylist(playlist)"><span class="mission-mark">♫</span><img v-if="playlist.spotifyPlaylistId === selectedLibraryPlaylist?.spotifyPlaylistId && headerArt" class="art-frame art-rail" :src="headerArt" alt="Selected playlist album art" /><span><strong>{{ playlist.name }}</strong><small>{{ playlist.cachedPlayableTrackCount }}/{{ playlist.declaredItemCount ?? '—' }} tracks · {{ playlist.contentStatus }}<template v-if="!playlist.editable"> · READ ONLY</template></small></span></button>
           <div class="divider" />
           <div class="section-title"><span>LIBRARY SOURCES</span><button class="icon-button" aria-label="Refresh all sources" @click="refreshSource()">↻</button></div>
           <p v-if="library.state.error" class="error library-error" role="alert">LIBRARY LOAD FAILED: {{ library.state.error }}</p>
@@ -151,7 +156,7 @@ onUnmounted(() => progress.dispose())
               <a v-if="headerArt && headerArtSong" class="art-link" :href="spotifyPageUrl(headerArtSong)" target="_blank" rel="noreferrer" aria-label="Open album on Spotify"><img class="art-frame art-header" :src="headerArt" alt="Selected album artwork" /><span class="art-label">SPOTIFY ART</span></a>
               <div class="playlist-heading"><h2>{{ selectedDefinition?.name || selectedLibraryPlaylist?.name || 'Select a mission' }}</h2><p>{{ selectedDefinition?.description || selectedLibraryPlaylist?.description || 'Choose a playlist or definition from the sidebar.' }}</p></div>
               <div class="playlist-info-rail">
-                <div class="mission-meta"><span>{{ selected?.orderedIds.length }} TRACKS</span><span v-if="selected?.dirty" class="dirty">● UNSAVED ORDER</span></div>
+                <div class="mission-meta"><span>{{ selected?.orderedIds.length }} TRACKS</span><span v-if="studio.state.activeKind === 'library_playlist' && !selectedLibraryPlaylist?.editable">READ ONLY</span><span v-if="selected?.dirty" class="dirty">● UNSAVED ORDER</span></div>
               </div>
             </div>
             <div v-if="studio.state.activeKind === 'definition'" class="playlist-info-lower">
@@ -178,7 +183,7 @@ onUnmounted(() => progress.dispose())
               </div>
             </div>
           </section>
-          <section class="panel selection"><div class="section-title"><span>STAGED TRACK SEQUENCE</span><span class="section-title-separator">//</span><span class="counter">{{ selected?.orderedIds.length || 0 }}</span></div><div class="selection-toolbar"><p class="hint">Drag rows to rearrange by hand or use the buttons on the right</p><button v-if="studio.state.activeKind === 'definition'" class="button quiet" :disabled="studio.state.loading || (selected?.orderedIds.length || 0) < 2" aria-label="Shuffle staged track sequence" @click="studio.shuffleTrackOrder">SHUFFLE</button></div><div class="track-table"><div class="track-head"><span>#</span><span class="track-heading-name">TRACK / ARTIST</span><span>ALBUM</span><span>CONTROLS</span></div><div v-for="(id, index) in selected?.orderedIds" :key="`${id}-${index}`" class="track-row" draggable="true" @dragstart="draggedIndex = index" @dragover.prevent @drop="dropTrack(index)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><a v-if="songFor(id)?.album.imageUrl && songFor(id)" class="art-link art-track-link" :href="spotifyPageUrl(songFor(id)!)" target="_blank" rel="noreferrer" :aria-label="`Open ${songFor(id)?.album.name || 'album'} on Spotify`"><img class="art-frame art-track" :src="songFor(id)?.album.imageUrl" alt="Album artwork" /></a><span class="track-name"><strong><span v-if="songFor(id)">{{ songFor(id)?.name }}</span><span v-else class="enrichment-pending" role="status" aria-label="Track ID enrichment pending" /></strong><small>{{ songFor(id)?.artists.map(artist => artist.name).filter(Boolean).join(', ') || id }}</small></span><span class="album">{{ songFor(id)?.album.name || '—' }}</span><span class="track-controls"><button class="icon-button" :aria-label="`Move track ${index + 1} up`" @click="studio.moveTrack(index, -1)">↑</button><button class="icon-button" :aria-label="`Move track ${index + 1} down`" @click="studio.moveTrack(index, 1)">↓</button><button class="icon-button danger" :aria-label="`Remove track ${index + 1}`" @click="studio.removeTrack(index)">×</button></span></div><div v-if="!selected?.orderedIds.length" class="empty-table">No tracks in this preview.</div></div></section>
+          <section class="panel selection"><div class="section-title"><span>PLAYLIST TRACKS</span><span class="section-title-separator">//</span><span class="counter">{{ selected?.orderedIds.length || 0 }}</span></div><div class="selection-toolbar"><p class="hint">{{ canEditTracks ? 'Drag rows to rearrange them or use the controls on the right.' : 'This playlist is read-only.' }}</p><div class="action-group selection-actions"><button v-if="studio.state.activeKind" class="button quiet" :disabled="isBusy || !canEditTracks || (selected?.orderedIds.length || 0) < 2" aria-label="Shuffle playlist tracks" @click="studio.shuffleTrackOrder">SHUFFLE</button><Transition name="publish-slide"><button v-if="studio.state.activeKind === 'library_playlist' && selectedLibraryPlaylist?.editable && selected?.dirty" class="button gold" :disabled="isBusy" aria-label="Publish library playlist" @click="publishLibraryPlaylist">PUBLISH</button></Transition></div></div><div class="track-table"><div class="track-head"><span>#</span><span class="track-heading-name">TRACK / ARTIST</span><span>ALBUM</span><span>CONTROLS</span></div><div v-for="(id, index) in selected?.orderedIds" :key="`${id}-${index}`" class="track-row" :class="{ 'read-only': !canEditTracks }" :draggable="canEditTracks" @dragstart="startTrackDrag(index)" @dragover="canEditTracks && $event.preventDefault()" @drop="dropTrack(index)"><span class="track-number">{{ String(index + 1).padStart(2, '0') }}</span><a v-if="songFor(id)?.album.imageUrl && songFor(id)" class="art-link art-track-link" :href="spotifyPageUrl(songFor(id)!)" target="_blank" rel="noreferrer" :aria-label="`Open ${songFor(id)?.album.name || 'album'} on Spotify`"><img class="art-frame art-track" :src="songFor(id)?.album.imageUrl" alt="Album artwork" /></a><span class="track-name"><strong><span v-if="songFor(id)">{{ songFor(id)?.name }}</span><span v-else class="enrichment-pending" role="status" aria-label="Track ID enrichment pending" /></strong><small>{{ songFor(id)?.artists.map(artist => artist.name).filter(Boolean).join(', ') || id }}</small></span><span class="album">{{ songFor(id)?.album.name || '—' }}</span><span class="track-controls"><button class="icon-button" :disabled="!canEditTracks || isBusy" :aria-label="`Move track ${index + 1} up`" @click="studio.moveTrack(index, -1)">↑</button><button class="icon-button" :disabled="!canEditTracks || isBusy" :aria-label="`Move track ${index + 1} down`" @click="studio.moveTrack(index, 1)">↓</button><button class="icon-button danger" :disabled="!canEditTracks || isBusy" :aria-label="`Remove track ${index + 1}`" @click="studio.removeTrack(index)">×</button></span></div><div v-if="!selected?.orderedIds.length" class="empty-table">No playable tracks in this playlist.</div></div></section>
         </section>
       </section>
     </template>

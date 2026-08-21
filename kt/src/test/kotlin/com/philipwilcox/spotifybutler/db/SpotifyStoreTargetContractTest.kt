@@ -16,9 +16,60 @@ import java.sql.DriverManager
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 
 class SpotifyStoreTargetContractTest {
+    @Test
+    fun libraryPlaylistsPutOwnedEntriesFirstWithoutChangingGroupOrder() {
+        val path = Files.createTempDirectory("library-playlist-order-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    listOf(
+                        SpotifyPlaylist("Shared first", "shared-1", "href", "uri", "tracks", ownerId = "other"),
+                        SpotifyPlaylist("Owned first", "owned-1", "href", "uri", "tracks", ownerId = "owner"),
+                        SpotifyPlaylist("Shared second", "shared-2", "href", "uri", "tracks", ownerId = "other"),
+                        SpotifyPlaylist("Owned second", "owned-2", "href", "uri", "tracks", ownerId = "owner"),
+                    ),
+                    emptyList(),
+                ),
+                10L,
+                "owner",
+            )
+
+            val playlists = store.libraryPlaylists("owner")
+            assertEquals(listOf("owned-1", "owned-2", "shared-1", "shared-2"), playlists.map { it.playlistId })
+            assertEquals(listOf(true, true, false, false), playlists.map { it.editable })
+        }
+    }
+
+    @Test
+    fun libraryPlaylistPublishUpdatesCountsContentsAndSourceRevision() {
+        val path = Files.createTempDirectory("library-playlist-publish-").resolve("cache.db")
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(snapshot("track-a", "playlist"), 10L, "owner")
+            val beforeRevision = store.libraryPlaylists("owner").single().sourceRevision
+
+            store.publishLibraryPlaylistTrackIds("playlist", listOf("track-a", "track-a"), 20L, "owner")
+
+            val published = store.libraryPlaylists("owner").single()
+            assertEquals(2, published.itemCount)
+            assertEquals(2, published.playableTrackCount)
+            assertEquals(listOf("track-a", "track-a"), store.libraryPlaylistTrackIds("owner", "playlist"))
+            assertEquals(com.philipwilcox.spotifybutler.service.CacheSourceStatus.READY, published.contentStatus)
+            assertEquals(java.time.Instant.ofEpochMilli(20L), published.lastSyncedAt)
+            assertNotEquals(beforeRevision, published.sourceRevision)
+
+            store.publishLibraryPlaylistTrackIds("playlist", emptyList(), 30L, "owner")
+            assertEquals(0, store.libraryPlaylists("owner").single().itemCount)
+            assertEquals(emptyList(), store.libraryPlaylistTrackIds("owner", "playlist"))
+        }
+    }
+
     @Test
     fun bulkPlaylistPersistencePreservesOrderDuplicatesAndValidatesBeforeDelete() {
         val path = Files.createTempDirectory("bulk-playlist-persistence-").resolve("cache.db")

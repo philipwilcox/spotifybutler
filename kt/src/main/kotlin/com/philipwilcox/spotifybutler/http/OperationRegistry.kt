@@ -148,6 +148,7 @@ class OperationRegistry {
             OperationKind.PUBLISH_PLAN -> result is PublishPlanResultWire
             OperationKind.PUBLISH_CREATE, OperationKind.PUBLISH_ADOPT -> result is PublishDestinationResultWire
             OperationKind.DESTINATION_SYNC -> result is DestinationSyncResultWire
+            OperationKind.LIBRARY_PLAYLIST_PUBLISH -> result is LibraryPlaylistPublishResultWire
             OperationKind.BULK_REPUBLISH_PLAN -> result is BulkRepublishPlanResultWire
             OperationKind.BULK_REPUBLISH -> result is BulkRepublishResultWire
         }

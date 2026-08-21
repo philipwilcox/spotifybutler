@@ -633,12 +633,14 @@ class SpotifyStore private constructor(
 
     fun libraryPlaylists(ownerSpotifyUserId: String): List<StoredLibraryPlaylist> =
         rows(
-            "SELECT p.*, d.description, d.item_count, d.display_url FROM playlists p " +
+            "SELECT p.*, d.description, d.item_count, d.display_url, d.owner_id FROM playlists p " +
                 "LEFT JOIN playlist_details d ON d.owner_spotify_user_id = p.owner_spotify_user_id " +
                 "AND d.playlist_id = p.id WHERE p.owner_spotify_user_id = ? " +
                 "AND NOT EXISTS (SELECT 1 FROM managed_playlists m " +
                 "WHERE m.owner_spotify_user_id = p.owner_spotify_user_id " +
-                "AND m.spotify_playlist_id = p.id) ORDER BY p.source_position, p.id",
+                "AND m.spotify_playlist_id = p.id) " +
+                "ORDER BY CASE WHEN d.owner_id = ? THEN 0 ELSE 1 END, p.source_position, p.id",
+            ownerSpotifyUserId,
             ownerSpotifyUserId,
         ) { result ->
             LibraryPlaylistRow(
@@ -649,6 +651,7 @@ class SpotifyStore private constructor(
                 result.getString("uri"),
                 result.getIntOrNull("item_count"),
                 result.getString("display_url"),
+                result.getString("owner_id") == ownerSpotifyUserId,
             )
         }.map { row ->
             val playlistId = row.playlistId
@@ -688,6 +691,7 @@ class SpotifyStore private constructor(
                 source?.sourceRevision,
                 source?.lastSyncedAt,
                 row.displayUrl,
+                row.editable,
             )
         }
 
@@ -812,6 +816,32 @@ class SpotifyStore private constructor(
             ) { it.getString(1) }?.let { definitionId ->
                 updateManagedPlaylistState(definitionId, ownerSpotifyUserId, syncTimestampMillis, snapshotId)
             }
+        }
+    }
+
+    fun publishLibraryPlaylistTrackIds(
+        playlistId: String,
+        trackIds: List<String>,
+        syncTimestampMillis: Long,
+        ownerSpotifyUserId: String,
+    ) {
+        transaction {
+            replacePlaylistItemsWithTrackIds(ownerSpotifyUserId, playlistId, trackIds)
+            execute(
+                "UPDATE playlist_details SET item_count = ? WHERE owner_spotify_user_id = ? AND playlist_id = ?",
+                trackIds.size,
+                ownerSpotifyUserId,
+                playlistId,
+            )
+            upsertSourceSnapshot(
+                ownerSpotifyUserId,
+                CacheSourceKey.playlistItems(ownerSpotifyUserId, playlistId).sourceKey,
+                CacheResourceKind.PLAYLIST_CONTENTS,
+                "ready",
+                newSourceRevision(syncTimestampMillis),
+                syncTimestampMillis,
+                trackIds.size,
+            )
         }
     }
 
@@ -1907,6 +1937,7 @@ data class StoredLibraryPlaylist(
     val sourceRevision: String?,
     val lastSyncedAt: Instant?,
     val displayUrl: String?,
+    val editable: Boolean,
 )
 
 private data class LibraryPlaylistRow(
@@ -1917,6 +1948,7 @@ private data class LibraryPlaylistRow(
     val uri: String,
     val itemCount: Int?,
     val displayUrl: String?,
+    val editable: Boolean,
 )
 
 private data class LibraryPlaylistSource(

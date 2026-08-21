@@ -5,7 +5,7 @@ import App from './App.vue'
 const response = (body: unknown, status = 200) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const recipe = { schemaVersion: 1, shuffleAfterGeneration: false, source: { type: 'saved_tracks' }, predicate: { type: 'all' }, distinctness: { type: 'by', identity: 'SpotifyUri' }, selection: { target: null, quotas: [], rankBy: { type: 'seeded_random' } }, ordering: { type: 'seeded_random' } }
 const definition = { definitionId: 'RECENT_LIKED_100', name: 'Recent liked', description: 'Saved tracks', kind: 'built_in', editable: false, enabled: true, recipe, sourceDependencies: [], destination: null }
-const playlist = { spotifyPlaylistId: 'library-playlist', name: 'Library playlist', description: null, href: 'https://spotify.test/playlist', uri: 'spotify:playlist:library-playlist', displayUrl: null, declaredItemCount: 2, cachedPlayableTrackCount: 2, contentSourceKey: 'playlist:library-playlist', contentStatus: 'ready', sourceRevision: null, lastSyncedAt: null }
+const playlist = { spotifyPlaylistId: 'library-playlist', name: 'Library playlist', description: null, href: 'https://spotify.test/playlist', uri: 'spotify:playlist:library-playlist', displayUrl: null, declaredItemCount: 2, cachedPlayableTrackCount: 2, contentSourceKey: 'playlist:library-playlist', contentStatus: 'ready', sourceRevision: null, lastSyncedAt: null, editable: true }
 const library = {
   ownerSpotifyUserId: 'operator', status: 'ready',
   sources: [{ sourceKey: 'saved_tracks', resourceKind: 'track_list', status: 'ready', sourceRevision: null, lastSyncedAt: null, itemCount: 2, canRefresh: true, lastErrorCode: null, lastErrorAt: null }],
@@ -46,6 +46,8 @@ function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number 
     const path = String(input)
     if (path === '/api/v1/session') return response(options.sessionStatus === undefined ? { userId: 'operator', csrfToken: 'csrf', expiresAt: '2026-01-01T00:00:00Z' } : { code: 'unauthorized', message: 'Please connect Spotify', requestId: 'req-1', details: {} }, options.sessionStatus ?? 200)
     if (path === '/api/v1/library') return response(options.libraryBody ?? library, options.libraryBody instanceof Error ? 500 : 200)
+    if (path === '/api/v1/library/playlists/library-playlist' && init?.method === 'GET') return response({ summary: playlist, trackIds: ['known-track', 'missing-track'] })
+    if (path === '/api/v1/library/playlists/library-playlist/publish') return response({ operationId: 'op-library-publish', kind: 'library_playlist_publish' })
     if (path.includes('/preview')) return response(preview)
     if (path.includes('/bulk-republish-plan')) return response({ operationId: 'op-bulk-plan', kind: 'bulk_republish_plan' })
     if (path.endsWith('/bulk-republish')) return response({ operationId: 'op-bulk', kind: 'bulk_republish' })
@@ -61,6 +63,66 @@ function frontendFetch(options: { libraryBody?: unknown; sessionStatus?: number 
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('App', () => {
+  it('edits and immediately publishes an owned library playlist beside Shuffle', async () => {
+    const fetcher = frontendFetch()
+    const operations = installOperationSockets()
+    vi.stubGlobal('fetch', fetcher)
+    Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.findAll('.sidebar .mission').find(button => button.text().includes(playlist.name))?.trigger('click')
+    await flushPromises()
+    const shuffle = wrapper.find('[aria-label="Shuffle playlist tracks"]')
+    expect(wrapper.find('.selection .section-title').text()).toContain('PLAYLIST TRACKS')
+    expect(shuffle.attributes()).not.toHaveProperty('disabled')
+    expect(wrapper.find('.track-row').attributes('draggable')).toBe('true')
+
+    await wrapper.find('[aria-label="Move track 1 down"]').trigger('click')
+    expect(wrapper.find('[aria-label="Publish library playlist"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Publish library playlist"]').element.parentElement?.parentElement).toBe(shuffle.element.parentElement)
+    await wrapper.find('[aria-label="Move track 2 up"]').trigger('click')
+    expect(wrapper.find('[aria-label="Publish library playlist"]').exists()).toBe(false)
+
+    await wrapper.find('[aria-label="Move track 1 down"]').trigger('click')
+    await wrapper.find('[aria-label="Publish library playlist"]').trigger('click')
+    await flushPromises()
+    expect(JSON.parse((fetcher.mock.calls.find(([path]) => String(path).endsWith('/library-playlist/publish'))?.[1] as RequestInit).body as string)).toEqual({ trackIds: ['missing-track', 'known-track'] })
+    operations.succeed('op-library-publish', 'library_playlist_publish', {
+      type: 'library_playlist_publish',
+      playlist: { summary: { ...playlist, sourceRevision: 'published', lastSyncedAt: '2026-02-01T00:00:00Z' }, trackIds: ['missing-track', 'known-track'] },
+    }, 1, 1)
+    await flushPromises()
+    expect(wrapper.find('[aria-label="Publish library playlist"]').exists()).toBe(false)
+  })
+
+  it('shows non-owned library playlists after owned playlists and keeps them read-only', async () => {
+    const shared = { ...playlist, spotifyPlaylistId: 'shared', name: 'Shared playlist', editable: false }
+    const readOnlyLibrary = { ...library, playlists: [playlist, shared] }
+    const baseFetcher = frontendFetch({ libraryBody: readOnlyLibrary })
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/v1/library/playlists/shared') return response({ summary: shared, trackIds: ['known-track', 'missing-track'] })
+      return baseFetcher(input, init)
+    })
+    vi.stubGlobal('fetch', fetcher)
+    Object.defineProperty(window, 'fetch', { configurable: true, value: fetcher })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const playlistButtons = wrapper.findAll('.sidebar .mission').filter(button => !button.classes().includes('definition-mission'))
+    expect(playlistButtons.map(button => button.text())).toEqual([
+      expect.stringContaining('Library playlist'),
+      expect.stringContaining('Shared playlist'),
+    ])
+    await playlistButtons[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('READ ONLY')
+    expect(wrapper.find('[aria-label="Shuffle playlist tracks"]').attributes()).toHaveProperty('disabled')
+    expect(wrapper.find('.track-row').attributes('draggable')).toBe('false')
+    expect(wrapper.find('[aria-label="Move track 1 down"]').attributes()).toHaveProperty('disabled')
+    expect(wrapper.find('[aria-label="Publish library playlist"]').exists()).toBe(false)
+  })
+
   it('renders album art with public Spotify links in the header and track row', async () => {
     const fetcher = frontendFetch()
     vi.stubGlobal('fetch', fetcher)
@@ -84,7 +146,7 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Known song')
     expect(wrapper.find('.enrichment-pending').attributes('aria-label')).toBe('Track ID enrichment pending')
     expect(wrapper.find('[aria-label="Refresh saved_tracks"]').exists()).toBe(true)
-    expect(wrapper.find('[aria-label="Shuffle staged track sequence"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Shuffle playlist tracks"]').exists()).toBe(true)
     expect((wrapper.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
   })
 

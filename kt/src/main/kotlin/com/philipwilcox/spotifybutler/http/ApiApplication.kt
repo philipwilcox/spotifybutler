@@ -312,6 +312,10 @@ class ApiApplication(
                 ) == listOf("api", "v1", "library", "playlists") &&
                 request.method == "GET" ->
                 libraryPlaylist(parts[4], session)
+            parts.size == 6 &&
+                parts.take(4) == listOf("api", "v1", "library", "playlists") &&
+                parts[5] == "publish" &&
+                request.method == "POST" -> libraryPlaylistPublish(parts[4], request, session, requestId)
             parts ==
                 listOf(
                     "api",
@@ -439,6 +443,38 @@ class ApiApplication(
         } catch (_: com.philipwilcox.spotifybutler.service.LibraryPlaylistNotFoundException) {
             throw ApiFailure(404, "not_found", "Library playlist not found")
         }
+
+    private fun libraryPlaylistPublish(
+        playlistId: String,
+        request: ApiRequest,
+        session: ButlerSession,
+        requestId: String,
+    ): ApiResponse {
+        requireStateChange(request, session)
+        val playlist =
+            try {
+                libraryService.playlist(session.ownerSpotifyUserId, playlistId)
+            } catch (_: com.philipwilcox.spotifybutler.service.LibraryPlaylistNotFoundException) {
+                throw ApiFailure(404, "not_found", "Library playlist not found")
+            }
+        if (!playlist.summary.editable) {
+            throw ApiFailure(403, "owner_mismatch", "The playlist does not belong to the authenticated owner")
+        }
+        val input = body<PublishLibraryPlaylistRequest>(request)
+        validateTrackIds(input.trackIds, session.ownerSpotifyUserId)
+        val totalSteps = 1 + ((input.trackIds.size + 99) / 100).coerceAtLeast(1)
+        return accepted(session, OperationKind.library_playlist_publish, requestId, totalSteps) {
+            destinationService.publishLibraryPlaylist(
+                playlistId,
+                session.ownerSpotifyUserId,
+                session.accessToken,
+                input.trackIds,
+            )
+            LibraryPlaylistPublishResultWire(
+                libraryService.playlist(session.ownerSpotifyUserId, playlistId).toWire(),
+            )
+        }
+    }
 
     @Suppress("SwallowedException", "TooGenericExceptionCaught")
     private fun refresh(
@@ -1306,6 +1342,7 @@ private fun com.philipwilcox.spotifybutler.service.LibraryPlaylistSummary.toWire
         contentStatus.name.lowercase(),
         sourceRevision,
         lastSyncedAt?.toString(),
+        editable,
     )
 
 private fun com.philipwilcox.spotifybutler.service.LibraryPlaylistDetail.toWire() =

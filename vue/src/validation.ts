@@ -126,7 +126,7 @@ export const parseSession = (value: unknown): Session => {
 
 export const parseAccepted = (value: unknown): OperationAccepted => {
   const v = object(value, 'operation')
-  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind: oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.kind') }
+  return { operationId: string(required(v, 'operationId', 'operation'), 'operation.operationId'), kind: oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'library_playlist_publish', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.kind') }
 }
 
 const resultType = (value: unknown): OperationResult['type'] => {
@@ -135,9 +135,10 @@ const resultType = (value: unknown): OperationResult['type'] => {
   if (type.includes('PublishPlanResultWire')) return 'publish_plan'
   if (type.includes('PublishDestinationResultWire')) return 'publish_destination'
   if (type.includes('DestinationSyncResultWire')) return 'destination_sync'
+  if (type.includes('LibraryPlaylistPublishResultWire')) return 'library_playlist_publish'
   if (type.includes('BulkRepublishPlanResultWire')) return 'bulk_republish_plan'
   if (type.includes('BulkRepublishResultWire')) return 'bulk_republish'
-  return oneOf(type, ['library_refresh', 'publish_plan', 'publish_destination', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.result.type')
+  return oneOf(type, ['library_refresh', 'publish_plan', 'publish_destination', 'destination_sync', 'library_playlist_publish', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.result.type')
 }
 
 const parseOperationResult = (value: unknown): OperationResult => {
@@ -146,6 +147,7 @@ const parseOperationResult = (value: unknown): OperationResult => {
   if (type === 'library_refresh') return { type, library: parseLibrary(required(v, 'library', 'operation.result')) }
   if (type === 'publish_plan') return { type, plan: parsePublishPlan(required(v, 'plan', 'operation.result')) }
   if (type === 'publish_destination') return { type, destination: parseDestination(required(v, 'destination', 'operation.result')) }
+  if (type === 'library_playlist_publish') return { type, playlist: parseLibraryPlaylistDetail(required(v, 'playlist', 'operation.result')) }
   if (type === 'bulk_republish_plan') return { type, plan: parseBulkRepublishPlan(required(v, 'plan', 'operation.result')) }
   if (type === 'bulk_republish') return { type, library: parseLibrary(required(v, 'library', 'operation.result')), items: parseBulkRepublishItems(required(v, 'items', 'operation.result')) }
   const current = required(v, 'current', 'operation.result')
@@ -154,7 +156,7 @@ const parseOperationResult = (value: unknown): OperationResult => {
 
 export const parseOperationStatus = (value: unknown): OperationStatus => {
   const v = object(value, 'operation')
-  const kind = oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.kind')
+  const kind = oneOf(required(v, 'kind', 'operation'), ['library_refresh', 'library_playlist_publish', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync', 'bulk_republish_plan', 'bulk_republish'] as const, 'operation.kind')
   const phase = oneOf(required(v, 'phase', 'operation'), ['queued', 'running', 'succeeded', 'failed'] as const, 'operation.phase')
   const resultValue = required(v, 'result', 'operation')
   const errorValue = required(v, 'error', 'operation')
@@ -163,7 +165,7 @@ export const parseOperationStatus = (value: unknown): OperationStatus => {
   if (phase === 'succeeded' && (result === null || error !== null)) fail('operation', 'invalid succeeded status')
   if (phase === 'failed' && (result !== null || error === null)) fail('operation', 'invalid failed status')
   if ((phase === 'queued' || phase === 'running') && (result !== null || error !== null)) fail('operation', 'non-terminal status has result or error')
-  if (result && ((kind === 'library_refresh' && result.type !== 'library_refresh') || (kind === 'publish_plan' && result.type !== 'publish_plan') || ((kind === 'publish_create' || kind === 'publish_adopt') && result.type !== 'publish_destination') || (kind === 'destination_sync' && result.type !== 'destination_sync') || (kind === 'bulk_republish_plan' && result.type !== 'bulk_republish_plan') || (kind === 'bulk_republish' && result.type !== 'bulk_republish'))) fail('operation', 'result does not match operation kind')
+  if (result && ((kind === 'library_refresh' && result.type !== 'library_refresh') || (kind === 'library_playlist_publish' && result.type !== 'library_playlist_publish') || (kind === 'publish_plan' && result.type !== 'publish_plan') || ((kind === 'publish_create' || kind === 'publish_adopt') && result.type !== 'publish_destination') || (kind === 'destination_sync' && result.type !== 'destination_sync') || (kind === 'bulk_republish_plan' && result.type !== 'bulk_republish_plan') || (kind === 'bulk_republish' && result.type !== 'bulk_republish'))) fail('operation', 'result does not match operation kind')
   const total = required(v, 'totalSteps', 'operation')
   const totalSteps = total === null ? null : nonNegativeInteger(total, 'operation.totalSteps')
   const completedSteps = nonNegativeInteger(required(v, 'completedSteps', 'operation'), 'operation.completedSteps')
@@ -283,6 +285,7 @@ export const parseLibraryPlaylist = (value: unknown, path = 'playlist'): Library
     contentStatus: oneOf(required(v, 'contentStatus', path), ['empty', 'ready', 'refreshing', 'stale', 'error'] as const, `${path}.contentStatus`),
     sourceRevision: nullableString(required(v, 'sourceRevision', path), `${path}.sourceRevision`),
     lastSyncedAt: nullableString(required(v, 'lastSyncedAt', path), `${path}.lastSyncedAt`),
+    editable: bool(required(v, 'editable', path), `${path}.editable`),
   }
 }
 

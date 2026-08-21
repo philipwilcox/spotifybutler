@@ -17,6 +17,7 @@ data class LibraryPlaylistSummary(
     val contentStatus: CacheSourceStatus,
     val sourceRevision: String?,
     val lastSyncedAt: Instant?,
+    val editable: Boolean,
 )
 
 data class LibraryPlaylistDetail(
@@ -79,6 +80,7 @@ class LibraryViewService(
             contentStatus,
             sourceRevision,
             lastSyncedAt,
+            editable,
         )
 }
 

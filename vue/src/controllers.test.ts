@@ -8,6 +8,7 @@ const definition: Definition = {
   recipe: { schemaVersion: 1, shuffleAfterGeneration: false, source: {}, predicate: {}, distinctness: {}, selection: {}, ordering: {} }, sourceDependencies: [], destination: null,
 }
 const preview = (ids: string[], seed = 'seed-a') => ({ definitionId: definition.definitionId, status: 'ready' as const, generatedTrackIds: ids, generatedTrackCount: ids.length, seed, recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null })
+const libraryPlaylist = (editable: boolean) => ({ spotifyPlaylistId: editable ? 'owned' : 'shared', name: editable ? 'Owned' : 'Shared', description: null, href: 'href', uri: 'uri', displayUrl: null, declaredItemCount: 2, cachedPlayableTrackCount: 2, contentSourceKey: 'playlist:items', contentStatus: 'ready' as const, sourceRevision: 'revision', lastSyncedAt: null, editable })
 const deferred = <T>() => {
   let resolve!: (value: T) => void
   let reject!: (error: unknown) => void
@@ -19,11 +20,51 @@ function fakeApi(overrides: Partial<ButlerApi> = {}): ButlerApi {
   return {
     getSession: vi.fn(), refreshSession: vi.fn(), deleteSession: vi.fn(), getLibrary: vi.fn(), refreshLibrary: vi.fn(), listDefinitions: vi.fn(),
     getDefinition: vi.fn().mockResolvedValue(definition), previewDefinition: vi.fn().mockResolvedValue(preview(['one', 'two'])), getCurrentDestination: vi.fn().mockResolvedValue(null),
-    getSongs: vi.fn().mockResolvedValue([]), getLibraryPlaylist: vi.fn(), planPublish: vi.fn(), publishDestination: vi.fn(), syncDestination: vi.fn(), updateRecipeSettings: vi.fn().mockResolvedValue(definition), ...overrides,
+    getSongs: vi.fn().mockResolvedValue([]), getLibraryPlaylist: vi.fn(), publishLibraryPlaylist: vi.fn(), planPublish: vi.fn(), publishDestination: vi.fn(), syncDestination: vi.fn(), updateRecipeSettings: vi.fn().mockResolvedValue(definition), ...overrides,
   }
 }
 
 describe('StudioController', () => {
+  it('edits owned library playlists against an exact baseline and adopts the authoritative publish result', async () => {
+    const owned = libraryPlaylist(true)
+    const published = { ...owned, declaredItemCount: 2, sourceRevision: 'published', lastSyncedAt: '2026-02-01T00:00:00Z' }
+    const api = fakeApi({
+      getLibraryPlaylist: vi.fn().mockResolvedValue({ summary: owned, trackIds: ['one', 'two'] }),
+      publishLibraryPlaylist: vi.fn().mockResolvedValue({ summary: published, trackIds: ['two', 'one'] }),
+    })
+    const studio = new StudioController(api)
+    await studio.selectLibraryPlaylist(owned)
+
+    expect(studio.state.selection).toMatchObject({ source: 'library-playlist', baselineIds: ['one', 'two'], dirty: false })
+    studio.moveTrack(1, -1)
+    expect(studio.state.selection).toMatchObject({ orderedIds: ['two', 'one'], dirty: true })
+    studio.moveTrack(0, 1)
+    expect(studio.state.selection.dirty).toBe(false)
+    studio.moveTrackTo(0, 1)
+    expect(await studio.publishLibraryPlaylist()).toBe(true)
+
+    expect(api.publishLibraryPlaylist).toHaveBeenCalledWith('owned', ['two', 'one'])
+    expect(studio.state.libraryPlaylist).toEqual(published)
+    expect(studio.state.selection).toMatchObject({ baselineIds: ['two', 'one'], orderedIds: ['two', 'one'], dirty: false })
+  })
+
+  it('keeps non-owned library playlists selectable and read-only', async () => {
+    const shared = libraryPlaylist(false)
+    const api = fakeApi({ getLibraryPlaylist: vi.fn().mockResolvedValue({ summary: shared, trackIds: ['one', 'two'] }) })
+    const studio = new StudioController(api, undefined, () => 0)
+    await studio.selectLibraryPlaylist(shared)
+
+    studio.moveTrack(1, -1)
+    studio.moveTrackTo(0, 1)
+    studio.shuffleTrackOrder()
+    studio.removeTrack(0)
+
+    expect(studio.state.selection.orderedIds).toEqual(['one', 'two'])
+    expect(studio.state.selection.dirty).toBe(false)
+    expect(await studio.publishLibraryPlaylist()).toBe(false)
+    expect(api.publishLibraryPlaylist).not.toHaveBeenCalled()
+  })
+
   it('falls back to the current destination for unavailable previews and tolerates missing enrichment', async () => {
     const current = { spotifyPlaylistId: 'managed', trackIds: ['missing', 'known'], lastSyncedAt: null, lastSeenSnapshotId: 'snap-1' }
     const api = fakeApi({

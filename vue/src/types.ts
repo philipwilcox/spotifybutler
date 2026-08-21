@@ -81,6 +81,7 @@ export interface LibraryPlaylist {
   readonly contentStatus: SourceStatus
   readonly sourceRevision: string | null
   readonly lastSyncedAt: string | null
+  readonly editable: boolean
 }
 
 export interface LibraryPlaylistDetail {
@@ -154,7 +155,7 @@ export interface ApiErrorDto {
   readonly details: Readonly<Record<string, string>>
 }
 
-export type OperationKind = 'library_refresh' | 'publish_plan' | 'publish_create' | 'publish_adopt' | 'destination_sync' | 'bulk_republish_plan' | 'bulk_republish'
+export type OperationKind = 'library_refresh' | 'library_playlist_publish' | 'publish_plan' | 'publish_create' | 'publish_adopt' | 'destination_sync' | 'bulk_republish_plan' | 'bulk_republish'
 export type OperationPhase = 'queued' | 'running' | 'succeeded' | 'failed'
 export interface OperationAccepted { readonly operationId: string; readonly kind: OperationKind }
 export interface OperationFailure { readonly code: string; readonly message: string }
@@ -169,6 +170,7 @@ export type OperationResult =
   | { readonly type: 'publish_plan'; readonly plan: PublishPlan }
   | { readonly type: 'publish_destination'; readonly destination: Destination }
   | { readonly type: 'destination_sync'; readonly current: CurrentDestination | null }
+  | { readonly type: 'library_playlist_publish'; readonly playlist: LibraryPlaylistDetail }
   | { readonly type: 'bulk_republish_plan'; readonly plan: BulkRepublishPlan }
   | { readonly type: 'bulk_republish'; readonly library: Library; readonly items: readonly BulkRepublishItem[] }
 export interface OperationStatus {
@@ -185,8 +187,9 @@ export interface OperationStatus {
 }
 
 export interface SelectionState {
-  readonly source: 'preview' | 'current-fallback'
+  readonly source: 'preview' | 'current-fallback' | 'library-playlist'
   readonly dirty: boolean
+  readonly baselineIds: readonly string[]
   readonly orderedIds: readonly string[]
   readonly enrichment: Readonly<Record<string, Song | undefined>>
 }

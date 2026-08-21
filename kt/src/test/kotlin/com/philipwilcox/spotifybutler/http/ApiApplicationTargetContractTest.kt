@@ -5,6 +5,7 @@ import com.philipwilcox.spotifybutler.service.SpotifyCacheService
 import com.philipwilcox.spotifybutler.spotify.SavedTrack
 import com.philipwilcox.spotifybutler.spotify.SpotifyCacheFetcher
 import com.philipwilcox.spotifybutler.spotify.SpotifyCacheSnapshot
+import com.philipwilcox.spotifybutler.spotify.SpotifyPlaylist
 import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import java.nio.file.Files
 import kotlin.test.Test
@@ -14,6 +15,99 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ApiApplicationTargetContractTest {
+    @Test
+    fun ownedLibraryPlaylistPublishesThroughAcceptedOperation() {
+        withApplication { app, session, gateway, store, registry ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    listOf(SavedTrack(null, track("one")), SavedTrack(null, track("two"))),
+                    emptyList(),
+                    emptyList(),
+                    listOf(
+                        SpotifyPlaylist("Shared", "shared", "href", "uri", "tracks", ownerId = "other"),
+                        SpotifyPlaylist("Owned", "owned", "href", "uri", "tracks", ownerId = OWNER),
+                    ),
+                    emptyList(),
+                ),
+                10L,
+                OWNER,
+            )
+            val library = app.handle(request("GET", "/api/v1/library", session))
+            assertTrue(library.body.indexOf("owned") < library.body.indexOf("shared"), library.body)
+            assertTrue(library.body.contains("\"editable\":true"), library.body)
+            assertTrue(library.body.contains("\"editable\":false"), library.body)
+
+            val publish =
+                app.handle(
+                    request(
+                        "POST",
+                        "/api/v1/library/playlists/owned/publish",
+                        session,
+                        "{\"trackIds\":[\"two\",\"one\"]}",
+                    ),
+                )
+            assertEquals(202, publish.status, publish.body)
+            assertTrue(publish.body.contains("\"kind\":\"library_playlist_publish\""), publish.body)
+            val terminal = awaitTerminal(registry, acceptedOperationId(publish.body))
+            assertEquals(OperationPhase.succeeded, terminal.phase)
+            assertEquals(2, terminal.totalSteps)
+            assertEquals(2, terminal.completedSteps)
+            val result = terminal.result as LibraryPlaylistPublishResultWire
+            assertEquals(listOf("two", "one"), result.playlist.trackIds)
+            assertEquals(2, result.playlist.summary.declaredItemCount)
+            assertEquals(2, result.playlist.summary.cachedPlayableTrackCount)
+            assertEquals("ready", result.playlist.summary.contentStatus)
+            assertEquals(listOf("two", "one"), gateway.tracks)
+            assertEquals(emptyList(), store.managedPlaylists(OWNER))
+        }
+    }
+
+    @Test
+    fun libraryPlaylistPublishRejectsMissingSharedAndInvalidTracksBeforeAcceptance() {
+        withApplication { app, session, _, store, _ ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    listOf(SavedTrack(null, track("one"))),
+                    emptyList(),
+                    emptyList(),
+                    listOf(
+                        SpotifyPlaylist("Shared", "shared", "href", "uri", "tracks", ownerId = "other"),
+                        SpotifyPlaylist("Owned", "owned", "href", "uri", "tracks", ownerId = OWNER),
+                    ),
+                    emptyList(),
+                ),
+                10L,
+                OWNER,
+            )
+            assertEquals(
+                404,
+                app
+                    .handle(
+                        request("POST", "/api/v1/library/playlists/missing/publish", session, "{\"trackIds\":[]}"),
+                    ).status,
+            )
+            assertEquals(
+                403,
+                app
+                    .handle(
+                        request("POST", "/api/v1/library/playlists/shared/publish", session, "{\"trackIds\":[]}"),
+                    ).status,
+            )
+            assertEquals(
+                422,
+                app
+                    .handle(
+                        request(
+                            "POST",
+                            "/api/v1/library/playlists/owned/publish",
+                            session,
+                            "{\"trackIds\":[\"missing\"]}",
+                        ),
+                    ).status,
+            )
+        }
+    }
+
     @Test
     fun removedRoutesAndGlobalFieldsAreAbsent() {
         withApplication { app, session, _, _, _ ->

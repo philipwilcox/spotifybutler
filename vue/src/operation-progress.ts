@@ -83,6 +83,7 @@ export class OperationProgressController {
 
   private fail(error: OperationFailureError): void {
     this.state.connectionError = error.message
+    this.state.active = null
     this.pending?.reject(error)
     this.pending = null
     this.socket?.close()

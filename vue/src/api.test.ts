@@ -23,11 +23,11 @@ describe('ButlerApiClient', () => {
 
   it('uses the documented paths, envelopes, bodies, and 204 handling for every client endpoint', async () => {
     const library = { ownerSpotifyUserId: 'operator', status: 'ready', sources: [], definitions: [definition], playlists: [] }
-    const playlist = { summary: { spotifyPlaylistId: 'playlist/1', name: 'Library', description: null, href: 'https://spotify.test/p', uri: 'spotify:playlist:p', displayUrl: null, declaredItemCount: 2, cachedPlayableTrackCount: 2, contentSourceKey: 'playlist:p', contentStatus: 'ready', sourceRevision: null, lastSyncedAt: null }, trackIds: ['a', 'b'] }
+    const playlist = { summary: { spotifyPlaylistId: 'playlist/1', name: 'Library', description: null, href: 'https://spotify.test/p', uri: 'spotify:playlist:p', displayUrl: null, declaredItemCount: 2, cachedPlayableTrackCount: 2, contentSourceKey: 'playlist:p', contentStatus: 'ready', sourceRevision: null, lastSyncedAt: null, editable: true }, trackIds: ['a', 'b'] }
     const preview = { definitionId: definition.definitionId, status: 'ready', generatedTrackIds: ['a'], generatedTrackCount: 1, seed: 'seed', recipeRevision: 'recipe', algorithmVersion: 'algorithm', sourceDependencies: [], generatedAt: '2026-01-01T00:00:00Z', unavailableReason: null }
     const publishPlan = { definitionId: definition.definitionId, playlistName: definition.name, action: 'create', candidates: [], message: null, publishFlowId: 'flow-1' }
     const accepted = { operationId: 'op-1', kind: 'library_refresh' }
-    const bodies = [session, session, library, accepted, playlist, { items: [definition] }, definition, preview, { operationId: 'op-2', kind: 'publish_plan' }, { operationId: 'op-3', kind: 'publish_create' }, current, { operationId: 'op-4', kind: 'destination_sync' }, { items: [song('a')], missingIds: [] }, undefined]
+    const bodies = [session, session, library, accepted, playlist, { operationId: 'op-library', kind: 'library_playlist_publish' }, { items: [definition] }, definition, preview, { operationId: 'op-2', kind: 'publish_plan' }, { operationId: 'op-3', kind: 'publish_create' }, current, { operationId: 'op-4', kind: 'destination_sync' }, { items: [song('a')], missingIds: [] }, undefined]
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => { const body = bodies.shift(); return body === undefined ? response(undefined, 204) : response(body) })
     const client = new ButlerApiClient(fetcher)
     await client.getSession()
@@ -35,6 +35,7 @@ describe('ButlerApiClient', () => {
     await client.getLibrary()
     await client.refreshLibrary(['saved_tracks'])
     await client.getLibraryPlaylist('playlist/1')
+    await client.publishLibraryPlaylist('playlist/1', ['b', 'a'])
     await client.listDefinitions()
     await client.getDefinition(definition.definitionId)
     await client.previewDefinition(definition.definitionId, 'seed value')
@@ -47,15 +48,16 @@ describe('ButlerApiClient', () => {
 
     expect(fetcher.mock.calls.map(([path]) => String(path))).toEqual([
       '/api/v1/session', '/api/v1/session/refresh', '/api/v1/library', '/api/v1/library/refresh',
-      '/api/v1/library/playlists/playlist%2F1', '/api/v1/playlists', '/api/v1/playlists/RECENT_LIKED_100',
+      '/api/v1/library/playlists/playlist%2F1', '/api/v1/library/playlists/playlist%2F1/publish', '/api/v1/playlists', '/api/v1/playlists/RECENT_LIKED_100',
       '/api/v1/playlists/RECENT_LIKED_100/preview?seed=seed%20value', '/api/v1/playlists/RECENT_LIKED_100/publish-plan', '/api/v1/playlists/RECENT_LIKED_100/publish',
       '/api/v1/playlists/RECENT_LIKED_100/current', '/api/v1/playlists/RECENT_LIKED_100/syncs',
       '/api/v1/songs/bulk', '/api/v1/session',
     ])
     expect(JSON.parse((fetcher.mock.calls[3][1] as RequestInit).body as string)).toEqual({ sourceKeys: ['saved_tracks'] })
-    expect(JSON.parse((fetcher.mock.calls[11][1] as RequestInit).body as string)).toEqual({ trackIds: ['a', 'b'], expectedDestinationSnapshotId: 'snap-1' })
-    expect(JSON.parse((fetcher.mock.calls[9][1] as RequestInit).body as string)).toEqual({ action: 'create', spotifyPlaylistId: null, trackIds: ['a'], publishFlowId: null })
-    expect(fetcher.mock.calls[13][1]).toMatchObject({ body: undefined })
+    expect(JSON.parse((fetcher.mock.calls[5][1] as RequestInit).body as string)).toEqual({ trackIds: ['b', 'a'] })
+    expect(JSON.parse((fetcher.mock.calls[12][1] as RequestInit).body as string)).toEqual({ trackIds: ['a', 'b'], expectedDestinationSnapshotId: 'snap-1' })
+    expect(JSON.parse((fetcher.mock.calls[10][1] as RequestInit).body as string)).toEqual({ action: 'create', spotifyPlaylistId: null, trackIds: ['a'], publishFlowId: null })
+    expect(fetcher.mock.calls[14][1]).toMatchObject({ body: undefined })
     expect(client.csrf).toBeNull()
   })
 

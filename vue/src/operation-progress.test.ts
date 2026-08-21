@@ -70,7 +70,7 @@ describe('OperationProgressController', () => {
   })
 
   it('initializes every operation with an unknown total', () => {
-    for (const kind of ['library_refresh', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync'] as const) {
+    for (const kind of ['library_refresh', 'library_playlist_publish', 'publish_plan', 'publish_create', 'publish_adopt', 'destination_sync'] as const) {
       const controller = new OperationProgressController(() => new FakeSocket())
       void controller.track({ operationId: `op-${kind}`, kind }).catch(() => undefined)
       expect(controller.state.active?.totalSteps).toBeNull()
@@ -85,5 +85,19 @@ describe('OperationProgressController', () => {
 
     socket.onmessage?.({ data: status({ libraryRefreshProgress: { completedSources: 9, totalSources: 8 } }) } as MessageEvent)
     expect(controller.state.connectionError).toBe('Progress update was invalid. Please reload.')
+    expect(controller.state.active).toBeNull()
+  })
+
+  it('releases the busy operation when completed steps exceed the advertised total', async () => {
+    const socket = new FakeSocket()
+    const controller = new OperationProgressController(() => socket)
+    const tracked = controller.track({ operationId: 'op-1', kind: 'library_playlist_publish' })
+
+    socket.onmessage?.({ data: status({ kind: 'library_playlist_publish', completedSteps: 1, totalSteps: 1 }) } as MessageEvent)
+    expect(controller.state.active).toMatchObject({ completedSteps: 1, totalSteps: 1 })
+    socket.onmessage?.({ data: status({ kind: 'library_playlist_publish', completedSteps: 2, totalSteps: 1 }) } as MessageEvent)
+
+    await expect(tracked).rejects.toMatchObject({ code: 'invalid_progress_update' })
+    expect(controller.state.active).toBeNull()
   })
 })

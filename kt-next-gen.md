@@ -2,12 +2,6 @@
 
 The notes here should be IGNORED for any current work, and only represent ideas for future directions to explore.
 
-## Further Library Full-Sync Optimizations
-
-Look at how prototype did it, allow more concurrent calls?
-
-Also, websocket or polling to view ongoing sync status?
-
 ## Replace Docker Workflow
 
 Remove the secrets file / mounted file fallback stuff in favor of env vars that we added? though how to use that for local mode.
@@ -16,9 +10,21 @@ Remove the secrets file / mounted file fallback stuff in favor of env vars that 
 
 Self-descriptive
 
+## Self-hosted code hosting + CI
+
+Make it update automatically and deploy on push.
+
 ## Fake backend and UI regression tests
 
 This would help dev speed of new frontend stuff
+
+## LastFM Integration, Metadata
+
+Pull personal stats and richer genre information
+
+Make a right-click interface for tagging tracks more dynamically with custom metadata that's available to future recipes.
+
+Figure out a durable store for this.
 
 ## Admin Panel
 Show who's used it! And possibly expand the "known users only restriction" after all if i ever deploy publicly.
@@ -36,17 +42,6 @@ animations.
 
 Let's add track length column and maybe other stuff to the track sequence preview. Listen count? Personal usage info?
 
-## Editable Playlists
-
-Let's make this able to edit non-generated playlists in the library too, and do things like shuffle their ordering with our shuffle logic.
-
-## LastFM Integration, Metadata
-
-Pull personal stats and richer genre information
-
-Make a right-click interface for tagging tracks more dynamically with custom metadata that's available to future recipes.
-
-Figure out a durable store for this.
 
 ## Perf - Full Library Sync
 

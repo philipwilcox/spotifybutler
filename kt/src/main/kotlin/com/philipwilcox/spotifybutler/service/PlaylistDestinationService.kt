@@ -78,6 +78,34 @@ class PlaylistDestinationService(
     private val gateway: PlaylistDestinationGateway,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    fun publishLibraryPlaylist(
+        spotifyPlaylistId: String,
+        ownerSpotifyUserId: String,
+        accessToken: String,
+        trackIds: List<String>,
+    ): AuthoritativePlaylistState {
+        requireEditableLibraryPlaylist(spotifyPlaylistId, ownerSpotifyUserId)
+        if (!gateway.owns(accessToken, spotifyPlaylistId, ownerSpotifyUserId)) throw OwnerMismatchException()
+        val authoritative = gateway.replace(accessToken, spotifyPlaylistId, trackIds)
+        store.publishLibraryPlaylistTrackIds(
+            spotifyPlaylistId,
+            authoritative.trackIds,
+            clock.millis(),
+            ownerSpotifyUserId,
+        )
+        return authoritative
+    }
+
+    private fun requireEditableLibraryPlaylist(
+        spotifyPlaylistId: String,
+        ownerSpotifyUserId: String,
+    ) {
+        val playlist =
+            store.libraryPlaylists(ownerSpotifyUserId).firstOrNull { it.playlistId == spotifyPlaylistId }
+                ?: throw LibraryPlaylistNotFoundException()
+        if (!playlist.editable) throw OwnerMismatchException()
+    }
+
     fun planPublish(
         definitionId: String,
         ownerSpotifyUserId: String,

@@ -8,8 +8,91 @@ import com.philipwilcox.spotifybutler.spotify.SpotifyTrack
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class PlaylistDestinationServiceContractTest {
+    @Test
+    fun libraryPlaylistPublishPreservesOrderAndCreatesNoManagedMapping() {
+        val path = Files.createTempDirectory("library-publish-contract-").resolve("cache.db")
+        val gateway = RecordingDestinationGateway()
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    listOf(
+                        SavedTrack(null, track("one")),
+                        SavedTrack(null, track("two")),
+                    ),
+                    emptyList(),
+                    emptyList(),
+                    listOf(SpotifyPlaylist("Library", "library", "href", "uri", "tracks", ownerId = "owner")),
+                    emptyList(),
+                ),
+                1L,
+                "owner",
+            )
+            val service = PlaylistDestinationService(store, gateway)
+
+            val result = service.publishLibraryPlaylist("library", "owner", "token", listOf("two", "one", "two"))
+
+            assertEquals(listOf("two", "one", "two"), result.trackIds)
+            assertEquals(listOf("two", "one", "two"), store.libraryPlaylistTrackIds("owner", "library"))
+            assertEquals(emptyList(), store.managedPlaylists("owner"))
+        }
+    }
+
+    @Test
+    fun libraryPlaylistPublishRejectsMissingCachedAndNonOwnedPlaylists() {
+        val path = Files.createTempDirectory("library-publish-owner-contract-").resolve("cache.db")
+        val gateway = RecordingDestinationGateway()
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    listOf(SpotifyPlaylist("Shared", "shared", "href", "uri", "tracks", ownerId = "other")),
+                    emptyList(),
+                ),
+                1L,
+                "owner",
+            )
+            val service = PlaylistDestinationService(store, gateway)
+
+            assertFailsWith<LibraryPlaylistNotFoundException> {
+                service.publishLibraryPlaylist("missing", "owner", "token", emptyList())
+            }
+            assertFailsWith<OwnerMismatchException> {
+                service.publishLibraryPlaylist("shared", "owner", "token", emptyList())
+            }
+            assertEquals(0, gateway.calls)
+        }
+    }
+
+    @Test
+    fun libraryPlaylistPublishRechecksRemoteOwnershipBeforeReplacing() {
+        val path = Files.createTempDirectory("library-publish-remote-owner-").resolve("cache.db")
+        val gateway = RecordingDestinationGateway().apply { ownsPlaylist = false }
+        SpotifyStore.open(path).use { store ->
+            store.replaceCache(
+                SpotifyCacheSnapshot(
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    listOf(SpotifyPlaylist("Owned", "owned", "href", "uri", "tracks", ownerId = "owner")),
+                    emptyList(),
+                ),
+                1L,
+                "owner",
+            )
+            val service = PlaylistDestinationService(store, gateway)
+
+            assertFailsWith<OwnerMismatchException> {
+                service.publishLibraryPlaylist("owned", "owner", "token", emptyList())
+            }
+            assertEquals(0, gateway.calls)
+        }
+    }
+
     @Test
     fun publishCreationPersistsDestinationAndSyncUpdatesManagedState() {
         val path = Files.createTempDirectory("destination-contract-").resolve("cache.db")
@@ -87,6 +170,7 @@ class PlaylistDestinationServiceContractTest {
         var calls = 0
         var currentCalls = 0
         var createdName: String? = null
+        var ownsPlaylist = true
 
         override fun create(
             accessToken: String,
@@ -100,7 +184,7 @@ class PlaylistDestinationServiceContractTest {
             accessToken: String,
             playlistId: String,
             ownerSpotifyUserId: String,
-        ) = true
+        ) = ownsPlaylist
 
         override fun replace(
             accessToken: String,

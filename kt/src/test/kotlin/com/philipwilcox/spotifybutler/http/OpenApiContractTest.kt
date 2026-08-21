@@ -21,6 +21,7 @@ class OpenApiContractTest {
                 "/api/v1/library",
                 "/api/v1/library/refresh",
                 "/api/v1/library/playlists/{playlistId}",
+                "/api/v1/library/playlists/{playlistId}/publish",
                 "/api/v1/playlists",
                 "/api/v1/playlists/{definitionId}",
                 "/api/v1/playlists/{definitionId}/preview",
@@ -59,6 +60,9 @@ class OpenApiContractTest {
         assertTrue(source.contains("recipeRevision"))
         assertTrue(source.contains("PublishPlan"))
         assertTrue(source.contains("PublishDestinationRequest"))
+        assertTrue(source.contains("PublishLibraryPlaylistRequest"))
+        assertTrue(source.contains("library_playlist_publish"))
+        assertTrue(source.contains("editable"))
     }
 
     private fun document(): Map<*, *> {
